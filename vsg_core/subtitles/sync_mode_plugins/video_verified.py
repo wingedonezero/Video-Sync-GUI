@@ -146,14 +146,13 @@ def calculate_video_verified_offset(
                 f"[VideoVerified]   Target: {target_props.get('content_type')} ({target_props.get('width')}x{target_props.get('height')})"
             )
 
-    # Detect FPS
-    fps = source_props.get("fps", 23.976)
-    if not fps:
-        fps = 23.976
-        log(f"[VideoVerified] FPS detection failed, using default: {fps}")
+    # Detect FPS (initial - may be updated after IVTC)
+    initial_fps = source_props.get("fps", 23.976)
+    if not initial_fps:
+        initial_fps = 23.976
+        log(f"[VideoVerified] FPS detection failed, using default: {initial_fps}")
 
-    frame_duration_ms = 1000.0 / fps
-    log(f"[VideoVerified] FPS: {fps:.3f} (frame: {frame_duration_ms:.3f}ms)")
+    log(f"[VideoVerified] Initial FPS: {initial_fps:.3f}")
 
     # Get settings parameters - use interlaced settings if appropriate
     if use_interlaced_settings:
@@ -212,41 +211,93 @@ def calculate_video_verified_offset(
 
     log(f"[VideoVerified] Source duration: ~{source_duration / 1000:.1f}s")
 
-    # Generate candidate frame offsets to test (centered on correlation)
-    correlation_frames = pure_correlation_ms / frame_duration_ms
-    candidates_frames = _generate_frame_candidates_static(
-        correlation_frames, search_range_frames
-    )
-    log(
-        f"[VideoVerified] Testing frame offsets: {candidates_frames} (around {correlation_frames:+.1f} frames)"
-    )
-
-    # Open video readers with deinterlace support
+    # Open video readers with per-video processing based on content type
+    # NOTE: We do this BEFORE calculating frame offsets because IVTC changes the FPS
     try:
-        # Use interlaced deinterlace method if enabled, otherwise auto-detect
-        if use_interlaced_settings:
-            deinterlace_mode = settings.interlaced_deinterlace_method
-            log(f"[VideoVerified] Using deinterlace method: {deinterlace_mode}")
-        else:
-            # Progressive content: auto-detect if deinterlacing is needed
-            deinterlace_mode = "auto"
-
-        # VideoReader still expects a dict config
+        # Determine processing for each video independently
+        # This allows: telecine source + progressive target, etc.
         config_dict = settings.to_dict()
+
+        # Source video processing
+        source_content_type = source_props.get("content_type", "progressive")
+        source_apply_ivtc = (
+            use_interlaced_settings
+            and settings.interlaced_use_ivtc
+            and source_content_type == "telecine"
+        )
+        source_deinterlace = (
+            settings.interlaced_deinterlace_method
+            if use_interlaced_settings and source_content_type == "interlaced"
+            else "auto"
+        )
+
+        log(f"[VideoVerified] Source: {source_content_type}")
+        if source_apply_ivtc:
+            log("[VideoVerified]   Processing: IVTC (telecine → progressive)")
+        elif source_content_type == "interlaced":
+            log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
+        else:
+            log("[VideoVerified]   Processing: none (progressive)")
+
+        # Target video processing
+        target_content_type = target_props.get("content_type", "progressive")
+        target_apply_ivtc = (
+            use_interlaced_settings
+            and settings.interlaced_use_ivtc
+            and target_content_type == "telecine"
+        )
+        target_deinterlace = (
+            settings.interlaced_deinterlace_method
+            if use_interlaced_settings and target_content_type == "interlaced"
+            else "auto"
+        )
+
+        log(f"[VideoVerified] Target: {target_content_type}")
+        if target_apply_ivtc:
+            log("[VideoVerified]   Processing: IVTC (telecine → progressive)")
+        elif target_content_type == "interlaced":
+            log(f"[VideoVerified]   Processing: deinterlace ({target_deinterlace})")
+        else:
+            log("[VideoVerified]   Processing: none (progressive)")
+
+        # Create readers with per-video settings
         source_reader = VideoReader(
             source_video,
             runner,
             temp_dir=temp_dir,
-            deinterlace=deinterlace_mode,
+            deinterlace=source_deinterlace,
+            content_type=source_content_type,
+            apply_ivtc=source_apply_ivtc,
             config=config_dict,
         )
         target_reader = VideoReader(
             target_video,
             runner,
             temp_dir=temp_dir,
-            deinterlace=deinterlace_mode,
+            deinterlace=target_deinterlace,
+            content_type=target_content_type,
+            apply_ivtc=target_apply_ivtc,
             config=config_dict,
         )
+
+        # Get processed FPS from readers (after IVTC/deinterlace)
+        # Use source reader's FPS for frame calculations
+        fps = source_reader.fps if source_reader.fps else initial_fps
+        target_fps = target_reader.fps if target_reader.fps else initial_fps
+
+        # Log FPS info, especially if IVTC changed it
+        if source_reader.ivtc_applied or target_reader.ivtc_applied:
+            log(f"[VideoVerified] Processed FPS: source={fps:.3f}, target={target_fps:.3f}")
+            if abs(fps - target_fps) > 0.1:
+                log(
+                    f"[VideoVerified] WARNING: FPS mismatch after processing "
+                    f"({fps:.3f} vs {target_fps:.3f})"
+                )
+        else:
+            log(f"[VideoVerified] FPS: {fps:.3f} (frame: {1000.0 / fps:.3f}ms)")
+
+        frame_duration_ms = 1000.0 / fps
+
     except Exception as e:
         log(f"[VideoVerified] Failed to open videos: {e}")
         log("[VideoVerified] Falling back to correlation")
@@ -257,6 +308,15 @@ def calculate_video_verified_offset(
             "final_offset_ms": total_delay_ms,
             "error": str(e),
         }
+
+    # Generate candidate frame offsets using processed FPS
+    correlation_frames = pure_correlation_ms / frame_duration_ms
+    candidates_frames = _generate_frame_candidates_static(
+        correlation_frames, search_range_frames
+    )
+    log(
+        f"[VideoVerified] Testing frame offsets: {candidates_frames} (around {correlation_frames:+.1f} frames)"
+    )
 
     # Select checkpoint times (distributed across video)
     checkpoint_times = _select_checkpoint_times_static(source_duration, num_checkpoints)

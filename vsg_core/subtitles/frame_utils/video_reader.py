@@ -237,6 +237,8 @@ class VideoReader:
         temp_dir: Path | None = None,
         deinterlace: str = "auto",
         settings: AppSettings | None = None,
+        content_type: str | None = None,
+        apply_ivtc: bool = False,
         **kwargs,
     ):
         self.video_path = video_path
@@ -248,12 +250,16 @@ class VideoReader:
         self.use_ffms2 = False
         self.use_opencv = False
         self.fps = None
+        self.original_fps = None  # FPS before IVTC (if applied)
         self.temp_dir = temp_dir
         self.deinterlace_method = deinterlace
         self.settings = settings
         self.is_interlaced = False
         self.field_order = "progressive"
         self.deinterlace_applied = False
+        self.content_type = content_type  # 'progressive', 'interlaced', 'telecine'
+        self.apply_ivtc = apply_ivtc  # Whether to apply IVTC for telecine content
+        self.ivtc_applied = False  # Whether IVTC was actually applied
 
         # Detect video properties for interlacing info
         self._detect_interlacing()
@@ -462,6 +468,100 @@ class VideoReader:
         clip = core.std.SelectEvery(clip, 2, 0)
         return clip
 
+    def _should_apply_ivtc(self) -> bool:
+        """Determine if IVTC should be applied to this video."""
+        # Must be explicitly enabled
+        if not self.apply_ivtc:
+            return False
+
+        # Content type must be telecine (either detected or passed in)
+        if self.content_type == "telecine":
+            return True
+
+        # Also check if detected as interlaced NTSC DVD (likely telecine)
+        # This handles cases where content_type wasn't passed but we detected it
+        if self.is_interlaced and self.fps and abs(self.fps - 29.97) < 0.1:
+            return True
+
+        return False
+
+    def _apply_ivtc_filter(self, clip, core):
+        """
+        Apply Inverse Telecine (IVTC) to recover progressive frames from telecine.
+
+        Uses VIVTC (VFM + VDecimate) to:
+        1. VFM: Field match to find original progressive frames
+        2. VDecimate: Remove duplicate frames (30fps -> 24fps)
+
+        This converts 29.97i telecine content back to ~23.976p progressive.
+
+        Args:
+            clip: VapourSynth clip (interlaced telecine)
+            core: VapourSynth core
+
+        Returns:
+            Progressive clip at ~23.976fps
+        """
+        tff = self.field_order == "tff"
+
+        self.runner._log_message(
+            f"[FrameUtils] Applying IVTC (field order: {'TFF' if tff else 'BFF'})"
+        )
+
+        # Store original FPS before IVTC
+        self.original_fps = clip.fps_num / clip.fps_den
+
+        try:
+            # Check if VIVTC is available
+            if hasattr(core, "vivtc"):
+                # VFM: Field matching - recovers progressive frames
+                # order: 1 = TFF, 0 = BFF
+                clip = core.vivtc.VFM(clip, order=1 if tff else 0)
+
+                # VDecimate: Remove duplicates (5 frames -> 4 frames)
+                # This converts 29.97fps -> 23.976fps
+                clip = core.vivtc.VDecimate(clip)
+
+                self.ivtc_applied = True
+                self.runner._log_message(
+                    f"[FrameUtils] IVTC applied with VIVTC "
+                    f"({self.original_fps:.3f}fps -> {clip.fps_num / clip.fps_den:.3f}fps)"
+                )
+                return clip
+
+            # Fallback: Try TIVTC if VIVTC not available
+            elif hasattr(core, "tivtc"):
+                # TFM: Field matching
+                clip = core.tivtc.TFM(clip, order=1 if tff else 0)
+
+                # TDecimate: Decimation
+                clip = core.tivtc.TDecimate(clip, mode=1)
+
+                self.ivtc_applied = True
+                self.runner._log_message(
+                    f"[FrameUtils] IVTC applied with TIVTC "
+                    f"({self.original_fps:.3f}fps -> {clip.fps_num / clip.fps_den:.3f}fps)"
+                )
+                return clip
+
+            else:
+                self.runner._log_message(
+                    "[FrameUtils] WARNING: No IVTC plugin available (vivtc or tivtc)"
+                )
+                self.runner._log_message(
+                    "[FrameUtils] Install vivtc plugin for VapourSynth"
+                )
+                self.runner._log_message(
+                    "[FrameUtils] Falling back to deinterlacing (may cause frame count mismatch)"
+                )
+                # Fall back to regular deinterlacing
+                return self._apply_deinterlace_filter(clip, core)
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] IVTC failed: {e}")
+            self.runner._log_message("[FrameUtils] Falling back to deinterlacing")
+            return self._apply_deinterlace_filter(clip, core)
+
     def _get_index_cache_path(self, video_path: str, temp_dir: Path) -> Path:
         """
         Generate cache path for FFMS2 index in job's temp directory.
@@ -569,9 +669,15 @@ class VideoReader:
                 source=str(self.video_path), cachefile=str(index_path)
             )
 
-            # Apply deinterlacing if needed
-            if self._should_deinterlace():
+            # Apply IVTC or deinterlacing based on content type
+            # Priority: IVTC for telecine > deinterlace for interlaced > passthrough
+            if self._should_apply_ivtc():
+                # Telecine content: apply IVTC to recover progressive frames
+                clip = self._apply_ivtc_filter(clip, core)
+            elif self._should_deinterlace():
+                # Pure interlaced content: apply deinterlacing
                 clip = self._apply_deinterlace_filter(clip, core)
+            # else: progressive content, no processing needed
 
             # Keep clip in original format (usually YUV)
             # We'll extract only luma (Y) plane for hashing - more reliable than RGB
@@ -581,16 +687,21 @@ class VideoReader:
             self.fps = self.vs_clip.fps_num / self.vs_clip.fps_den
             self.use_vapoursynth = True
 
-            deinterlace_status = ""
-            if self.deinterlace_applied:
-                deinterlace_status = (
+            # Build status message
+            processing_status = ""
+            if self.ivtc_applied:
+                processing_status = (
+                    f", IVTC applied ({self.original_fps:.3f} -> {self.fps:.3f}fps)"
+                )
+            elif self.deinterlace_applied:
+                processing_status = (
                     f", deinterlaced with {self._get_deinterlace_method()}"
                 )
             elif self.is_interlaced and self.deinterlace_method == "none":
-                deinterlace_status = ", interlaced (deinterlace disabled)"
+                processing_status = ", interlaced (deinterlace disabled)"
 
             self.runner._log_message(
-                f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f}{deinterlace_status})"
+                f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f}{processing_status})"
             )
             self.runner._log_message(
                 "[FrameUtils] Index will be shared across all workers (no re-indexing!)"
