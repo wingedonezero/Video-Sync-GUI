@@ -19,6 +19,14 @@ PYTHON_AUDIO_SEPARATOR_REPO="audio-separator @ git+https://github.com/nomadkarao
 PYTHON_AUDIO_SEPARATOR_GPU_REPO="audio-separator[gpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 PYTHON_AUDIO_SEPARATOR_CPU_REPO="audio-separator[cpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 
+# Packages to exclude from updates (add package names here)
+# These won't be updated when running "Update Libraries"
+UPDATE_EXCLUDE=(
+    # "numpy"           # Example: uncomment to exclude numpy
+    # "torch"           # Example: uncomment to exclude torch
+    # "paddlepaddle"    # Example: uncomment to exclude paddlepaddle
+)
+
 # Function to show main menu
 show_menu() {
     echo ""
@@ -32,16 +40,17 @@ show_menu() {
     echo ""
     echo -e "  ${CYAN}1)${NC} Full Setup - Install Python 3.13 and all dependencies"
     echo -e "  ${CYAN}2)${NC} Update Libraries - Check for and install updates"
-    echo -e "  ${CYAN}3)${NC} Install Optional Dependencies (AI audio features)"
-    echo -e "  ${CYAN}4)${NC} Verify Dependencies - Check all packages are installed"
-    echo -e "  ${CYAN}5)${NC} Rebuild PyAV (FFmpeg subtitles support)"
-    echo -e "  ${CYAN}6)${NC} Download curated audio-separator models"
-    echo -e "  ${CYAN}7)${NC} Download EasyOCR models (for OCR)"
-    echo -e "  ${CYAN}8)${NC} Download PaddleOCR models (for OCR)"
-    echo -e "  ${CYAN}9)${NC} Fix PaddleOCR versions (compatibility fix)"
-    echo -e "  ${CYAN}10)${NC} Exit"
+    echo -e "  ${CYAN}3)${NC} Show Installed Libraries - List all packages with versions"
+    echo -e "  ${CYAN}4)${NC} Install Optional Dependencies (AI audio features)"
+    echo -e "  ${CYAN}5)${NC} Verify Dependencies - Check all packages are installed"
+    echo -e "  ${CYAN}6)${NC} Rebuild PyAV (FFmpeg subtitles support)"
+    echo -e "  ${CYAN}7)${NC} Download curated audio-separator models"
+    echo -e "  ${CYAN}8)${NC} Download EasyOCR models (for OCR)"
+    echo -e "  ${CYAN}9)${NC} Download PaddleOCR models (for OCR)"
+    echo -e "  ${CYAN}10)${NC} Fix PaddleOCR versions (compatibility fix)"
+    echo -e "  ${CYAN}11)${NC} Exit"
     echo ""
-    echo -n "Enter your choice [1-10]: "
+    echo -n "Enter your choice [1-11]: "
 }
 
 # Function to check Python version and verify it works
@@ -564,6 +573,15 @@ check_updates() {
         return 1
     fi
 
+    # Show exclusion list if any
+    if [ ${#UPDATE_EXCLUDE[@]} -gt 0 ]; then
+        echo -e "${YELLOW}Excluded from updates:${NC}"
+        for pkg in "${UPDATE_EXCLUDE[@]}"; do
+            echo -e "  ${CYAN}•${NC} $pkg"
+        done
+        echo ""
+    fi
+
     echo -e "${YELLOW}Checking for package updates...${NC}"
     echo ""
 
@@ -582,14 +600,21 @@ check_updates() {
         return 0
     fi
 
-    # Parse and display outdated packages
+    # Convert exclude array to pipe-separated string for Python
+    exclude_list=$(IFS='|'; echo "${UPDATE_EXCLUDE[*]}")
+
+    # Parse and display outdated packages (mark excluded ones)
     echo -e "${YELLOW}The following packages have updates available:${NC}"
     echo ""
     echo "$outdated" | "$VENV_PYTHON" -c "
 import sys, json
 data = json.load(sys.stdin)
+exclude = set('$exclude_list'.lower().split('|')) if '$exclude_list' else set()
 for pkg in data:
-    print(f\"  {pkg['name']:30s} {pkg['version']:15s} -> {pkg['latest_version']}\")
+    name = pkg['name']
+    is_excluded = name.lower() in exclude
+    marker = ' ${YELLOW}[excluded]${NC}' if is_excluded else ''
+    print(f\"  {name:30s} {pkg['version']:15s} -> {pkg['latest_version']}{marker}\")
 "
 
     echo ""
@@ -598,17 +623,101 @@ for pkg in data:
 
     if [[ "$response" =~ ^[Yy]$ ]]; then
         echo ""
-        echo -e "${BLUE}Updating packages...${NC}"
-        venv_pip install --upgrade $(echo "$outdated" | "$VENV_PYTHON" -c "
+        echo -e "${BLUE}Updating packages (excluding: ${UPDATE_EXCLUDE[*]:-none})...${NC}"
+        packages_to_update=$(echo "$outdated" | "$VENV_PYTHON" -c "
 import sys, json
 data = json.load(sys.stdin)
-print(' '.join([pkg['name'] for pkg in data]))
+exclude = set('$exclude_list'.lower().split('|')) if '$exclude_list' else set()
+packages = [pkg['name'] for pkg in data if pkg['name'].lower() not in exclude]
+print(' '.join(packages))
 ")
-        echo ""
-        echo -e "${GREEN}✓ Packages updated successfully!${NC}"
+        if [ -n "$packages_to_update" ]; then
+            venv_pip install --upgrade $packages_to_update
+            echo ""
+            echo -e "${GREEN}✓ Packages updated successfully!${NC}"
+        else
+            echo -e "${YELLOW}All outdated packages are in the exclusion list${NC}"
+        fi
     else
         echo -e "${YELLOW}Update cancelled${NC}"
     fi
+}
+
+# Function to show all installed libraries
+show_installed_libs() {
+    echo ""
+    echo "========================================="
+    echo "Installed Libraries"
+    echo "========================================="
+    echo ""
+
+    if ! ensure_venv; then
+        return 1
+    fi
+
+    echo -e "${YELLOW}Fetching installed packages...${NC}"
+    echo ""
+
+    # Get all installed packages and display them nicely
+    "$VENV_PYTHON" << 'PYEOF'
+import subprocess
+import sys
+import json
+
+# Colors
+GREEN = '\033[0;32m'
+BLUE = '\033[0;34m'
+YELLOW = '\033[1;33m'
+CYAN = '\033[0;36m'
+NC = '\033[0m'
+
+# Get installed packages
+result = subprocess.run(
+    [sys.executable, '-m', 'pip', 'list', '--format=json'],
+    capture_output=True, text=True
+)
+
+packages = json.loads(result.stdout)
+packages.sort(key=lambda x: x['name'].lower())
+
+# Group by category (rough heuristic)
+ai_keywords = ['torch', 'paddle', 'ocr', 'easyocr', 'onnx', 'tensorflow', 'keras', 'audio-separator']
+media_keywords = ['av', 'ffmpeg', 'opencv', 'pillow', 'vapour', 'ffms', 'scene']
+gui_keywords = ['pyside', 'qt', 'pyqt']
+
+def categorize(name):
+    name_lower = name.lower()
+    for kw in ai_keywords:
+        if kw in name_lower:
+            return 'AI/ML'
+    for kw in media_keywords:
+        if kw in name_lower:
+            return 'Media'
+    for kw in gui_keywords:
+        if kw in name_lower:
+            return 'GUI'
+    return 'Other'
+
+# Print summary
+print(f"{CYAN}Total packages:{NC} {len(packages)}")
+print("")
+
+# Print all packages
+print(f"{CYAN}{'Package':<40} {'Version':<20} {'Category':<10}{NC}")
+print("-" * 70)
+
+for pkg in packages:
+    name = pkg['name']
+    version = pkg['version']
+    category = categorize(name)
+    print(f"{name:<40} {version:<20} {category:<10}")
+
+print("")
+print(f"{GREEN}Total: {len(packages)} packages installed{NC}")
+PYEOF
+
+    echo ""
+    echo -e "${BLUE}Tip: To check for updates, use option 2 (Update Libraries)${NC}"
 }
 
 # Function to install optional dependencies
@@ -1053,6 +1162,10 @@ main() {
             check_updates
             exit 0
             ;;
+        --list|--installed)
+            show_installed_libs
+            exit 0
+            ;;
         --optional)
             install_optional
             exit 0
@@ -1096,27 +1209,30 @@ main() {
                 check_updates
                 ;;
             3)
-                install_optional
+                show_installed_libs
                 ;;
             4)
-                verify_dependencies
+                install_optional
                 ;;
             5)
-                rebuild_pyav_from_source
+                verify_dependencies
                 ;;
             6)
-                download_audio_separator_models
+                rebuild_pyav_from_source
                 ;;
             7)
-                download_easyocr_models
+                download_audio_separator_models
                 ;;
             8)
-                download_paddleocr_models
+                download_easyocr_models
                 ;;
             9)
-                fix_paddleocr_versions
+                download_paddleocr_models
                 ;;
             10)
+                fix_paddleocr_versions
+                ;;
+            11)
                 echo ""
                 echo -e "${GREEN}Goodbye!${NC}"
                 echo ""
@@ -1124,7 +1240,7 @@ main() {
                 ;;
             *)
                 echo ""
-                echo -e "${RED}Invalid choice. Please enter 1-10.${NC}"
+                echo -e "${RED}Invalid choice. Please enter 1-11.${NC}"
                 ;;
         esac
 
