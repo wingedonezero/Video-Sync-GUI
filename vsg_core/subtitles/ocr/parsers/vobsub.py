@@ -33,6 +33,15 @@ from .base import ParseResult, SubtitleImage, SubtitleImageParser
 
 logger = logging.getLogger(__name__)
 
+# Timing constants matching SubtitleEdit defaults
+# These ensure proper gaps and reasonable durations
+MIN_GAP_MS = 24  # Minimum gap between consecutive subtitles
+MAX_DURATION_MS = 8000  # Maximum subtitle duration (8 seconds)
+MIN_DURATION_MS = 1000  # Minimum subtitle duration (1 second)
+DEFAULT_LAST_DURATION_MS = (
+    3000  # Default duration for last subtitle with no duration info
+)
+
 
 @dataclass(slots=True)
 class IdxEntry:
@@ -251,18 +260,46 @@ class VobSubParser(SubtitleImageParser):
 
         # Calculate end time using duration from control sequence
         # The duration comes from the SP_DCSQ_STM delay field when stop display (0x02) is seen
+        # Logic matches SubtitleEdit's VobSubParser.cs behavior
         if duration_ms > 0:
             # Use the actual duration from the subtitle packet
             end_ms = entry.timestamp_ms + duration_ms
             logger.debug(f"Subtitle {index}: using SPU duration {duration_ms}ms")
         elif index + 1 < len(all_entries):
-            # Fallback: use next subtitle's start time (old behavior)
-            end_ms = all_entries[index + 1].timestamp_ms
-            logger.debug(f"Subtitle {index}: no SPU duration, using next start time")
+            # Fallback: use next subtitle's start time minus gap buffer
+            # This creates proper spacing between consecutive subtitles
+            end_ms = all_entries[index + 1].timestamp_ms - MIN_GAP_MS
+            logger.debug(
+                f"Subtitle {index}: no SPU duration, using next start - {MIN_GAP_MS}ms gap"
+            )
         else:
-            # Default 4 second duration for last subtitle with no duration info
-            end_ms = entry.timestamp_ms + 4000
-            logger.debug(f"Subtitle {index}: no SPU duration, using 4s default")
+            # Default duration for last subtitle with no duration info
+            end_ms = entry.timestamp_ms + DEFAULT_LAST_DURATION_MS
+            logger.debug(
+                f"Subtitle {index}: no SPU duration, using {DEFAULT_LAST_DURATION_MS}ms default"
+            )
+
+        # Enforce duration limits (matching SubtitleEdit defaults)
+        calculated_duration = end_ms - entry.timestamp_ms
+
+        # Cap maximum duration
+        if calculated_duration > MAX_DURATION_MS:
+            end_ms = entry.timestamp_ms + MAX_DURATION_MS
+            logger.debug(
+                f"Subtitle {index}: capped duration from {calculated_duration}ms to {MAX_DURATION_MS}ms"
+            )
+
+        # Enforce minimum duration (but don't extend past next subtitle)
+        if calculated_duration < MIN_DURATION_MS:
+            if index + 1 < len(all_entries):
+                # Don't extend past next subtitle minus gap
+                max_end = all_entries[index + 1].timestamp_ms - MIN_GAP_MS
+                end_ms = min(entry.timestamp_ms + MIN_DURATION_MS, max_end)
+            else:
+                end_ms = entry.timestamp_ms + MIN_DURATION_MS
+            logger.debug(
+                f"Subtitle {index}: extended short duration from {calculated_duration}ms"
+            )
 
         return SubtitleImage(
             index=index,
