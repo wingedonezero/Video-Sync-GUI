@@ -1,6 +1,8 @@
 # vsg_qt/options_dialog/ui.py
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -23,6 +25,9 @@ from .tabs import (
     SubtitleSyncTab,
 )
 
+if TYPE_CHECKING:
+    from vsg_core.config import AppConfig
+
 
 def _wrap_scroll(widget: QWidget) -> QScrollArea:
     sa = QScrollArea()
@@ -36,15 +41,15 @@ class OptionsDialog(QDialog):
     Drop-in replacement preserving public API/behavior of the previous OptionsDialog.
 
     Usage:
-        dlg = OptionsDialog(config_dict, parent)
+        dlg = OptionsDialog(app_config, parent)
         if dlg.exec():
-            config_dict is updated in-place via dlg.accept()
+            app_config.settings is updated in-place via dlg.accept()
 
     Exposes:
         - self.sections: dict[str, dict[str, QWidget]] of all keyed widgets
     """
 
-    def __init__(self, config: dict, parent=None):
+    def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Application Settings")
         self.setMinimumSize(900, 600)

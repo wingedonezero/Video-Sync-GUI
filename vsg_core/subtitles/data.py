@@ -1054,10 +1054,12 @@ class SubtitleData:
                 success=False, operation="sync", error=f"Unknown sync mode: {mode}"
             )
 
-        # Convert dict config to AppSettings if needed
+        # Convert dict config to AppSettings if needed, default if None
         from vsg_core.models.settings import AppSettings
 
-        if config is not None and not isinstance(config, AppSettings):
+        if config is None:
+            settings_obj = AppSettings()
+        elif not isinstance(config, AppSettings):
             settings_obj = AppSettings.model_validate(config)
         else:
             settings_obj = config
