@@ -50,7 +50,7 @@ def main() -> int:
         with open(config_path, encoding="utf-8") as f:
             config_dict = json.load(f)
         # Convert dict to AppSettings for run_ocr_unified
-        settings = AppSettings(**config_dict)
+        settings = AppSettings.model_validate(config_dict)
     except Exception as exc:
         payload = {"success": False, "error": f"Failed to load config JSON: {exc}"}
         print(f"{JSON_PREFIX}{json.dumps(payload)}", flush=True)

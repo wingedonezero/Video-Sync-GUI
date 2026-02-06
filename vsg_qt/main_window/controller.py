@@ -172,9 +172,7 @@ class MainController:
         # sharing the same AppSettings instance between the main thread and worker.
         # Concurrent access to the shared object (even read-only) can cause segfaults
         # in PySide6/shiboken6 when the GIL is released during C++ calls.
-        from vsg_core.models.settings import AppSettings
-
-        worker_settings = AppSettings.from_config(self.config.settings.to_dict())
+        worker_settings = self.config.settings.model_copy(deep=True)
         self.worker = JobWorker(worker_settings, jobs, and_merge, output_dir)
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.progress.connect(self.update_progress)

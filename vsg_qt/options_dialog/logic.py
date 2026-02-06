@@ -1,41 +1,33 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vsg_core.models.settings import AppSettings
 
 
 class OptionsLogic:
     """
-    Thin logic/helper for OptionsDialog to read/write a dict-like config.
+    Thin logic/helper for OptionsDialog to read/write AppSettings.
     The dialog exposes a 'sections' dict mapping section names -> dict of widgets.
     """
 
     def __init__(self, dialog):
         self.dlg = dialog
 
-    # --- load/save over a flat dict or AppSettings dataclass ---
-    def load_from_config(self, cfg: dict[str, Any]) -> None:
-        # Handle both dict and AppSettings dataclass
-        is_dataclass = hasattr(cfg, "__dataclass_fields__")
+    # --- load/save over AppSettings (always attribute access) ---
+    def load_from_config(self, cfg: AppSettings) -> None:
         for section in self.dlg.sections.values():
             for key, widget in section.items():
-                if is_dataclass:
-                    value = getattr(cfg, key, None)
-                else:
-                    value = cfg.get(key)
+                value = getattr(cfg, key, None)
                 self._set_widget_val(widget, value)
 
-    def save_to_config(self, cfg: dict[str, Any]) -> None:
-        # Handle both dict and AppSettings dataclass
-        is_dataclass = hasattr(cfg, "__dataclass_fields__")
+    def save_to_config(self, cfg: AppSettings) -> None:
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 value = self._get_widget_val(widget)
-                if is_dataclass:
-                    # Only set if the attribute exists on the dataclass
-                    if hasattr(cfg, key):
-                        setattr(cfg, key, value)
-                else:
-                    cfg[key] = value
+                if hasattr(cfg, key):
+                    setattr(cfg, key, value)
 
     # --- widget helpers copied from previous OptionsDialog (kept behavior) ---
     def _get_widget_val(self, widget):
@@ -62,6 +54,7 @@ class OptionsLogic:
         if (
             isinstance(widget, QWidget)
             and widget.layout()
+            and widget.layout().itemAt(0)
             and isinstance(widget.layout().itemAt(0).widget(), QLineEdit)
         ):
             return widget.layout().itemAt(0).widget().text()

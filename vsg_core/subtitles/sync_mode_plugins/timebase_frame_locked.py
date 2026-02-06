@@ -67,7 +67,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         from ..data import OperationRecord, OperationResult, SyncEventData
 
         if settings is None:
-            settings = AppSettings.from_config({})
+            settings = AppSettings()
 
         def log(msg: str):
             if runner:
@@ -96,7 +96,9 @@ class TimebaseFrameLockedSync(SyncPlugin):
         )
 
         # Try to get VideoTimestamps for precise frame alignment
-        vts = self._get_video_timestamps(target_video, target_fps, runner, settings.to_dict())
+        vts = self._get_video_timestamps(
+            target_video, target_fps, runner, settings.to_dict()
+        )
 
         # Statistics tracking
         stats = {

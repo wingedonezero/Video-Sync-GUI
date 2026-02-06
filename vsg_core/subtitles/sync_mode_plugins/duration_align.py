@@ -80,7 +80,7 @@ class DurationAlignSync(SyncPlugin):
         from ..frame_verification import verify_alignment_with_sliding_window
 
         if settings is None:
-            settings = AppSettings.from_config({})
+            settings = AppSettings()
 
         def log(msg: str):
             if runner:
@@ -173,7 +173,11 @@ class DurationAlignSync(SyncPlugin):
                         source_info["streams"][0]["nb_read_frames"]
                     )
                     source_duration_ms = frame_to_time_vfr(
-                        source_frame_count - 1, source_video, source_fps, runner, settings.to_dict()
+                        source_frame_count - 1,
+                        source_video,
+                        source_fps,
+                        runner,
+                        settings.to_dict(),
                     )
 
                 if target_duration_ms is None:

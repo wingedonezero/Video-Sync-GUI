@@ -64,7 +64,7 @@ def run_ocr(
     lang: str,
     runner: CommandRunner,
     tool_paths: dict,
-    settings: AppSettings | dict,
+    settings: AppSettings,
     work_dir: Path | None = None,
     logs_dir: Path | None = None,
     track_id: int = 0,
@@ -84,7 +84,7 @@ def run_ocr(
         lang: The 3-letter language code for OCR (e.g., 'eng')
         runner: The CommandRunner instance for logging
         tool_paths: A dictionary of tool paths (unused by new OCR)
-        settings: The application's typed settings (AppSettings or dict)
+        settings: The application's typed settings (AppSettings)
         work_dir: Working directory for temp files
         logs_dir: Directory for OCR reports
         track_id: Track ID for organizing work files
@@ -116,10 +116,7 @@ def run_ocr(
         return None
 
     # Determine output format and path
-    if isinstance(settings, dict):
-        output_format = settings.get("ocr_output_format", "ass")
-    else:
-        output_format = settings.ocr_output_format
+    output_format = settings.ocr_output_format
     output_suffix = ".ass" if output_format == "ass" else ".srt"
     output_path = sub_path.with_suffix(output_suffix)
 
@@ -198,19 +195,15 @@ def run_ocr(
         return None
 
 
-def _build_ocr_settings(settings: AppSettings | dict, lang: str) -> dict:
+def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
     """
-    Build OCR settings dict from AppSettings or dict for internal OCR pipeline.
+    Build OCR settings dict from AppSettings for internal OCR pipeline.
 
     Maps AppSettings fields to OCR pipeline settings dict.
-    The internal OCR components still use dict for flexibility.
-    Accepts both AppSettings (attribute access) and dict (key access).
+    The internal OCR components use dict for their own config.
     """
 
-    # Helper to get value from either AppSettings or dict
     def get_val(key: str, default=None):
-        if isinstance(settings, dict):
-            return settings.get(key, default)
         return getattr(settings, key, default)
 
     # Map 3-letter language codes to Tesseract codes
@@ -291,7 +284,7 @@ def run_ocr_unified(
     lang: str,
     runner: CommandRunner,
     tool_paths: dict,
-    settings: AppSettings | dict,
+    settings: AppSettings,
     work_dir: Path | None = None,
     logs_dir: Path | None = None,
     track_id: int = 0,

@@ -15,7 +15,6 @@ The AppConfig class handles:
 - Loading settings from JSON with migration of old keys
 - Saving settings to JSON
 - Runtime path resolution (output_folder, temp_root, etc.)
-- Validation of values
 - Directory creation
 """
 
@@ -26,7 +25,6 @@ from pathlib import Path
 from typing import Any
 
 from vsg_core.models import AppSettings
-
 
 # =====================================================================
 # Standalone temp directory helpers
@@ -107,7 +105,7 @@ def cleanup_old_style_editor_temp_files(
 class AppConfig:
     """Configuration manager that uses AppSettings as the source of truth.
 
-    Settings are stored as an AppSettings dataclass internally.
+    Settings are stored as an AppSettings Pydantic model internally.
     Defaults are derived from AppSettings.get_defaults().
     """
 
@@ -121,7 +119,6 @@ class AppConfig:
 
         self.settings: AppSettings = None  # type: ignore  # Set by load()
         self._accessed_keys: set[str] = set()  # Track accessed keys for typo detection
-        self._validation_enabled = True  # Can be disabled for backwards compatibility
 
         self.load()
         self.ensure_dirs_exist()
@@ -153,171 +150,165 @@ class AppConfig:
 
         return defaults
 
-    def _validate_value(self, key: str, value: Any) -> tuple[bool, str | None]:
-        """
-        Validates a config value against expected type and range.
+    def _migrate_legacy_keys(self, loaded_settings: dict[str, Any]) -> bool:
+        """Apply all legacy key migrations to a loaded settings dict.
 
-        Returns:
-            Tuple of (is_valid, error_message)
+        Returns True if any changes were made.
         """
-        if not self._validation_enabled:
-            return True, None
+        changed = False
 
-        # Type and range validation based on key patterns
-        if key.endswith("_enabled") or (
-            key.startswith("log_") and not key.endswith(("_lines", "_step", "_tail"))
+        # Remove deprecated keys
+        if "post_mux_validate_metadata" in loaded_settings:
+            del loaded_settings["post_mux_validate_metadata"]
+            changed = True
+
+        # Rename old language keys
+        if "analysis_lang_ref" in loaded_settings and not loaded_settings.get(
+            "analysis_lang_source1"
         ):
-            if not isinstance(value, bool):
-                return False, f"{key} must be bool, got {type(value).__name__}"
-
-        elif key.endswith(("_pct", "_percentage")):
-            if not isinstance(value, (int, float)):
-                return False, f"{key} must be numeric, got {type(value).__name__}"
-            if not (0.0 <= value <= 100.0):
-                return False, f"{key} must be 0-100, got {value}"
-
-        elif key.endswith(
-            ("_ms", "_duration_ms", "_gap_ms", "_window_ms", "_tolerance_ms")
-        ) or key.endswith(("_hz", "_lowcut_hz", "_highcut_hz", "_bandlimit_hz")):
-            if not isinstance(value, (int, float)):
-                return False, f"{key} must be numeric, got {type(value).__name__}"
-            if value < 0:
-                return False, f"{key} cannot be negative, got {value}"
-
-        elif key.endswith(("_db", "_threshold_db", "_noise")):
-            if not isinstance(value, (int, float)):
-                return False, f"{key} must be numeric, got {type(value).__name__}"
-            if value > 0:
-                warnings.warn(
-                    f"{key} is typically negative (dB), got {value}", stacklevel=2
-                )
-
-        elif key.endswith(
-            ("_count", "_chunks", "_samples", "_taps", "_workers", "_points")
+            loaded_settings["analysis_lang_source1"] = loaded_settings[
+                "analysis_lang_ref"
+            ]
+            changed = True
+        if "analysis_lang_sec" in loaded_settings and not loaded_settings.get(
+            "analysis_lang_others"
         ):
-            if not isinstance(value, int):
-                return False, f"{key} must be int, got {type(value).__name__}"
-            if value < 0:
-                return False, f"{key} cannot be negative, got {value}"
+            loaded_settings["analysis_lang_others"] = loaded_settings[
+                "analysis_lang_sec"
+            ]
+            changed = True
+        for old_key in [
+            "analysis_lang_ref",
+            "analysis_lang_sec",
+            "analysis_lang_ter",
+        ]:
+            if old_key in loaded_settings:
+                del loaded_settings[old_key]
+                changed = True
 
-        elif key.endswith(("_threshold", "_ratio")):
-            if not isinstance(value, (int, float)):
-                return False, f"{key} must be numeric, got {type(value).__name__}"
-            if value < 0:
-                return False, f"{key} cannot be negative, got {value}"
+        # Fix old source separation device
+        if loaded_settings.get("source_separation_device") == "cpu":
+            loaded_settings["source_separation_device"] = "auto"
+            changed = True
 
-        # Enum validation for specific keys
-        if key == "source_separation_device":
-            valid = ["auto", "cpu", "cuda", "rocm", "mps"]
-            if value not in valid:
-                return False, f"{key} must be one of {valid}, got '{value}'"
-        elif key == "source_separation_mode":
-            valid = ["none", "instrumental", "vocals"]
-            if value not in valid:
-                return False, f"{key} must be one of {valid}, got '{value}'"
+        # Convert old source separation model names
+        legacy_separation_map = {
+            "Demucs - Music/Effects (Strip Vocals)": "instrumental",
+            "Demucs - Vocals Only": "vocals",
+        }
+        legacy_selection = loaded_settings.get("source_separation_model")
+        if legacy_selection in legacy_separation_map:
+            loaded_settings["source_separation_mode"] = legacy_separation_map[
+                legacy_selection
+            ]
+            loaded_settings["source_separation_model"] = "default"
+            changed = True
 
-        elif key == "frame_hash_algorithm":
-            valid = ["dhash", "phash", "average_hash", "whash"]
-            if value not in valid:
-                return False, f"{key} must be one of {valid}, got '{value}'"
+        return changed
 
-        elif key.endswith("_fallback_mode"):
-            # Don't enforce specific values as different modes have different options
-            if not isinstance(value, str):
-                return False, f"{key} must be string, got {type(value).__name__}"
+    def load(self):
+        """Load settings from JSON file, applying migrations and defaults.
 
-        elif key in ("sync_mode", "delay_selection_mode"):
-            if not isinstance(value, str):
-                return False, f"{key} must be string, got {type(value).__name__}"
-
-        elif key in ("analysis_mode", "snap_mode"):
-            if not isinstance(value, str):
-                return False, f"{key} must be string, got {type(value).__name__}"
-
-        elif key == "stepping_silence_detection_method":
-            valid = ["rms_basic", "ffmpeg_silencedetect", "smart_fusion"]
-            if value not in valid:
-                return False, f"{key} must be one of {valid}, got '{value}'"
-
-        elif key == "segment_resample_engine":
-            valid = ["aresample", "rubberband"]
-            if value not in valid:
-                return False, f"{key} must be one of {valid}, got '{value}'"
-
-        return True, None
-
-    def _coerce_type(self, key: str, value: Any, default_value: Any) -> Any:
+        Pydantic handles type coercion and validation automatically.
         """
-        Coerces a loaded value to match the type of its default.
+        changed = False
+        if self.settings_path.exists():
+            try:
+                with open(self.settings_path, encoding="utf-8") as f:
+                    loaded_settings = json.load(f)
 
-        Handles JSON loading issues where numbers may be stored as strings.
+                # Apply legacy key migrations on the raw dict
+                if self._migrate_legacy_keys(loaded_settings):
+                    changed = True
 
-        Args:
-            key: Config key name
-            value: Loaded value (may be wrong type)
-            default_value: Default value (provides expected type)
+                # Apply defaults for missing keys
+                for key, default_value in self.defaults.items():
+                    if key not in loaded_settings:
+                        loaded_settings[key] = default_value
+                        changed = True
 
-        Returns:
-            Coerced value matching default's type
+                # Pydantic handles all type coercion and validation
+                self.settings = AppSettings.from_config(loaded_settings)
+
+            except (OSError, json.JSONDecodeError):
+                self.settings = AppSettings.from_config(self.defaults)
+                changed = True
+        else:
+            self.settings = AppSettings.from_config(self.defaults)
+            changed = True
+
+        if changed:
+            self.save()
+
+    def save(self):
+        """Save current settings to JSON file.
+
+        Saves all fields defined in AppSettings (derived from defaults).
         """
-        # If value is already the correct type, return as-is
-        if type(value) is type(default_value):
-            return value
-
-        # Try to coerce to default's type
         try:
-            if isinstance(default_value, bool):
-                # Handle bool specially - strings need explicit conversion
-                if isinstance(value, str):
-                    return value.lower() in ("true", "1", "yes", "on")
-                return bool(value)
-            elif isinstance(default_value, int):
-                # Convert to float first, then int (handles "10.0" strings)
-                return int(float(value))
-            elif isinstance(default_value, float):
-                return float(value)
-            elif isinstance(default_value, str):
-                return str(value)
-            elif isinstance(default_value, (list, tuple)):
-                # Handle list/tuple - JSON loads as list
-                if isinstance(value, (list, tuple)):
-                    return value
-                return default_value
-            else:
-                # Unknown type, return as-is
-                return value
-        except (ValueError, TypeError):
-            # Coercion failed, return default value
+            # Pydantic model_dump() handles serialization
+            settings_dict = self.settings.to_dict()
+
+            # Only save keys that are in our defaults (which comes from AppSettings)
+            # This ensures we don't save any orphaned keys
+            keys_to_save = self.defaults.keys()
+            settings_to_save = {
+                k: settings_dict.get(k) for k in keys_to_save if k in settings_dict
+            }
+
+            with open(self.settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings_to_save, f, indent=4)
+        except OSError as e:
+            print(f"Error saving settings: {e}")
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Gets a config value from the AppSettings model.
+
+        Tracks accessed keys for typo detection. If a key is not in defaults
+        and no default is provided, warns about potential typo.
+        """
+        self._accessed_keys.add(key)
+
+        # Warn if accessing a key that's not in defaults and no default provided
+        if key not in self.defaults and default is None:
             warnings.warn(
-                f"Config key '{key}' has invalid value '{value}', using default: {default_value}",
+                f"Config key '{key}' not found in defaults. Possible typo? Returning None.",
                 UserWarning,
                 stacklevel=2,
             )
-            return default_value
+
+        # Use getattr to access AppSettings fields
+        return getattr(self.settings, key, default)
+
+    def set(self, key: str, value: Any):
+        """
+        Sets a config value on the AppSettings model.
+
+        Pydantic's validate_assignment handles type coercion and validation.
+        """
+        # Pydantic validates on setattr due to validate_assignment=True
+        setattr(self.settings, key, value)
 
     def validate_all(self) -> list[str]:
         """
         Validates all settings and returns list of error messages.
 
+        With Pydantic, validation happens automatically on construction
+        and assignment. This method re-validates the full model.
+
         Returns:
             List of validation error messages (empty if all valid)
         """
-        import dataclasses
-
-        errors = []
-        for field in dataclasses.fields(self.settings):
-            value = getattr(self.settings, field.name)
-            is_valid, error_msg = self._validate_value(field.name, value)
-            if not is_valid:
-                errors.append(error_msg)
-        return errors
+        try:
+            AppSettings.model_validate(self.settings.to_dict())
+            return []
+        except Exception as e:
+            return [str(e)]
 
     def validate_schema(self) -> list[str]:
         """
         Validates that AppSettings fields match what we expect.
-
-        This catches issues where AppSettings has fields not in defaults
-        (which shouldn't happen if everything derives from AppSettings).
 
         Returns:
             List of warning messages (empty if schema is valid)
@@ -342,143 +333,6 @@ class AppConfig:
 
         return warnings_list
 
-    def load(self):
-        """Load settings from JSON file, applying migrations and defaults."""
-        changed = False
-        if self.settings_path.exists():
-            try:
-                with open(self.settings_path, encoding="utf-8") as f:
-                    loaded_settings = json.load(f)
-
-                # === Migration: Remove deprecated keys ===
-                if "post_mux_validate_metadata" in loaded_settings:
-                    del loaded_settings["post_mux_validate_metadata"]
-                    changed = True
-
-                # === Migration: Rename old language keys ===
-                if "analysis_lang_ref" in loaded_settings and not loaded_settings.get(
-                    "analysis_lang_source1"
-                ):
-                    loaded_settings["analysis_lang_source1"] = loaded_settings[
-                        "analysis_lang_ref"
-                    ]
-                    changed = True
-                if "analysis_lang_sec" in loaded_settings and not loaded_settings.get(
-                    "analysis_lang_others"
-                ):
-                    loaded_settings["analysis_lang_others"] = loaded_settings[
-                        "analysis_lang_sec"
-                    ]
-                    changed = True
-                for old_key in [
-                    "analysis_lang_ref",
-                    "analysis_lang_sec",
-                    "analysis_lang_ter",
-                ]:
-                    if old_key in loaded_settings:
-                        del loaded_settings[old_key]
-                        changed = True
-
-                # === Migration: Fix old source separation device ===
-                if loaded_settings.get("source_separation_device") == "cpu":
-                    loaded_settings["source_separation_device"] = "auto"
-                    changed = True
-
-                # === Migration: Convert old source separation model names ===
-                legacy_separation_map = {
-                    "Demucs - Music/Effects (Strip Vocals)": "instrumental",
-                    "Demucs - Vocals Only": "vocals",
-                }
-                legacy_selection = loaded_settings.get("source_separation_model")
-                if legacy_selection in legacy_separation_map:
-                    loaded_settings["source_separation_mode"] = legacy_separation_map[
-                        legacy_selection
-                    ]
-                    loaded_settings["source_separation_model"] = "default"
-                    changed = True
-
-                # === Apply defaults for missing keys ===
-                for key, default_value in self.defaults.items():
-                    if key not in loaded_settings:
-                        loaded_settings[key] = default_value
-                        changed = True
-
-                # === Coerce types to match defaults (fixes string numbers from JSON) ===
-                for key, value in loaded_settings.items():
-                    if key in self.defaults:
-                        coerced = self._coerce_type(key, value, self.defaults[key])
-                        if coerced != value:
-                            loaded_settings[key] = coerced
-                            changed = True
-
-                # Create AppSettings dataclass from the merged dict
-                self.settings = AppSettings.from_config(loaded_settings)
-
-            except (OSError, json.JSONDecodeError):
-                self.settings = AppSettings.from_config(self.defaults)
-                changed = True
-        else:
-            self.settings = AppSettings.from_config(self.defaults)
-            changed = True
-
-        if changed:
-            self.save()
-
-    def save(self):
-        """Save current settings to JSON file.
-
-        Saves all fields defined in AppSettings (derived from defaults).
-        """
-        try:
-            # Convert AppSettings to dict
-            settings_dict = self.settings.to_dict()
-
-            # Only save keys that are in our defaults (which comes from AppSettings)
-            # This ensures we don't save any orphaned keys
-            keys_to_save = self.defaults.keys()
-            settings_to_save = {
-                k: settings_dict.get(k) for k in keys_to_save if k in settings_dict
-            }
-
-            with open(self.settings_path, "w", encoding="utf-8") as f:
-                json.dump(settings_to_save, f, indent=4)
-        except OSError as e:
-            print(f"Error saving settings: {e}")
-
-    def get(self, key: str, default: Any = None) -> Any:
-        """
-        Gets a config value from the AppSettings dataclass.
-
-        Tracks accessed keys for typo detection. If a key is not in defaults
-        and no default is provided, warns about potential typo.
-        """
-        self._accessed_keys.add(key)
-
-        # Warn if accessing a key that's not in defaults and no default provided
-        if key not in self.defaults and default is None:
-            warnings.warn(
-                f"Config key '{key}' not found in defaults. Possible typo? Returning None.",
-                UserWarning,
-                stacklevel=2,
-            )
-
-        # Use getattr to access AppSettings dataclass fields
-        return getattr(self.settings, key, default)
-
-    def set(self, key: str, value: Any):
-        """
-        Sets a config value on the AppSettings dataclass.
-
-        Validates the value before setting if validation is enabled.
-        """
-        if self._validation_enabled:
-            is_valid, error_msg = self._validate_value(key, value)
-            if not is_valid:
-                raise ValueError(f"Invalid config value: {error_msg}")
-
-        # Use setattr to modify AppSettings dataclass fields
-        setattr(self.settings, key, value)
-
     def get_unrecognized_keys(self) -> builtins.set[str]:
         """
         Returns set of accessed keys that are not in defaults.
@@ -491,20 +345,18 @@ class AppConfig:
         """
         Returns set of keys in settings that are not in defaults.
 
-        Note: With AppSettings dataclass, this always returns empty set
-        since the dataclass has fixed fields.
+        Note: With AppSettings Pydantic model, this always returns empty set
+        since the model has fixed fields.
         """
-        # AppSettings dataclass has fixed fields, no orphaned keys possible
         return set()
 
     def remove_orphaned_keys(self) -> builtins.set[str]:
         """
         Removes orphaned keys from settings and saves.
 
-        Note: With AppSettings dataclass, this is a no-op since there
+        Note: With AppSettings Pydantic model, this is a no-op since there
         are no orphaned keys.
         """
-        # AppSettings dataclass has fixed fields, nothing to remove
         return set()
 
     def ensure_dirs_exist(self):
@@ -541,9 +393,7 @@ class AppConfig:
 
     def cleanup_old_style_editor_temp(self, max_age_hours: float = 1.0) -> int:
         """Clean up old files (> max_age_hours) in the style editor temp dir."""
-        return cleanup_old_style_editor_temp_files(
-            self.get("temp_root"), max_age_hours
-        )
+        return cleanup_old_style_editor_temp_files(self.get("temp_root"), max_age_hours)
 
     def get_vs_index_dir(self) -> Path:
         """

@@ -74,7 +74,7 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         from ..frame_utils import detect_video_fps
 
         if settings is None:
-            settings = AppSettings.from_config({})
+            settings = AppSettings()
 
         def log(msg: str):
             if runner:
