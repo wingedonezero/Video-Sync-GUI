@@ -881,8 +881,8 @@ class SubtitlesStep:
                 runner=runner,
                 settings=ctx.settings,
                 temp_dir=ctx.temp_dir,
-                sync_exclusion_styles=getattr(item, "sync_exclusion_styles", None),
-                sync_exclusion_mode=getattr(item, "sync_exclusion_mode", "exclude"),
+                sync_exclusion_styles=item.sync_exclusion_styles,
+                sync_exclusion_mode=item.sync_exclusion_mode,
             )
 
             if result.success:
@@ -906,9 +906,7 @@ class SubtitlesStep:
                     global_shift_raw_ms=global_shift_ms,
                     source_key=source_key,
                     plugin_name=plugin.name,
-                    events_modified=result.events_affected
-                    if hasattr(result, "events_affected")
-                    else 0,
+                    events_modified=result.events_affected,
                     stepping_adjusted_before=item.stepping_adjusted,
                     stepping_adjusted_after=item.stepping_adjusted,
                     frame_adjusted_before=item.frame_adjusted,
