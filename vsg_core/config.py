@@ -28,6 +28,82 @@ from typing import Any
 from vsg_core.models import AppSettings
 
 
+# =====================================================================
+# Standalone temp directory helpers
+#
+# These functions only need a temp_root path (from settings.temp_root).
+# Use these instead of instantiating AppConfig when you only need
+# temp dir operations (e.g., on the worker thread or in vsg_core code).
+# =====================================================================
+
+
+def get_style_editor_temp_path(temp_root: str | Path) -> Path:
+    """Return the style_editor temp directory, creating it if needed."""
+    temp_dir = Path(temp_root) / "style_editor"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return temp_dir
+
+
+def cleanup_style_editor_temp_files(temp_root: str | Path) -> int:
+    """Remove all files in the style_editor temp directory.
+
+    Returns:
+        Number of items removed
+    """
+    import shutil
+
+    temp_dir = Path(temp_root) / "style_editor"
+    if not temp_dir.exists():
+        return 0
+
+    count = 0
+    for item in temp_dir.iterdir():
+        try:
+            if item.is_file():
+                item.unlink()
+                count += 1
+            elif item.is_dir():
+                shutil.rmtree(item)
+                count += 1
+        except OSError:
+            pass
+    return count
+
+
+def cleanup_old_style_editor_temp_files(
+    temp_root: str | Path, max_age_hours: float = 1.0
+) -> int:
+    """Remove files older than *max_age_hours* from the style_editor temp dir.
+
+    Returns:
+        Number of items removed
+    """
+    import shutil
+    import time
+
+    temp_dir = Path(temp_root) / "style_editor"
+    if not temp_dir.exists():
+        return 0
+
+    max_age_seconds = max_age_hours * 3600
+    current_time = time.time()
+    count = 0
+
+    for item in temp_dir.iterdir():
+        try:
+            mtime = item.stat().st_mtime
+            if (current_time - mtime) > max_age_seconds:
+                if item.is_file():
+                    item.unlink()
+                    count += 1
+                elif item.is_dir():
+                    shutil.rmtree(item)
+                    count += 1
+        except OSError:
+            pass
+    return count
+
+
 class AppConfig:
     """Configuration manager that uses AppSettings as the source of truth.
 
@@ -456,87 +532,18 @@ class AppConfig:
         return self.script_dir / ".config" / "fonts"
 
     def get_style_editor_temp_dir(self) -> Path:
-        """
-        Returns the path to the style_editor temp directory for preview files.
-
-        This is inside the normal temp_work directory and gets cleaned up at job start,
-        not when the style editor closes. This allows debugging of temp files
-        and keeps all job-related temp files in one place.
-        """
-        temp_dir = Path(self.get("temp_root")) / "style_editor"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        return temp_dir
+        """Returns the path to the style_editor temp directory for preview files."""
+        return get_style_editor_temp_path(self.get("temp_root"))
 
     def cleanup_style_editor_temp(self) -> int:
-        """
-        Clean up the style editor temp directory.
-
-        Called at job start or end to remove old preview files.
-
-        Returns:
-            Number of files removed
-        """
-        import shutil
-
-        temp_dir = Path(self.get("temp_root")) / "style_editor"
-        if not temp_dir.exists():
-            return 0
-
-        count = 0
-        for item in temp_dir.iterdir():
-            try:
-                if item.is_file():
-                    item.unlink()
-                    count += 1
-                elif item.is_dir():
-                    shutil.rmtree(item)
-                    count += 1
-            except OSError:
-                pass
-        return count
+        """Clean up the style editor temp directory."""
+        return cleanup_style_editor_temp_files(self.get("temp_root"))
 
     def cleanup_old_style_editor_temp(self, max_age_hours: float = 1.0) -> int:
-        """
-        Clean up old files in the style editor temp directory.
-
-        Only removes files/directories older than max_age_hours. This is safe
-        to call when opening the style editor as it won't affect the current
-        session's files or any recently created files.
-
-        Args:
-            max_age_hours: Maximum age in hours before cleanup (default 1 hour)
-
-        Returns:
-            Number of items removed
-        """
-        import shutil
-        import time
-
-        temp_dir = Path(self.get("temp_root")) / "style_editor"
-        if not temp_dir.exists():
-            return 0
-
-        max_age_seconds = max_age_hours * 3600
-        current_time = time.time()
-        count = 0
-
-        for item in temp_dir.iterdir():
-            try:
-                # Get modification time of the item
-                mtime = item.stat().st_mtime
-                age_seconds = current_time - mtime
-
-                if age_seconds > max_age_seconds:
-                    if item.is_file():
-                        item.unlink()
-                        count += 1
-                    elif item.is_dir():
-                        shutil.rmtree(item)
-                        count += 1
-            except OSError:
-                pass
-
-        return count
+        """Clean up old files (> max_age_hours) in the style editor temp dir."""
+        return cleanup_old_style_editor_temp_files(
+            self.get("temp_root"), max_age_hours
+        )
 
     def get_vs_index_dir(self) -> Path:
         """

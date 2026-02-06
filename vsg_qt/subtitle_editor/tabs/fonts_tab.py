@@ -211,26 +211,42 @@ class FontsTab(BaseTab):
 
         layout.addStretch()
 
-    def set_fonts_dir(self, fonts_dir: Path | None) -> None:
-        """Set the fonts directory for preview."""
-        from vsg_core.config import AppConfig
+    def set_fonts_dir(
+        self,
+        fonts_dir: Path | None,
+        user_fonts_dir: Path | None = None,
+        temp_root: str | None = None,
+    ) -> None:
+        """Set the fonts directory for preview.
 
-        config = AppConfig()
-
+        Args:
+            fonts_dir: Attached fonts dir from subtitle file (where libass looks).
+            user_fonts_dir: User's fonts directory to scan for the dropdown.
+                            Pass from config.get_fonts_dir().
+            temp_root: Temp root path (from settings.temp_root).
+                       Used to create a fallback fonts dir when fonts_dir is None.
+        """
         # Store attached fonts dir (from subtitle) - this is where libass looks
         if fonts_dir:
             self._attached_fonts_dir = Path(fonts_dir)
-        else:
+        elif temp_root:
             # Create a temp fonts directory if none provided
-            # This ensures we have somewhere to copy replacement fonts
+            from vsg_core.config import get_style_editor_temp_path
+
             self._attached_fonts_dir = (
-                config.get_style_editor_temp_dir() / "vsg_replacement_fonts"
+                get_style_editor_temp_path(temp_root) / "vsg_replacement_fonts"
             )
             self._attached_fonts_dir.mkdir(parents=True, exist_ok=True)
             print(f"[FontsTab] Created temp fonts dir: {self._attached_fonts_dir}")
+        else:
+            # Last resort: use a temp dir next to the module
+            import tempfile
+
+            self._attached_fonts_dir = Path(tempfile.mkdtemp(prefix="vsg_fonts_"))
+            print(f"[FontsTab] Created fallback temp fonts dir: {self._attached_fonts_dir}")
 
         # User's fonts dir - this is what we scan for the dropdown
-        self._user_fonts_dir = config.get_fonts_dir()
+        self._user_fonts_dir = user_fonts_dir
 
         # For backward compatibility
         self._fonts_dir = self._attached_fonts_dir

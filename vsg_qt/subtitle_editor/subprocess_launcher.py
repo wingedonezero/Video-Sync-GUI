@@ -91,6 +91,8 @@ def main():
             existing_style_patch=existing_style_patch,
             existing_filter_config=existing_filter_config,
             parent=None,  # No parent in subprocess
+            temp_root=params.get("temp_root"),
+            user_fonts_dir=params.get("user_fonts_dir"),
         )
 
         # Run the dialog

@@ -70,10 +70,9 @@ class Orchestrator:
         job_temp.mkdir(parents=True, exist_ok=True)
 
         # Cleanup old style editor temp files from previous sessions
-        from vsg_core.config import AppConfig
+        from vsg_core.config import cleanup_style_editor_temp_files
 
-        config = AppConfig()
-        cleaned = config.cleanup_style_editor_temp()
+        cleaned = cleanup_style_editor_temp_files(settings.temp_root)
         if cleaned > 0:
             log(f"[Cleanup] Removed {cleaned} old style editor temp files")
 

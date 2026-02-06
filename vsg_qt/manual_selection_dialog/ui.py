@@ -680,7 +680,7 @@ class ManualSelectionDialog(QDialog):
             return
 
         # Get available styles from target file for validation
-        engine = StyleEngine(temp_path)
+        engine = StyleEngine(temp_path, temp_dir=self.config.get_style_editor_temp_dir())
         available_styles = set(engine.get_style_names())
 
         # Validate and collect warnings
@@ -943,6 +943,8 @@ class ManualSelectionDialog(QDialog):
                 existing_style_patch=existing_style_patch,
                 existing_filter_config=existing_filter_config,
                 parent=self,
+                temp_root=self.config.settings.temp_root,
+                user_fonts_dir=str(self.config.get_fonts_dir()),
             )
             if editor.exec() == QDialog.Accepted:
                 style_patch = editor.get_style_patch()
