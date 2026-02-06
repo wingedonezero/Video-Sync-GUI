@@ -16,9 +16,10 @@ Plugins are located in: vsg_core/subtitles/sync_mode_plugins/
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, Optional, Type
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ...models.settings import AppSettings
     from ..data import OperationResult, SubtitleData
 
 
@@ -50,7 +51,7 @@ class SyncPlugin(ABC):
         source_video: str | None = None,
         target_video: str | None = None,
         runner=None,
-        config: dict | None = None,
+        settings: AppSettings | None = None,
         **kwargs,
     ) -> OperationResult:
         """
@@ -66,7 +67,7 @@ class SyncPlugin(ABC):
             source_video: Source video path
             target_video: Target video path
             runner: CommandRunner for logging
-            config: Settings dict
+            settings: AppSettings instance
             **kwargs: Additional mode-specific parameters
 
         Returns:

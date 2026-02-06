@@ -96,9 +96,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         )
 
         # Try to get VideoTimestamps for precise frame alignment
-        vts = self._get_video_timestamps(
-            target_video, target_fps, runner, settings.to_dict()
-        )
+        vts = self._get_video_timestamps(target_video, target_fps, runner, settings)
 
         # Statistics tracking
         stats = {
@@ -290,7 +288,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
             details=stats,
         )
 
-    def _get_video_timestamps(self, video_path: str, fps: float, runner, config: dict):
+    def _get_video_timestamps(self, video_path: str, fps: float, runner, config):
         """Get VideoTimestamps handler for the video."""
         try:
             from ..frame_utils import get_vfr_timestamps

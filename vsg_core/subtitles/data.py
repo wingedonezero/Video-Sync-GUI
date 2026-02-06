@@ -19,7 +19,10 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models.settings import AppSettings
 
 # =============================================================================
 # Per-Event Metadata (OCR, Sync, Stepping)
@@ -1021,7 +1024,7 @@ class SubtitleData:
         source_video: str | None = None,
         target_video: str | None = None,
         runner=None,
-        config: dict | None = None,
+        config: AppSettings | dict | None = None,
         **kwargs,
     ) -> OperationResult:
         """
@@ -1051,10 +1054,12 @@ class SubtitleData:
                 success=False, operation="sync", error=f"Unknown sync mode: {mode}"
             )
 
-        # Convert dict config to AppSettings if needed
+        # Convert dict config to AppSettings if needed, default if None
         from vsg_core.models.settings import AppSettings
 
-        if config is not None and not isinstance(config, AppSettings):
+        if config is None:
+            settings_obj = AppSettings()
+        elif not isinstance(config, AppSettings):
             settings_obj = AppSettings.model_validate(config)
         else:
             settings_obj = config
