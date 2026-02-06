@@ -84,7 +84,7 @@ def calculate_video_verified_offset(
     from ..frame_utils import detect_video_properties
 
     if settings is None:
-        settings = AppSettings.from_config({})
+        settings = AppSettings()
 
     def log(msg: str):
         if runner:
@@ -1191,7 +1191,7 @@ class VideoVerifiedSync(SyncPlugin):
         from ..data import OperationResult
 
         if settings is None:
-            settings = AppSettings.from_config({})
+            settings = AppSettings()
 
         def log(msg: str):
             if runner:

@@ -54,7 +54,7 @@ class TimeBasedSync(SyncPlugin):
         from ..data import OperationRecord, OperationResult
 
         if settings is None:
-            settings = AppSettings.from_config({})
+            settings = AppSettings()
 
         def log(msg: str):
             if runner:

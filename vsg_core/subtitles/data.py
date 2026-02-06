@@ -1051,6 +1051,14 @@ class SubtitleData:
                 success=False, operation="sync", error=f"Unknown sync mode: {mode}"
             )
 
+        # Convert dict config to AppSettings if needed
+        from vsg_core.models.settings import AppSettings
+
+        if config is not None and not isinstance(config, AppSettings):
+            settings_obj = AppSettings.model_validate(config)
+        else:
+            settings_obj = config
+
         return plugin.apply(
             subtitle_data=self,
             total_delay_ms=total_delay_ms,
@@ -1059,8 +1067,7 @@ class SubtitleData:
             source_video=source_video,
             target_video=target_video,
             runner=runner,
-            settings=config,  # Pass as 'settings' for sync plugins that expect AppSettings
-            config=config or {},  # Keep for backward compatibility
+            settings=settings_obj,
             **kwargs,
         )
 

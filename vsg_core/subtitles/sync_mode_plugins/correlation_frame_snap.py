@@ -76,7 +76,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
         from ..frame_verification import verify_correlation_with_frame_snap
 
         if settings is None:
-            settings = AppSettings.from_config({})
+            settings = AppSettings()
 
         def log(msg: str):
             if runner:

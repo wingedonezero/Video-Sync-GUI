@@ -78,7 +78,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         from ..frame_utils import detect_video_fps, get_video_duration_ms
 
         if settings is None:
-            settings = AppSettings.from_config({})
+            settings = AppSettings()
 
         def log(msg: str):
             if runner:

@@ -879,8 +879,7 @@ class SubtitlesStep:
                 source_video=str(source_video) if source_video else None,
                 target_video=str(target_video) if target_video else None,
                 runner=runner,
-                settings=ctx.settings,  # Pass AppSettings directly for plugins that need it
-                config=ctx.settings.to_dict(),  # Keep dict for backward compatibility
+                settings=ctx.settings,
                 temp_dir=ctx.temp_dir,
                 sync_exclusion_styles=getattr(item, "sync_exclusion_styles", None),
                 sync_exclusion_mode=getattr(item, "sync_exclusion_mode", "exclude"),
@@ -1303,9 +1302,7 @@ class SubtitlesStep:
         if not ctx.settings.video_verified_frame_audit:
             return
         if not target_fps:
-            runner._log_message(
-                "[FrameAudit] Skipped: target FPS not available"
-            )
+            runner._log_message("[FrameAudit] Skipped: target FPS not available")
             return
 
         try:
