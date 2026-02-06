@@ -211,7 +211,10 @@ class AppConfig:
     def load(self):
         """Load settings from JSON file, applying migrations and defaults.
 
-        Pydantic handles type coercion and validation automatically.
+        Uses field-by-field recovery: starts from defaults, then overlays
+        each saved value individually. If a single field fails Pydantic
+        validation, only that field is reset to its default — all other
+        customizations are preserved.
         """
         changed = False
         if self.settings_path.exists():
@@ -229,16 +232,31 @@ class AppConfig:
                         loaded_settings[key] = default_value
                         changed = True
 
-                # Pydantic handles all type coercion and validation
-                self.settings = AppSettings.from_config(loaded_settings)
+                # Try loading all at once first (fast path for valid files)
+                try:
+                    self.settings = AppSettings.from_config(loaded_settings)
+                except ValidationError:
+                    # Field-by-field recovery: start from defaults, overlay
+                    # each saved value individually, skip only broken fields
+                    self.settings = AppSettings.from_config(self.defaults)
+                    rejected: list[str] = []
+                    for key, value in loaded_settings.items():
+                        if key not in self.defaults:
+                            continue
+                        try:
+                            setattr(self.settings, key, value)
+                        except (ValidationError, ValueError, TypeError):
+                            rejected.append(key)
+                    if rejected:
+                        warnings.warn(
+                            f"Settings recovery: {len(rejected)} field(s) reset "
+                            f"to defaults: {', '.join(rejected)}",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+                    changed = True
 
-            except (OSError, json.JSONDecodeError, ValidationError) as e:
-                if isinstance(e, ValidationError):
-                    warnings.warn(
-                        f"Settings validation failed, resetting to defaults: {e}",
-                        UserWarning,
-                        stacklevel=2,
-                    )
+            except (OSError, json.JSONDecodeError):
                 self.settings = AppSettings.from_config(self.defaults)
                 changed = True
         else:
