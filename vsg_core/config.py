@@ -383,21 +383,31 @@ class AppConfig:
 
     def get_orphaned_keys(self) -> builtins.set[str]:
         """
-        Returns set of keys in settings that are not in defaults.
+        Returns set of keys in the JSON file that are not in AppSettings.
 
-        Note: With AppSettings Pydantic model, this always returns empty set
-        since the model has fixed fields.
+        Reads the raw JSON to find orphaned/unknown keys that Pydantic's
+        extra='ignore' silently dropped on load.
         """
-        return set()
+        if not self.settings_path.exists():
+            return set()
+        try:
+            with open(self.settings_path, encoding="utf-8") as f:
+                on_disk = set(json.load(f).keys())
+            return on_disk - AppSettings.get_field_names()
+        except (OSError, json.JSONDecodeError):
+            return set()
 
     def remove_orphaned_keys(self) -> builtins.set[str]:
         """
-        Removes orphaned keys from settings and saves.
+        Removes orphaned keys from the JSON file and re-saves.
 
-        Note: With AppSettings Pydantic model, this is a no-op since there
-        are no orphaned keys.
+        Returns the set of keys that were removed.
         """
-        return set()
+        orphaned = self.get_orphaned_keys()
+        if orphaned:
+            # Re-save from model (which already excludes unknown keys)
+            self.save()
+        return orphaned
 
     def ensure_dirs_exist(self):
         Path(self.get("output_folder")).mkdir(parents=True, exist_ok=True)

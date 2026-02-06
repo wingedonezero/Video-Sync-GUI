@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+import warnings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
+
+logger = logging.getLogger(__name__)
 
 
 class OptionsLogic:
@@ -20,19 +24,40 @@ class OptionsLogic:
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 value = getattr(cfg, key, None)
+                if value is None and not hasattr(cfg, key):
+                    warnings.warn(
+                        f"Options widget '{key}' has no matching AppSettings field",
+                        UserWarning,
+                        stacklevel=2,
+                    )
                 self._set_widget_val(widget, value)
 
-    def save_to_config(self, cfg: AppSettings) -> None:
+    def save_to_config(self, cfg: AppSettings) -> list[str]:
+        """Save widget values to config.  Returns list of rejected keys."""
         from pydantic import ValidationError
 
+        rejected: list[str] = []
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 value = self._get_widget_val(widget)
                 if hasattr(cfg, key):
                     try:
                         setattr(cfg, key, value)
-                    except ValidationError:
-                        pass  # Keep previous value if widget sends invalid data
+                    except (ValidationError, ValueError, TypeError) as exc:
+                        rejected.append(key)
+                        warnings.warn(
+                            f"Setting '{key}' rejected value {value!r}: {exc}",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+                else:
+                    rejected.append(key)
+                    warnings.warn(
+                        f"Options widget '{key}' has no matching AppSettings field — value not saved",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+        return rejected
 
     # --- widget helpers copied from previous OptionsDialog (kept behavior) ---
     def _get_widget_val(self, widget):
