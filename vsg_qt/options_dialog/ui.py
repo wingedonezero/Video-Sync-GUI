@@ -149,5 +149,17 @@ class OptionsDialog(QDialog):
         self._ocr_tab.initialize_font_preview()
 
     def accept(self) -> None:
-        self._logic.save_to_config(self.config.settings)
+        rejected = self._logic.save_to_config(self.config.settings)
+        if rejected:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                self,
+                "Settings Warning",
+                f"{len(rejected)} setting(s) could not be saved "
+                f"(invalid values):\n\n"
+                + "\n".join(f"  • {k}" for k in rejected[:10])
+                + ("\n  ..." if len(rejected) > 10 else "")
+                + "\n\nThese settings kept their previous values.",
+            )
         super().accept()

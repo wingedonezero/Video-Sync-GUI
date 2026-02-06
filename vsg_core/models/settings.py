@@ -29,7 +29,40 @@ from pydantic import BaseModel, ConfigDict
 
 from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     AnalysisModeStr,
+    CorrAnchorFallbackStr,
+    CorrelationMethodSourceSepStr,
+    CorrelationMethodStr,
+    CorrelationSnapFallbackStr,
+    DeinterlaceMethodStr,
+    DelaySelectionModeStr,
+    DurationAlignFallbackStr,
+    FilteringMethodStr,
+    FrameComparisonMethodStr,
+    FrameHashAlgorithmStr,
+    InterlacedForceModeStr,
+    InterlacedHashAlgorithmStr,
+    OcrBinarizationMethodStr,
+    OcrEngineStr,
+    OcrOutputFormatStr,
+    ResampleEngineStr,
+    RubberbandTransientsStr,
+    SilenceDetectionMethodStr,
     SnapModeStr,
+    SourceSeparationDeviceStr,
+    SourceSeparationModeStr,
+    SteppingBoundaryModeStr,
+    SteppingCorrectionModeStr,
+    SteppingFillModeStr,
+    SteppingFilteredFallbackStr,
+    SteppingQualityModeStr,
+    SubAnchorFallbackStr,
+    SubtitleRoundingStr,
+    SubtitleSyncModeStr,
+    SyncModeStr,
+    SyncStabilityOutlierModeStr,
+    VideoSnapModeStr,
+    VideoTimestampsRoundingStr,
+    VideoTimestampsSnapModeStr,
 )
 
 # Sentinel for path defaults that need runtime resolution
@@ -75,8 +108,8 @@ class AppSettings(BaseModel):
     # Analysis Settings
     # =========================================================================
     analysis_mode: AnalysisModeStr = "Audio Correlation"
-    analysis_lang_source1: str | None = None
-    analysis_lang_others: str | None = None
+    analysis_lang_source1: str = ""
+    analysis_lang_others: str = ""
     scan_chunk_count: int = 10
     scan_chunk_duration: int = 15
     min_match_pct: float = 5.0
@@ -122,7 +155,7 @@ class AppSettings(BaseModel):
     # Timing Sync Settings
     # =========================================================================
     auto_apply_strict: bool = False
-    sync_mode: str = "positive_only"
+    sync_mode: SyncModeStr = "positive_only"
 
     # =========================================================================
     # Timing Fix Settings
@@ -143,36 +176,36 @@ class AppSettings(BaseModel):
     # =========================================================================
     # Subtitle Sync Settings
     # =========================================================================
-    subtitle_sync_mode: str = "time-based"
+    subtitle_sync_mode: SubtitleSyncModeStr = "time-based"
     time_based_use_raw_values: bool = False
     time_based_bypass_subtitle_data: bool = True
-    subtitle_rounding: str = "floor"
+    subtitle_rounding: SubtitleRoundingStr = "floor"
     subtitle_target_fps: float = 0.0
-    videotimestamps_snap_mode: str = "start"
-    videotimestamps_rounding: str = "round"
+    videotimestamps_snap_mode: VideoTimestampsSnapModeStr = "start"
+    videotimestamps_rounding: VideoTimestampsRoundingStr = "round"
 
     # =========================================================================
     # Frame Matching Settings (shared by all frame-based sync modes)
     # =========================================================================
-    frame_hash_algorithm: str = "dhash"
+    frame_hash_algorithm: FrameHashAlgorithmStr = "dhash"
     frame_hash_size: int = 8
     frame_hash_threshold: int = 5
     frame_window_radius: int = 5
     frame_search_range_ms: int = 2000
     frame_agreement_tolerance_ms: int = 100
     frame_use_vapoursynth: bool = True
-    frame_comparison_method: str = "hash"
+    frame_comparison_method: FrameComparisonMethodStr = "hash"
 
     # =========================================================================
     # Correlation Snap Settings
     # =========================================================================
-    correlation_snap_fallback_mode: str = "snap-to-frame"
+    correlation_snap_fallback_mode: CorrelationSnapFallbackStr = "snap-to-frame"
     correlation_snap_use_scene_changes: bool = True
 
     # =========================================================================
     # Correlation-Guided Frame Anchor Settings
     # =========================================================================
-    corr_anchor_fallback_mode: str = "use-correlation"
+    corr_anchor_fallback_mode: CorrAnchorFallbackStr = "use-correlation"
     corr_anchor_anchor_positions: list[int] = [10, 50, 90]
     corr_anchor_refine_per_line: bool = False
     corr_anchor_refine_workers: int = 4
@@ -180,14 +213,14 @@ class AppSettings(BaseModel):
     # =========================================================================
     # Subtitle-Anchored Frame Snap Settings
     # =========================================================================
-    sub_anchor_fallback_mode: str = "abort"
+    sub_anchor_fallback_mode: SubAnchorFallbackStr = "abort"
 
     # =========================================================================
     # Duration Align Settings
     # =========================================================================
     duration_align_verify_with_frames: bool = False
     duration_align_validate: bool = True
-    duration_align_fallback_mode: str = "duration-offset"
+    duration_align_fallback_mode: DurationAlignFallbackStr = "none"
     duration_align_validate_points: int = 3
     duration_align_strictness: int = 80
     duration_align_skip_validation_generated_tracks: bool = True
@@ -212,32 +245,34 @@ class AppSettings(BaseModel):
     # Interlaced Video Settings
     # =========================================================================
     interlaced_handling_enabled: bool = False
-    interlaced_force_mode: str = "auto"
+    interlaced_force_mode: InterlacedForceModeStr = "auto"
     interlaced_num_checkpoints: int = 5
     interlaced_search_range_frames: int = 5
-    interlaced_hash_algorithm: str = "ahash"
+    interlaced_hash_algorithm: InterlacedHashAlgorithmStr = "ahash"
     interlaced_hash_size: int = 8
     interlaced_hash_threshold: int = 25
-    interlaced_comparison_method: str = "ssim"
+    interlaced_comparison_method: FrameComparisonMethodStr = "ssim"
     interlaced_fallback_to_audio: bool = True
     interlaced_sequence_length: int = 5
-    interlaced_deinterlace_method: str = "bwdif"
+    interlaced_deinterlace_method: DeinterlaceMethodStr = "bwdif"
     interlaced_use_ivtc: bool = False
 
     # =========================================================================
     # Analysis/Correlation Settings
     # =========================================================================
-    source_separation_mode: str = "none"
+    source_separation_mode: SourceSeparationModeStr = "none"
     source_separation_model: str = "default"
-    source_separation_device: str = "auto"
+    source_separation_device: SourceSeparationDeviceStr = "auto"
     source_separation_timeout: int = 900
-    filtering_method: str = "Dialogue Band-Pass Filter"
-    correlation_method: str = "Phase Correlation (GCC-PHAT)"
-    correlation_method_source_separated: str = "Phase Correlation (GCC-PHAT)"
+    filtering_method: FilteringMethodStr = "Dialogue Band-Pass Filter"
+    correlation_method: CorrelationMethodStr = "Phase Correlation (GCC-PHAT)"
+    correlation_method_source_separated: CorrelationMethodSourceSepStr = (
+        "Phase Correlation (GCC-PHAT)"
+    )
 
     # Delay Selection Settings
-    delay_selection_mode: str = "Mode (Most Common)"
-    delay_selection_mode_source_separated: str = "Mode (Clustered)"
+    delay_selection_mode: DelaySelectionModeStr = "Mode (Most Common)"
+    delay_selection_mode_source_separated: DelaySelectionModeStr = "Mode (Clustered)"
     min_accepted_chunks: int = 3
     first_stable_min_chunks: int = 3
     first_stable_skip_unstable: bool = True
@@ -279,7 +314,7 @@ class AppSettings(BaseModel):
     # =========================================================================
     stepping_adjust_subtitles: bool = True
     stepping_adjust_subtitles_no_audio: bool = True
-    stepping_boundary_mode: str = "start"
+    stepping_boundary_mode: SteppingBoundaryModeStr = "start"
     stepping_first_stable_min_chunks: int = 3
     stepping_first_stable_skip_unstable: bool = True
 
@@ -304,7 +339,7 @@ class AppSettings(BaseModel):
 
     # Silence Snapping
     stepping_snap_to_silence: bool = True
-    stepping_silence_detection_method: str = "smart_fusion"
+    stepping_silence_detection_method: SilenceDetectionMethodStr = "smart_fusion"
     stepping_silence_search_window_s: float = 5.0
     stepping_silence_threshold_db: float = -40.0
     stepping_silence_min_duration_ms: float = 100.0
@@ -331,12 +366,12 @@ class AppSettings(BaseModel):
 
     # Video-Aware Boundary Snapping
     stepping_snap_to_video_frames: bool = False
-    stepping_video_snap_mode: str = "scenes"
+    stepping_video_snap_mode: VideoSnapModeStr = "scenes"
     stepping_video_snap_max_offset_s: float = 2.0
     stepping_video_scene_threshold: float = 0.4
 
     # Fill Mode & Content
-    stepping_fill_mode: str = "silence"
+    stepping_fill_mode: SteppingFillModeStr = "silence"
     stepping_content_correlation_threshold: float = 0.5
     stepping_content_search_window_s: float = 5.0
 
@@ -350,14 +385,14 @@ class AppSettings(BaseModel):
     stepping_audit_large_correction_s: float = 3.0
 
     # Filtered Stepping Correction
-    stepping_correction_mode: str = "full"
-    stepping_quality_mode: str = "normal"
+    stepping_correction_mode: SteppingCorrectionModeStr = "full"
+    stepping_quality_mode: SteppingQualityModeStr = "normal"
     stepping_min_chunks_per_cluster: int = 3
     stepping_min_cluster_percentage: float = 5.0
     stepping_min_cluster_duration_s: float = 20.0
     stepping_min_match_quality_pct: float = 85.0
     stepping_min_total_clusters: int = 2
-    stepping_filtered_fallback: str = "nearest"
+    stepping_filtered_fallback: SteppingFilteredFallbackStr = "nearest"
     stepping_diagnostics_verbose: bool = True
 
     # Segmented Audio QA
@@ -371,15 +406,15 @@ class AppSettings(BaseModel):
     sync_stability_enabled: bool = True
     sync_stability_variance_threshold: float = 0.0
     sync_stability_min_chunks: int = 3
-    sync_stability_outlier_mode: str = "any"
+    sync_stability_outlier_mode: SyncStabilityOutlierModeStr = "any"
     sync_stability_outlier_threshold: float = 1.0
 
     # =========================================================================
     # Resampling Engine Settings
     # =========================================================================
-    segment_resample_engine: str = "aresample"
+    segment_resample_engine: ResampleEngineStr = "aresample"
     segment_rb_pitch_correct: bool = False
-    segment_rb_transients: str = "crisp"
+    segment_rb_transients: RubberbandTransientsStr = "crisp"
     segment_rb_smoother: bool = True
     segment_rb_pitchq: bool = True
 
@@ -387,14 +422,14 @@ class AppSettings(BaseModel):
     # OCR Settings
     # =========================================================================
     ocr_enabled: bool = True
-    ocr_engine: str = "tesseract"
+    ocr_engine: OcrEngineStr = "tesseract"
     ocr_language: str = "eng"
     ocr_psm: int = 7
     ocr_char_whitelist: str = ""
     ocr_char_blacklist: str = "|"
     ocr_low_confidence_threshold: float = 60.0
     ocr_multi_pass: bool = True
-    ocr_output_format: str = "ass"
+    ocr_output_format: OcrOutputFormatStr = "ass"
 
     # OCR Preprocessing
     ocr_preprocess_auto: bool = True
@@ -402,7 +437,7 @@ class AppSettings(BaseModel):
     ocr_target_height: int = 80
     ocr_border_size: int = 5
     ocr_force_binarization: bool = False
-    ocr_binarization_method: str = "otsu"
+    ocr_binarization_method: OcrBinarizationMethodStr = "otsu"
     ocr_denoise: bool = False
     ocr_save_debug_images: bool = False
 

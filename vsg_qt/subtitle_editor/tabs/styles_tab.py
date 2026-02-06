@@ -214,12 +214,12 @@ class StylesTab(BaseTab):
         if not self._state:
             return
 
-        # Initialize favorites manager
-        from vsg_core.config import AppConfig
+        # Initialize favorites manager (standalone helper avoids creating
+        # a separate AppConfig instance that would re-read settings.json)
+        from vsg_core.config import get_config_dir_path
         from vsg_core.favorite_colors import FavoriteColorsManager
 
-        config = AppConfig()
-        self._favorites_manager = FavoriteColorsManager(config.get_config_dir())
+        self._favorites_manager = FavoriteColorsManager(get_config_dir_path())
 
         # Populate styles dropdown
         self._populate_styles()

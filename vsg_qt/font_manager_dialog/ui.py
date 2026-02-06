@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from vsg_core.config import AppConfig
 from vsg_core.font_manager import (
     FontReplacementManager,
     FontScanner,
@@ -50,6 +49,7 @@ class FontManagerDialog(QDialog):
         self,
         subtitle_path: str,
         current_replacements: dict[str, dict[str, Any]] | None = None,
+        fonts_dir: Path | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -57,9 +57,14 @@ class FontManagerDialog(QDialog):
         self.setWindowTitle("Font Manager")
         self.setMinimumSize(900, 600)
 
-        # Initialize managers
-        config = AppConfig()
-        self.fonts_dir = config.get_fonts_dir()
+        # Use caller-provided fonts_dir to avoid creating a separate AppConfig
+        # instance that would re-read settings.json independently.
+        if fonts_dir is not None:
+            self.fonts_dir = Path(fonts_dir)
+        else:
+            from vsg_core.config import get_fonts_dir_path
+
+            self.fonts_dir = get_fonts_dir_path()
         self.scanner = FontScanner(self.fonts_dir)
         self.analyzer = SubtitleFontAnalyzer(subtitle_path)
         self.replacement_manager = FontReplacementManager(self.fonts_dir)
