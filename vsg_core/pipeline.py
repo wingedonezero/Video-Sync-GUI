@@ -133,7 +133,7 @@ class JobPipeline:
                 attachment_sources=attachment_sources or [],
                 source_settings=source_settings or {},
             )
-            ctx_temp_dir = getattr(ctx, "temp_dir", None)
+            ctx_temp_dir = ctx.temp_dir
 
             # --- 6. Return Early if Analysis Only ---
             if not and_merge:
@@ -143,14 +143,10 @@ class JobPipeline:
                     status="Analyzed",
                     name=Path(source1_file).name,
                     delays=ctx.delays.source_delays_ms if ctx.delays else {},
-                    stepping_sources=getattr(ctx, "stepping_sources", []),
-                    stepping_detected_disabled=getattr(
-                        ctx, "stepping_detected_disabled", []
-                    ),
-                    stepping_detected_separated=getattr(
-                        ctx, "stepping_detected_separated", []
-                    ),
-                    sync_stability_issues=getattr(ctx, "sync_stability_issues", []),
+                    stepping_sources=ctx.stepping_sources,
+                    stepping_detected_disabled=ctx.stepping_detected_disabled,
+                    stepping_detected_separated=ctx.stepping_detected_separated,
+                    sync_stability_issues=ctx.sync_stability_issues,
                 )
 
             # --- 7. Validate Merge Tokens ---
@@ -203,15 +199,11 @@ class JobPipeline:
                 output=str(final_output_path),
                 delays=ctx.delays.source_delays_ms if ctx.delays else {},
                 issues=issues,
-                stepping_sources=getattr(ctx, "stepping_sources", []),
-                stepping_detected_disabled=getattr(
-                    ctx, "stepping_detected_disabled", []
-                ),
-                stepping_detected_separated=getattr(
-                    ctx, "stepping_detected_separated", []
-                ),
-                stepping_quality_issues=getattr(ctx, "stepping_quality_issues", []),
-                sync_stability_issues=getattr(ctx, "sync_stability_issues", []),
+                stepping_sources=ctx.stepping_sources,
+                stepping_detected_disabled=ctx.stepping_detected_disabled,
+                stepping_detected_separated=ctx.stepping_detected_separated,
+                stepping_quality_issues=ctx.stepping_quality_issues,
+                sync_stability_issues=ctx.sync_stability_issues,
             )
 
         except Exception as e:
