@@ -95,19 +95,6 @@ class MkvmergeOptionsBuilder:
             else:
                 reason = f"source_delays_ms[{sync_key}]"
 
-            # DIAGNOSTIC: Log the delay calculation for subtitle tracks
-            if tr.type == "subtitles":
-                raw_delay = (
-                    plan.delays.source_delays_ms.get(sync_key, 0) if plan.delays else 0
-                )
-                print(f"[MUX DEBUG] Subtitle track {tr.id} ({tr.source}):")
-                print(f"[MUX DEBUG]   sync_key={sync_key}, raw_delay={raw_delay}ms")
-                print(
-                    f"[MUX DEBUG]   stepping_adjusted={stepping_adj}, frame_adjusted={frame_adj}"
-                )
-                print(f"[MUX DEBUG]   final_delay_to_mkvmerge={delay_ms}ms")
-                print(f"[MUX DEBUG]   reason={reason}")
-
             # === AUDIT: Record mux track delay ===
             if audit:
                 raw_delay_available = None
