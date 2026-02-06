@@ -59,7 +59,11 @@ class CommandRunner:
             return None
 
         tool_name = cmd[0]
-        full_cmd = [tool_paths.get(tool_name, tool_name), *list(map(str, cmd[1:]))]
+        # Use `or` to handle None values from optional tools (shutil.which returns None)
+        # dict.get(key, default) returns None if the key exists with a None value,
+        # so we need `or` to fall back to the tool name for PATH lookup
+        resolved = tool_paths.get(tool_name) or tool_name
+        full_cmd = [resolved, *list(map(str, cmd[1:]))]
 
         try:
             pretty_cmd = " ".join(shlex.quote(str(c)) for c in full_cmd)

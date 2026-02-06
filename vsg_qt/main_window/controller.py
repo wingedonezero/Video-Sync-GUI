@@ -168,7 +168,14 @@ class MainController:
         )
         self.append_log(f"[Report] Created: {report_path}")
 
-        self.worker = JobWorker(self.config.settings, jobs, and_merge, output_dir)
+        # Create a snapshot copy of settings for the worker thread to avoid
+        # sharing the same AppSettings instance between the main thread and worker.
+        # Concurrent access to the shared object (even read-only) can cause segfaults
+        # in PySide6/shiboken6 when the GIL is released during C++ calls.
+        from vsg_core.models.settings import AppSettings
+
+        worker_settings = AppSettings.from_config(self.config.settings.to_dict())
+        self.worker = JobWorker(worker_settings, jobs, and_merge, output_dir)
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.progress.connect(self.update_progress)
         self.worker.signals.status.connect(self.update_status)
