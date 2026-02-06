@@ -63,8 +63,13 @@ class SubtitleEditorWindow(QDialog):
         existing_style_patch: dict | None = None,
         existing_filter_config: dict | None = None,
         parent=None,
+        temp_root: str | None = None,
+        user_fonts_dir: str | None = None,
     ):
         super().__init__(parent)
+
+        self._temp_root = temp_root
+        self._user_fonts_dir = Path(user_fonts_dir) if user_fonts_dir else None
 
         # Clean up old temp files from previous sessions (>1 hour old)
         self._cleanup_old_temp_files()
@@ -200,7 +205,11 @@ class SubtitleEditorWindow(QDialog):
         if fonts_tab:
             # Always set fonts_dir (even if None) to trigger font scanning
             # fonts_tab will create a temp dir if needed
-            fonts_tab.set_fonts_dir(self._fonts_dir)
+            fonts_tab.set_fonts_dir(
+                self._fonts_dir,
+                user_fonts_dir=self._user_fonts_dir,
+                temp_root=self._temp_root,
+            )
             fonts_tab.set_replacements(self._existing_replacements)
             # Get the actual fonts dir (may be temp dir created by fonts_tab)
             actual_fonts_dir = fonts_tab.get_fonts_dir()
@@ -290,11 +299,14 @@ class SubtitleEditorWindow(QDialog):
 
     def _cleanup_old_temp_files(self) -> None:
         """Clean up old temp files from previous editor sessions."""
+        if not self._temp_root:
+            return
         try:
-            from vsg_core.config import AppConfig
+            from vsg_core.config import cleanup_old_style_editor_temp_files
 
-            config = AppConfig()
-            cleaned = config.cleanup_old_style_editor_temp(max_age_hours=1.0)
+            cleaned = cleanup_old_style_editor_temp_files(
+                self._temp_root, max_age_hours=1.0
+            )
             if cleaned > 0:
                 print(f"[SubtitleEditor] Cleaned up {cleaned} old temp item(s)")
         except Exception as e:

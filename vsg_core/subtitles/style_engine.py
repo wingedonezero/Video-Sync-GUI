@@ -12,8 +12,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from vsg_core.config import AppConfig
-
 from .data import SubtitleData, SubtitleStyle
 
 # =============================================================================
@@ -84,25 +82,26 @@ class StyleEngine:
     using the SubtitleData system.
     """
 
-    def __init__(self, subtitle_path: str, temp_dir: Path | None = None):
+    def __init__(self, subtitle_path: str, temp_dir: Path | str | None = None):
         """
         Initialize the style engine.
 
         Args:
             subtitle_path: Path to the subtitle file
-            temp_dir: Optional temp directory for preview files.
-                      If not provided, uses config's style_editor_temp directory.
+            temp_dir: Temp directory for preview files.
+                      Callers should pass this from settings.temp_root or
+                      config.get_style_editor_temp_dir().
         """
         self.path = Path(subtitle_path)
         self.data: SubtitleData | None = None
         self._temp_file: Path | None = None
 
-        # Use provided temp_dir or get from config
         if temp_dir:
             self._temp_dir = Path(temp_dir)
         else:
-            config = AppConfig()
-            self._temp_dir = config.get_style_editor_temp_dir()
+            # Fallback: use a sibling directory next to the subtitle file
+            self._temp_dir = self.path.parent / ".style_editor_temp"
+            self._temp_dir.mkdir(parents=True, exist_ok=True)
 
         self.load()
 
