@@ -446,11 +446,11 @@ Pydantic will automatically validate on load and assignment.
 **Risk:** Low — read-only comparison against JSON file.
 **Size:** Small
 
-### Commit 5: Centralize AppConfig — remove duplicate instantiations
-**Files:** `vsg_qt/font_manager_dialog/ui.py`, `vsg_qt/subtitle_editor/tabs/styles_tab.py`
-**What:** Instead of `config = AppConfig()`, accept config as constructor parameter or access it from parent widget chain.
-**Risk:** Medium — requires threading the config through to those dialogs. Must ensure the main window's config instance is accessible.
-**Size:** Medium
+### Commit 5: Centralize AppConfig — remove duplicate instantiations ✅ DONE
+**Files:** `vsg_core/config.py`, `vsg_qt/font_manager_dialog/ui.py`, `vsg_qt/subtitle_editor/tabs/styles_tab.py`
+**What:** Added standalone `get_config_dir_path()` and `get_fonts_dir_path()` helpers to `config.py`. `StylesTab` now uses `get_config_dir_path()` instead of `AppConfig()`. `FontManagerDialog` accepts `fonts_dir` as parameter, falls back to `get_fonts_dir_path()`.
+**Risk:** Low — standalone helpers compute the same paths without loading settings.
+**Size:** Small
 
 ### Commit 6: Add explicit warnings for unvalidated settings on load
 **Files:** `vsg_core/config.py`

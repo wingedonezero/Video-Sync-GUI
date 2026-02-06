@@ -29,12 +29,32 @@ from pydantic import ValidationError
 from vsg_core.models import AppSettings
 
 # =====================================================================
-# Standalone temp directory helpers
+# Standalone path helpers
 #
-# These functions only need a temp_root path (from settings.temp_root).
 # Use these instead of instantiating AppConfig when you only need
-# temp dir operations (e.g., on the worker thread or in vsg_core code).
+# a path (e.g., config_dir, fonts_dir, temp operations).
 # =====================================================================
+
+# Project root — same value as AppConfig.script_dir, computed once.
+_script_dir = Path(__file__).resolve().parent.parent
+
+
+def get_config_dir_path() -> Path:
+    """Return the .config directory path without instantiating AppConfig."""
+    return _script_dir / ".config"
+
+
+def get_fonts_dir_path(fonts_directory_setting: str = "") -> Path:
+    """Return the fonts directory without instantiating AppConfig.
+
+    Args:
+        fonts_directory_setting: Value of the ``fonts_directory`` setting.
+            Pass this when available to honour user overrides; omit or pass
+            ``""`` to fall back to the default location.
+    """
+    if fonts_directory_setting and Path(fonts_directory_setting).exists():
+        return Path(fonts_directory_setting)
+    return _script_dir / ".config" / "fonts"
 
 
 def get_style_editor_temp_path(temp_root: str | Path) -> Path:
