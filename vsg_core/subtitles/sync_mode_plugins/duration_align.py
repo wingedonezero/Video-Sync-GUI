@@ -177,7 +177,7 @@ class DurationAlignSync(SyncPlugin):
                         source_video,
                         source_fps,
                         runner,
-                        settings.to_dict(),
+                        settings,
                     )
 
                 if target_duration_ms is None:
@@ -206,7 +206,7 @@ class DurationAlignSync(SyncPlugin):
                         target_video,
                         target_fps_detected or target_fps,
                         runner,
-                        settings.to_dict(),
+                        settings,
                     )
 
             except Exception as e:
@@ -258,7 +258,7 @@ class DurationAlignSync(SyncPlugin):
                 wrapped_events,
                 duration_offset_ms,
                 runner,
-                settings.to_dict(),
+                settings,
             )
 
             if validation_result.get("valid"):
@@ -295,7 +295,7 @@ class DurationAlignSync(SyncPlugin):
                 wrapped_events,
                 duration_offset_ms,
                 runner,
-                settings.to_dict(),
+                settings,
                 temp_dir,
             )
 

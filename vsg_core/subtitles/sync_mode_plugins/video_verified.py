@@ -216,8 +216,6 @@ def calculate_video_verified_offset(
     try:
         # Determine processing for each video independently
         # This allows: telecine source + progressive target, etc.
-        config_dict = settings.to_dict()
-
         # Source video processing
         source_content_type = source_props.get("content_type", "progressive")
         source_apply_ivtc = (
@@ -268,7 +266,7 @@ def calculate_video_verified_offset(
             deinterlace=source_deinterlace,
             content_type=source_content_type,
             apply_ivtc=source_apply_ivtc,
-            config=config_dict,
+            settings=settings,
         )
         target_reader = VideoReader(
             target_video,
@@ -277,7 +275,7 @@ def calculate_video_verified_offset(
             deinterlace=target_deinterlace,
             content_type=target_content_type,
             apply_ivtc=target_apply_ivtc,
-            config=config_dict,
+            settings=settings,
         )
 
         # Get processed FPS from readers (after IVTC/deinterlace)

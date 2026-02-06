@@ -156,7 +156,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
                     pure_correlation_ms,
                     fps,
                     runner,
-                    settings.to_dict(),
+                    settings,
                 )
 
                 if verification_result.get("valid"):
