@@ -239,13 +239,14 @@ class VideoReader:
         settings: AppSettings | None = None,
         content_type: str | None = None,
         apply_ivtc: bool = False,
-        **kwargs,
+        use_vapoursynth: bool = True,
     ):
         self.video_path = video_path
         self.runner = runner
         self.vs_clip = None  # VapourSynth clip
         self.source = None  # FFMS2 source
         self.cap = None  # OpenCV capture
+        self._use_vapoursynth_requested = use_vapoursynth
         self.use_vapoursynth = False
         self.use_ffms2 = False
         self.use_opencv = False
@@ -269,7 +270,7 @@ class VideoReader:
         self._detect_interlacing()
 
         # Try VapourSynth first (fastest - persistent index caching)
-        if self._try_vapoursynth():
+        if self._use_vapoursynth_requested and self._try_vapoursynth():
             return
 
         # Try FFMS2 second (fast but re-indexes each time)
