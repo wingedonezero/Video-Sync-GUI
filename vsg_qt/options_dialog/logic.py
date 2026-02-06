@@ -23,11 +23,16 @@ class OptionsLogic:
                 self._set_widget_val(widget, value)
 
     def save_to_config(self, cfg: AppSettings) -> None:
+        from pydantic import ValidationError
+
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 value = self._get_widget_val(widget)
                 if hasattr(cfg, key):
-                    setattr(cfg, key, value)
+                    try:
+                        setattr(cfg, key, value)
+                    except ValidationError:
+                        pass  # Keep previous value if widget sends invalid data
 
     # --- widget helpers copied from previous OptionsDialog (kept behavior) ---
     def _get_widget_val(self, widget):

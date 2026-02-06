@@ -24,6 +24,8 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from vsg_core.models import AppSettings
 
 # =====================================================================
@@ -230,7 +232,13 @@ class AppConfig:
                 # Pydantic handles all type coercion and validation
                 self.settings = AppSettings.from_config(loaded_settings)
 
-            except (OSError, json.JSONDecodeError):
+            except (OSError, json.JSONDecodeError, ValidationError) as e:
+                if isinstance(e, ValidationError):
+                    warnings.warn(
+                        f"Settings validation failed, resetting to defaults: {e}",
+                        UserWarning,
+                        stacklevel=2,
+                    )
                 self.settings = AppSettings.from_config(self.defaults)
                 changed = True
         else:
@@ -281,14 +289,28 @@ class AppConfig:
         # Use getattr to access AppSettings fields
         return getattr(self.settings, key, default)
 
-    def set(self, key: str, value: Any):
+    def set(self, key: str, value: Any) -> bool:
         """
         Sets a config value on the AppSettings model.
 
         Pydantic's validate_assignment handles type coercion and validation.
+        If the value fails validation, a warning is emitted and the field
+        keeps its previous value.
+
+        Returns:
+            True if the value was set, False if validation rejected it.
         """
-        # Pydantic validates on setattr due to validate_assignment=True
-        setattr(self.settings, key, value)
+        try:
+            setattr(self.settings, key, value)
+            return True
+        except ValidationError:
+            warnings.warn(
+                f"Config key '{key}' rejected value {value!r} (validation failed). "
+                f"Keeping previous value: {getattr(self.settings, key, None)!r}",
+                UserWarning,
+                stacklevel=2,
+            )
+            return False
 
     def validate_all(self) -> list[str]:
         """
