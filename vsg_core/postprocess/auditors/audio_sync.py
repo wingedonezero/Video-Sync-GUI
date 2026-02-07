@@ -3,7 +3,6 @@ import json
 import math
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -42,9 +41,7 @@ class AudioSyncAuditor(BaseAuditor):
 
         # Build a mapping of track index to plan item
         audio_plan_items = [
-            item
-            for item in self.ctx.extracted_items
-            if item.track.type == "audio"
+            item for item in self.ctx.extracted_items if item.track.type == "audio"
         ]
 
         # Get audio tracks from final file
@@ -63,6 +60,10 @@ class AudioSyncAuditor(BaseAuditor):
             # Calculate what the delay SHOULD be
             expected_delay_ms = self._calculate_expected_delay(plan_item)
 
+            # Get sample rate from container for accurate frame size calculation
+            track_props = final_track.get("properties", {})
+            sample_rate = track_props.get("audio_sampling_frequency", 48000)
+
             # Method 1: Check codec_delay metadata (primary method)
             issues += self._verify_codec_delay(
                 plan_item, final_track, expected_delay_ms, i
@@ -70,7 +71,7 @@ class AudioSyncAuditor(BaseAuditor):
 
             # Method 2: Check first packet timestamp (secondary verification)
             issues += self._verify_first_packet_timestamp(
-                final_mkv_path, i, expected_delay_ms, plan_item
+                final_mkv_path, i, expected_delay_ms, plan_item, sample_rate
             )
 
         if issues == 0:
@@ -117,11 +118,12 @@ class AudioSyncAuditor(BaseAuditor):
         # Special handling for negative delays in allow_negative mode
         # mkvmerge cuts frames, so we need to calculate what the ACTUAL delay will be
         if sync_mode == "allow_negative" and expected_delay_ms < 0:
-            # Determine codec frame size
-            frame_size_ms = self._get_codec_frame_size_ms(codec_id)
+            # Get sample rate from container properties (default 48kHz)
+            sample_rate = props.get("audio_sampling_frequency", 48000)
+            samples_per_frame = self._get_codec_samples_per_frame(codec_id)
 
-            if frame_size_ms is not None:
-                if frame_size_ms == 0:
+            if samples_per_frame is not None:
+                if samples_per_frame == 0:
                     # Sample-accurate codecs (PCM, FLAC) - no frame cutting math needed
                     self.log(
                         f"  ⓘ '{name}' ({source}) is sample-accurate codec ({codec_id})"
@@ -131,6 +133,10 @@ class AudioSyncAuditor(BaseAuditor):
                     )
                     tolerance_ms = 1.0
                 else:
+                    # Calculate exact frame size from samples/sample_rate
+                    frame_size_ms = samples_per_frame / sample_rate * 1000
+                    flat_frame_ms = round(frame_size_ms, 2)
+
                     # Calculate what mkvmerge will actually do:
                     # 1. Calculate frames to cut: abs(delay) / frame_size
                     # 2. mkvmerge rounds UP (uses ceil) to be conservative
@@ -140,16 +146,26 @@ class AudioSyncAuditor(BaseAuditor):
                     # 3. Actual delay after cutting = original_delay + frames_cut
                     # (cutting frames makes audio start later, so it's additive)
                     calculated_actual_delay = expected_delay_ms + frames_cut_ms
+                    # Matroska truncates to integer ms (TimestampScale = 1ms)
+                    matroska_delay_ms = int(calculated_actual_delay)
 
                     self.log(
                         f"  ⓘ '{name}' ({source}) negative delay calculation (codec: {codec_id}):"
                     )
                     self.log(f"     Requested delay: {expected_delay_ms:+.1f}ms")
-                    self.log(f"     Frame size: {frame_size_ms:.2f}ms")
-                    self.log(f"     Frames to cut: {frames_to_cut}")
-                    self.log(f"     Frames cut: {frames_cut_ms:.1f}ms")
                     self.log(
-                        f"     Calculated actual delay: {calculated_actual_delay:+.1f}ms"
+                        f"     Frame size: {flat_frame_ms}ms"
+                        f" ({samples_per_frame} samples @ {sample_rate}Hz"
+                        f" = {frame_size_ms:.6f}ms)"
+                    )
+                    self.log(f"     Frames to cut: {frames_to_cut}")
+                    self.log(
+                        f"     Frames cut: {flat_frame_ms * frames_to_cut:.1f}ms"
+                        f" (exact: {frames_cut_ms:.3f}ms)"
+                    )
+                    self.log(
+                        f"     Calculated actual delay: {calculated_actual_delay:+.3f}ms"
+                        f" (Matroska: {matroska_delay_ms:+d}ms)"
                     )
 
                     # Now compare against the calculated value, not the requested value
@@ -158,7 +174,8 @@ class AudioSyncAuditor(BaseAuditor):
 
                     if diff_ms <= tolerance_ms:
                         self.log(
-                            f"  ✓ '{name}' ({source}) metadata: {actual_delay_ms:+.1f}ms (matches calculated {calculated_actual_delay:+.1f}ms)"
+                            f"  ✓ '{name}' ({source}) metadata: {actual_delay_ms:+.1f}ms"
+                            f" (matches calculated {calculated_actual_delay:+.3f}ms)"
                         )
                         return 0
                     else:
@@ -169,7 +186,8 @@ class AudioSyncAuditor(BaseAuditor):
                             f"          Expected delay: {expected_delay_ms:+.1f}ms (requested)"
                         )
                         self.log(
-                            f"          Calculated delay: {calculated_actual_delay:+.1f}ms (after frame cutting)"
+                            f"          Calculated delay: {calculated_actual_delay:+.3f}ms"
+                            f" (Matroska: {matroska_delay_ms:+d}ms)"
                         )
                         self.log(f"          Actual delay:   {actual_delay_ms:+.1f}ms")
                         self.log(f"          Difference:     {diff_ms:.1f}ms")
@@ -231,6 +249,7 @@ class AudioSyncAuditor(BaseAuditor):
         audio_track_index: int,
         expected_delay_ms: float,
         plan_item,
+        sample_rate: int = 48000,
     ) -> int:
         """
         Secondary verification: Check the timestamp of the first audio packet.
@@ -289,14 +308,16 @@ class AudioSyncAuditor(BaseAuditor):
             # Special handling for negative delays in allow_negative mode
             # mkvmerge cuts frames, so we need to calculate what the ACTUAL delay will be
             if sync_mode == "allow_negative" and expected_delay_ms < 0:
-                # Determine codec frame size
-                frame_size_ms = self._get_codec_frame_size_ms(codec_id)
+                samples_per_frame = self._get_codec_samples_per_frame(codec_id)
 
-                if frame_size_ms is not None:
-                    if frame_size_ms == 0:
+                if samples_per_frame is not None:
+                    if samples_per_frame == 0:
                         # Sample-accurate codecs (PCM, FLAC) - delay should be exact
                         tolerance_ms = 1.0
                     else:
+                        # Calculate exact frame size from samples/sample_rate
+                        frame_size_ms = samples_per_frame / sample_rate * 1000
+
                         # Calculate what mkvmerge will actually do
                         frames_to_cut = math.ceil(
                             abs(expected_delay_ms) / frame_size_ms
@@ -310,10 +331,14 @@ class AudioSyncAuditor(BaseAuditor):
 
                         if diff_ms <= tolerance_ms:
                             self.log(
-                                f"  ✓ '{name}' ({source}) first packet: {first_pts_ms:+.1f}ms (matches calculated {calculated_actual_delay:+.1f}ms)"
+                                f"  ✓ '{name}' ({source}) first packet:"
+                                f" {first_pts_ms:+.1f}ms"
+                                f" (matches calculated"
+                                f" {calculated_actual_delay:+.3f}ms)"
                             )
                             return 0
                         else:
+                            matroska_delay_ms = int(calculated_actual_delay)
                             self.log(
                                 f"[WARNING] Audio sync mismatch (packet timestamp) for '{name}' ({source}):"
                             )
@@ -321,7 +346,9 @@ class AudioSyncAuditor(BaseAuditor):
                                 f"          Expected delay: {expected_delay_ms:+.1f}ms (requested)"
                             )
                             self.log(
-                                f"          Calculated delay: {calculated_actual_delay:+.1f}ms (after frame cutting)"
+                                f"          Calculated delay:"
+                                f" {calculated_actual_delay:+.3f}ms"
+                                f" (Matroska: {matroska_delay_ms:+d}ms)"
                             )
                             self.log(
                                 f"          Actual first packet at:  {first_pts_ms:+.1f}ms"
@@ -381,66 +408,66 @@ class AudioSyncAuditor(BaseAuditor):
 
         return issues
 
-    def _get_codec_frame_size_ms(self, codec_id: str) -> float | None:
+    def _get_codec_samples_per_frame(self, codec_id: str) -> int | None:
         """
-        Returns the frame size in milliseconds for a given codec, or None if unknown.
+        Returns the number of samples per audio frame for a given codec.
 
         Returns 0 for sample-accurate codecs (PCM, FLAC) that have no frame boundaries.
-        This is used to calculate the expected delay after mkvmerge cuts frames for
-        negative delays in allow_negative mode.
-
-        Frame sizes are based on typical configurations at 48kHz sample rate.
+        Returns None for unknown codecs.
         """
         codec_upper = codec_id.upper()
 
         # Lossy compressed formats with fixed frame sizes
         if "AC3" in codec_upper or "EAC3" in codec_upper:
-            # AC3/EAC3: 1536 samples @ 48kHz = 32ms
-            return 32.0
+            return 1536  # AC3/EAC3: 1536 samples per frame
 
         if "DTS" in codec_upper:
-            # DTS Core: 512 samples @ 48kHz = 10.67ms
-            # DTS-HD uses same base frame size
-            return 10.67
+            return 512  # DTS Core/DTS-HD: 512 samples per frame
 
         if "TRUEHD" in codec_upper or "MLP" in codec_upper:
-            # TrueHD/MLP: 40 samples @ 48kHz = 0.83ms
-            return 0.83
+            return 40  # TrueHD/MLP: 40 samples per frame
 
         if "AAC" in codec_upper:
-            # AAC: 1024 samples @ 48kHz = 21.33ms (standard AAC)
-            # HE-AAC uses 2048 samples but we use conservative value
-            return 21.33
+            return 1024  # AAC-LC: 1024 samples per frame
 
         if "MP3" in codec_upper or ("MPEG" in codec_upper and "L3" in codec_upper):
-            # MP3: 1152 samples, ~24ms @ 48kHz, ~26ms @ 44.1kHz
-            # Use conservative value for 44.1kHz which is more common
-            return 26.0
+            return 1152  # MP3: 1152 samples per frame
 
         if "OPUS" in codec_upper:
-            # Opus: Default 20ms frames (can be 2.5-60ms but 20ms is standard)
-            return 20.0
+            return 960  # Opus: 960 samples @ 48kHz (20ms default)
 
         if "VORBIS" in codec_upper:
-            # Vorbis: Variable, typically 2048 samples @ 48kHz = 42.67ms
-            return 42.67
+            return 2048  # Vorbis: typically 2048 samples per frame
 
         # Lossless/sample-accurate formats - return 0 to indicate no frame boundaries
         if "FLAC" in codec_upper:
-            # FLAC: Sample-accurate, no fixed frame boundaries for cutting
-            return 0.0
+            return 0
 
         if "PCM" in codec_upper or codec_upper.startswith("A_PCM"):
-            # PCM: Sample-accurate
-            return 0.0
+            return 0
 
         if "ALAC" in codec_upper:
-            # Apple Lossless: Sample-accurate like FLAC
-            return 0.0
+            return 0
 
         if "WAV" in codec_upper:
-            # WAV/PCM: Sample-accurate
-            return 0.0
+            return 0
 
-        # Unknown codec - return None so caller can use generous tolerance
+        # Unknown codec
         return None
+
+    def _get_codec_frame_size_ms(
+        self, codec_id: str, sample_rate: int = 48000
+    ) -> float | None:
+        """
+        Returns the exact frame size in milliseconds for a given codec.
+
+        Uses samples_per_frame / sample_rate * 1000 for precise calculation.
+        Returns 0 for sample-accurate codecs (PCM, FLAC).
+        Returns None for unknown codecs.
+        """
+        samples = self._get_codec_samples_per_frame(codec_id)
+        if samples is None:
+            return None
+        if samples == 0:
+            return 0.0
+        return samples / sample_rate * 1000
