@@ -158,17 +158,6 @@ class AppSettings(BaseModel):
     sync_mode: SyncModeStr = "positive_only"
 
     # =========================================================================
-    # Timing Fix Settings
-    # =========================================================================
-    timing_fix_enabled: bool = False
-    timing_fix_overlaps: bool = True
-    timing_overlap_min_gap_ms: int = 1
-    timing_fix_short_durations: bool = True
-    timing_min_duration_ms: int = 500
-    timing_fix_long_durations: bool = True
-    timing_max_cps: float = 20.0
-
-    # =========================================================================
     # Segmented Audio Correction
     # =========================================================================
     segmented_enabled: bool = False
@@ -449,7 +438,6 @@ class AppSettings(BaseModel):
 
     # OCR Post-Processing
     ocr_cleanup_enabled: bool = True
-    ocr_cleanup_normalize_ellipsis: bool = False
     ocr_custom_wordlist_path: str = ""
 
     # OCR Debug & Runtime
