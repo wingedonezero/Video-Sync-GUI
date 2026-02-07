@@ -157,6 +157,16 @@ class SubtitleWriter:
             f"{self.config.shadow_depth},8,10,10,{self.config.margin_v},1"
         )
         lines.append(top_style_line)
+
+        # Middle-center style (for mid-screen signs/text, alignment 5 = center)
+        middle_style_line = (
+            f"Style: Middle,{self.config.font_name},"
+            f"{self.config.font_size},{self.config.primary_color},"
+            f"&H000000FF,{self.config.outline_color},&H00000000,"
+            f"0,0,0,0,100,100,0,0,1,{self.config.outline_width},"
+            f"{self.config.shadow_depth},5,10,10,0,1"
+        )
+        lines.append(middle_style_line)
         lines.append("")
 
         # Events section
@@ -182,22 +192,30 @@ class SubtitleWriter:
                     region_text = self._escape_ass_text(
                         "\n".join(lr.text for lr in region_lines)
                     )
-                    style = "Top" if region == "top" else self.config.style_name
+                    if region == "top":
+                        style = "Top"
+                    elif region == "middle":
+                        style = "Middle"
+                    else:
+                        style = self.config.style_name
                     dialogue = (
                         f"Dialogue: 0,{start},{end},{style},,0,0,0,,{region_text}"
                     )
                     lines.append(dialogue)
-            elif (
-                self.config.preserve_positions
-                and sub.line_regions
-                and all(lr.region == "top" for lr in sub.line_regions)
-            ):
-                # All lines are top-positioned
+            elif self.config.preserve_positions and sub.line_regions:
+                # All lines in the same non-bottom region
+                region = sub.line_regions[0].region
                 text = self._escape_ass_text(sub.text)
-                dialogue = f"Dialogue: 0,{start},{end},Top,,0,0,0,,{text}"
+                if region == "top":
+                    style = "Top"
+                elif region == "middle":
+                    style = "Middle"
+                else:
+                    style = self.config.style_name
+                dialogue = f"Dialogue: 0,{start},{end},{style},,0,0,0,,{text}"
                 lines.append(dialogue)
             else:
-                # Default: bottom-aligned (no line_regions or all bottom)
+                # Default: bottom-aligned (no line_regions or preserve disabled)
                 text = self._escape_ass_text(sub.text)
                 dialogue = (
                     f"Dialogue: 0,{start},{end},{self.config.style_name},,0,0,0,,{text}"
