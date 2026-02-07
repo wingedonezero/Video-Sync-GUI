@@ -1234,8 +1234,10 @@ class VideoVerifiedSync(SyncPlugin):
         video_offset_ms = details.get("video_offset_ms", pure_correlation_ms)
         selection_reason = details.get("reason", "unknown")
 
-        # Generate job name from target video
-        job_name = Path(target_video).stem if target_video else "unknown"
+        # Generate job name from target video + track label for unique audit filenames
+        video_stem = Path(target_video).stem if target_video else "unknown"
+        track_label = kwargs.get("track_label", "")
+        job_name = f"{video_stem}_{track_label}" if track_label else video_stem
 
         return self._apply_offset(
             subtitle_data,
