@@ -52,6 +52,7 @@ class OCRLineResult:
     word_confidences: list[tuple[str, float]] = field(default_factory=list)
     psm_used: int = 7
     was_retry: bool = False
+    y_center: float = 0.0  # Y center of this line within the source image (pixels)
 
 
 @dataclass(slots=True)

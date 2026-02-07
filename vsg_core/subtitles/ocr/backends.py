@@ -27,6 +27,7 @@ class OCRLineResult:
     confidence: float  # 0-100 scale
     word_confidences: list[tuple[str, float]] = field(default_factory=list)
     backend: str = "unknown"
+    y_center: float = 0.0  # Y center of this line within the source image (pixels)
 
 
 @dataclass(slots=True)
@@ -479,6 +480,7 @@ class EasyOCRBackend(OCRBackend):
                 line_conf = (
                     sum(d["conf"] for d in detection_data) / len(detection_data) * 100.0
                 )
+                avg_y = sum(d["y_center"] for d in detection_data) / len(detection_data)
 
                 line = OCRLineResult(
                     text=line_text,
@@ -487,6 +489,7 @@ class EasyOCRBackend(OCRBackend):
                         (d["text"], d["conf"] * 100.0) for d in detection_data
                     ],
                     backend=self.name,
+                    y_center=avg_y,
                 )
 
                 result.lines = [line]
@@ -537,11 +540,15 @@ class EasyOCRBackend(OCRBackend):
                 # Calculate average confidence for the line
                 line_conf = sum(d["conf"] for d in group) / len(group) * 100.0
 
+                # Average Y center for all detections in this line group
+                group_y = sum(d["y_center"] for d in group) / len(group)
+
                 line = OCRLineResult(
                     text=line_text,
                     confidence=line_conf,
                     word_confidences=[(d["text"], d["conf"] * 100.0) for d in group],
                     backend=self.name,
+                    y_center=group_y,
                 )
                 lines.append(line)
 
@@ -900,6 +907,7 @@ class PaddleOCRBackend(OCRBackend):
                 line_conf = (
                     sum(d["conf"] for d in detection_data) / len(detection_data) * 100.0
                 )
+                avg_y = sum(d["y_center"] for d in detection_data) / len(detection_data)
 
                 line = OCRLineResult(
                     text=line_text,
@@ -908,6 +916,7 @@ class PaddleOCRBackend(OCRBackend):
                         (d["text"], d["conf"] * 100.0) for d in detection_data
                     ],
                     backend=self.name,
+                    y_center=avg_y,
                 )
 
                 result.lines = [line]
@@ -958,11 +967,15 @@ class PaddleOCRBackend(OCRBackend):
                 # Calculate average confidence for the line
                 line_conf = sum(d["conf"] for d in group) / len(group) * 100.0
 
+                # Average Y center for all detections in this line group
+                group_y = sum(d["y_center"] for d in group) / len(group)
+
                 line = OCRLineResult(
                     text=line_text,
                     confidence=line_conf,
                     word_confidences=[(d["text"], d["conf"] * 100.0) for d in group],
                     backend=self.name,
+                    y_center=group_y,
                 )
                 lines.append(line)
 
