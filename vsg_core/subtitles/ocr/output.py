@@ -7,9 +7,13 @@ The actual ASS/SRT file writing is handled by the shared writers in
 vsg_core/subtitles/writers/ (ass_writer.py, srt_writer.py).
 
 Position handling:
-    - Bottom subtitles (> threshold): Default style (alignment 2)
-    - Top subtitles (< 25%): Top style (alignment 8)
-    - Middle subtitles: Middle style (alignment 5)
+    - Bottom subtitles (default): Default style (alignment 2)
+    - Top subtitles (< 40% of frame): Top style (alignment 8)
+    Anime VobSub only uses top/bottom positioning in practice.
+
+Post-processing:
+    - Consecutive Top events with identical text are merged to prevent
+      flickering when VobSub re-emits the same sign across multiple images.
 """
 
 from dataclasses import dataclass, field
@@ -27,7 +31,7 @@ class OutputConfig:
     # Position handling
     preserve_positions: bool = True
     bottom_threshold_percent: float = 75.0  # Below this = not bottom
-    top_threshold_percent: float = 25.0  # Above this = top
+    top_threshold_percent: float = 40.0  # Below this = top
 
     # ASS style settings
     style_name: str = "Default"
@@ -49,7 +53,7 @@ class LineRegion:
     """A single OCR line with its classified screen region."""
 
     text: str
-    region: str  # "top", "middle", or "bottom"
+    region: str  # "top" or "bottom"
     y_center: float = 0.0  # Y center in source image pixels
 
 
@@ -179,24 +183,10 @@ def create_subtitle_data_from_ocr(
         margin_v=config.margin_v,
     )
 
-    # Create middle style for mid-screen text (signs, etc.)
-    middle_style = SubtitleStyle(
-        name="Middle",
-        fontname=config.font_name,
-        fontsize=float(config.font_size),
-        primary_color=config.primary_color,
-        outline_color=config.outline_color,
-        outline=config.outline_width,
-        shadow=config.shadow_depth,
-        alignment=5,  # Middle center
-        margin_v=0,
-    )
-
     data.styles = OrderedDict(
         [
             ("Default", default_style),
             ("Top", top_style),
-            ("Middle", middle_style),
         ]
     )
 
@@ -207,8 +197,8 @@ def create_subtitle_data_from_ocr(
     unknown_words_map: dict = {}  # word -> first occurrence info
     positioned_count = 0
 
-    # Region-to-style mapping
-    _region_styles = {"top": "Top", "middle": "Middle", "bottom": "Default"}
+    # Region-to-style mapping (top/bottom only — anime VobSub standard)
+    _region_styles = {"top": "Top", "bottom": "Default"}
 
     # Convert each OCR result to SubtitleEvent(s)
     for result in ocr_results:
@@ -244,7 +234,7 @@ def create_subtitle_data_from_ocr(
             for lr in result.line_regions:
                 region_groups.setdefault(lr.region, []).append(lr)
 
-            for region in ("top", "middle", "bottom"):
+            for region in ("top", "bottom"):
                 if region not in region_groups:
                     continue
                 region_text = "\\N".join(lr.text for lr in region_groups[region])
@@ -325,4 +315,58 @@ def create_subtitle_data_from_ocr(
         unknown_words=list(unknown_words_map.values()),
     )
 
+    # Merge consecutive Top events with identical text to prevent flickering.
+    # VobSub re-emits the same top text (signs, titles) each time the bottom
+    # dialogue changes, creating duplicate Top events with tiny gaps.
+    if config.preserve_positions:
+        _merge_consecutive_top_events(data.events)
+
     return data
+
+
+def _merge_consecutive_top_events(events: list) -> None:
+    """
+    Merge consecutive Top-styled events that have identical text.
+
+    VobSub creates a new image each time bottom dialogue changes, even when
+    top text (signs, titles) stays the same. This produces duplicate Top
+    events with tiny gaps that cause flickering in players.
+
+    Merges in-place: extends the first event's end_ms to cover all
+    consecutive duplicates, then removes the duplicates.
+
+    Uses a max gap of 200ms — anything larger likely means the sign
+    actually disappeared and reappeared.
+    """
+    max_gap_ms = 200.0
+    to_remove: list[int] = []
+    i = 0
+    while i < len(events):
+        if events[i].style != "Top":
+            i += 1
+            continue
+
+        # Found a Top event — look ahead for consecutive duplicates
+        j = i + 1
+        while j < len(events):
+            if (
+                events[j].style == "Top"
+                and events[j].text == events[i].text
+                and events[j].start_ms - events[i].end_ms <= max_gap_ms
+            ):
+                # Extend the first event to cover this duplicate
+                events[i].end_ms = max(events[i].end_ms, events[j].end_ms)
+                to_remove.append(j)
+                j += 1
+            elif events[j].style == "Top":
+                # Different Top text or too large a gap — stop
+                break
+            else:
+                # Skip non-Top events (Default dialogue between Top events)
+                j += 1
+
+        i = j if j > i + 1 else i + 1
+
+    # Remove merged duplicates in reverse order to preserve indices
+    for idx in reversed(to_remove):
+        del events[idx]

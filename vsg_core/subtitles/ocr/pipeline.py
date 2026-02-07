@@ -49,6 +49,7 @@ class PipelineConfig:
     # Position handling
     preserve_positions: bool = True
     bottom_threshold_percent: float = 75.0
+    top_threshold_percent: float = 40.0
 
     # Confidence
     low_confidence_threshold: float = 60.0
@@ -128,6 +129,7 @@ class OCRPipeline:
             output_format=self.settings.get("ocr_output_format", "ass"),
             preserve_positions=self.settings.get("ocr_preserve_positions", True),
             bottom_threshold_percent=self.settings.get("ocr_bottom_threshold", 75.0),
+            top_threshold_percent=self.settings.get("ocr_top_threshold", 40.0),
             low_confidence_threshold=self.settings.get(
                 "ocr_low_confidence_threshold", 60.0
             ),
@@ -457,31 +459,66 @@ class OCRPipeline:
                 potential_issues=list(post_result.fixes_applied.keys()),
             )
 
-        # Classify each OCR line's screen region using y_center + VobSub offset
+        # Classify lines as top or bottom using y_center + VobSub offset.
+        # Two-pass approach:
+        #   1. Classify each line individually (top if < threshold, else bottom)
+        #   2. Group adjacent lines with the same classification together —
+        #      if a line is near its neighbors (within 15% of frame height),
+        #      it belongs to the same text block and gets the block's region.
+        # This handles multi-line top text (all lines stay "top" even if
+        # lower lines cross the threshold) while still correctly splitting
+        # images with both top signs and bottom dialogue.
         line_regions: list[LineRegion] = []
         if (
             self.config.preserve_positions
             and sub_image.frame_height > 0
             and ocr_result.lines
         ):
+            # Pass 1: get absolute y_pct for each line
+            line_y_pcts: list[float | None] = []
             for ocr_line in ocr_result.lines:
                 if ocr_line.y_center > 0:
-                    # Map line's Y within cropped image to absolute frame Y
                     abs_y = ocr_line.y_center + sub_image.y
                     y_pct = (abs_y / sub_image.frame_height) * 100
-                    if y_pct <= 25.0:
-                        region = "top"
-                    elif y_pct >= self.config.bottom_threshold_percent:
-                        region = "bottom"
-                    else:
-                        region = "middle"
+                    line_y_pcts.append(y_pct)
                 else:
-                    # No y_center info (e.g. Tesseract) — assume bottom
-                    region = "bottom"
+                    line_y_pcts.append(None)
+
+            # Pass 2: group into clusters of nearby lines, then classify
+            # each cluster by its topmost line's position
+            cluster_gap = 15.0  # max y_pct gap between lines in same cluster
+            clusters: list[list[int]] = []  # list of [line indices]
+            for idx, y_pct in enumerate(line_y_pcts):
+                if y_pct is None:
+                    # No position info — treat as its own bottom cluster
+                    clusters.append([idx])
+                    continue
+                # Check if this line belongs to the previous cluster
+                if clusters and line_y_pcts[clusters[-1][-1]] is not None:
+                    prev_y = line_y_pcts[clusters[-1][-1]]
+                    if abs(y_pct - prev_y) <= cluster_gap:
+                        clusters[-1].append(idx)
+                        continue
+                # Start a new cluster
+                clusters.append([idx])
+
+            # Assign region per cluster based on topmost line
+            line_region_map: list[str] = ["bottom"] * len(ocr_result.lines)
+            for cluster in clusters:
+                # Find the minimum y_pct in this cluster
+                min_pct = min(
+                    (line_y_pcts[i] for i in cluster if line_y_pcts[i] is not None),
+                    default=None,
+                )
+                if min_pct is not None and min_pct <= self.config.top_threshold_percent:
+                    for i in cluster:
+                        line_region_map[i] = "top"
+
+            for idx, ocr_line in enumerate(ocr_result.lines):
                 line_regions.append(
                     LineRegion(
                         text=ocr_line.text,
-                        region=region,
+                        region=line_region_map[idx],
                         y_center=ocr_line.y_center,
                     )
                 )
