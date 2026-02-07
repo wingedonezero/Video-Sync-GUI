@@ -229,15 +229,22 @@ def create_subtitle_data_from_ocr(
         )
 
         if has_multiple:
-            # Group lines by region and create separate events
-            region_groups: dict[str, list[LineRegion]] = {}
-            for lr in result.line_regions:
-                region_groups.setdefault(lr.region, []).append(lr)
+            # Group lines by region, using corrected text from result.text
+            # (lr.text is raw OCR; result.text has corrections applied)
+            corrected_lines = result.text.split("\n")
+            region_lines: dict[str, list[str]] = {}
+            for idx_lr, lr in enumerate(result.line_regions):
+                line_text = (
+                    corrected_lines[idx_lr]
+                    if idx_lr < len(corrected_lines)
+                    else lr.text
+                )
+                region_lines.setdefault(lr.region, []).append(line_text)
 
             for region in ("top", "bottom"):
-                if region not in region_groups:
+                if region not in region_lines:
                     continue
-                region_text = "\\N".join(lr.text for lr in region_groups[region])
+                region_text = "\\N".join(region_lines[region])
                 event = SubtitleEvent(
                     start_ms=float(result.start_ms),
                     end_ms=float(result.end_ms),
@@ -315,58 +322,72 @@ def create_subtitle_data_from_ocr(
         unknown_words=list(unknown_words_map.values()),
     )
 
-    # Merge consecutive Top events with identical text to prevent flickering.
-    # VobSub re-emits the same top text (signs, titles) each time the bottom
-    # dialogue changes, creating duplicate Top events with tiny gaps.
+    # Merge consecutive duplicate events to prevent flickering.
+    # VobSub re-emits the same text each time the other region changes,
+    # creating duplicate events with tiny gaps (e.g., same Top sign repeated
+    # as bottom dialogue changes, or same Default dialogue repeated as top
+    # sign changes).
     if config.preserve_positions:
-        _merge_consecutive_top_events(data.events)
+        _merge_consecutive_duplicate_events(data.events)
 
     return data
 
 
-def _merge_consecutive_top_events(events: list) -> None:
+def _merge_consecutive_duplicate_events(events: list) -> None:
     """
-    Merge consecutive Top-styled events that have identical text.
+    Merge consecutive events of the same style that have identical text.
 
-    VobSub creates a new image each time bottom dialogue changes, even when
-    top text (signs, titles) stays the same. This produces duplicate Top
-    events with tiny gaps that cause flickering in players.
+    VobSub creates a new image each time either region changes. This means:
+    - Top text (signs) is re-emitted each time bottom dialogue changes
+    - Bottom dialogue is re-emitted each time top sign changes
+
+    Both produce duplicate events with tiny gaps that cause flickering.
 
     Merges in-place: extends the first event's end_ms to cover all
     consecutive duplicates, then removes the duplicates.
 
-    Uses a max gap of 200ms — anything larger likely means the sign
+    Uses a max gap of 200ms — anything larger likely means the text
     actually disappeared and reappeared.
     """
     max_gap_ms = 200.0
     to_remove: list[int] = []
-    i = 0
-    while i < len(events):
-        if events[i].style != "Top":
-            i += 1
+    merged: set[int] = set()  # Track already-merged indices
+
+    for i in range(len(events)):
+        if i in merged:
             continue
 
-        # Found a Top event — look ahead for consecutive duplicates
+        style = events[i].style
+
+        # Look ahead for consecutive duplicates of the same style
         j = i + 1
+        found_merge = False
         while j < len(events):
+            if j in merged:
+                j += 1
+                continue
+
             if (
-                events[j].style == "Top"
+                events[j].style == style
                 and events[j].text == events[i].text
                 and events[j].start_ms - events[i].end_ms <= max_gap_ms
             ):
                 # Extend the first event to cover this duplicate
                 events[i].end_ms = max(events[i].end_ms, events[j].end_ms)
                 to_remove.append(j)
+                merged.add(j)
+                found_merge = True
                 j += 1
-            elif events[j].style == "Top":
-                # Different Top text or too large a gap — stop
+            elif events[j].style == style:
+                # Same style but different text or gap too large — stop
                 break
             else:
-                # Skip non-Top events (Default dialogue between Top events)
+                # Different style — skip (e.g., Default between Top events)
                 j += 1
 
-        i = j if j > i + 1 else i + 1
+        if not found_merge:
+            continue
 
     # Remove merged duplicates in reverse order to preserve indices
-    for idx in reversed(to_remove):
+    for idx in sorted(to_remove, reverse=True):
         del events[idx]
