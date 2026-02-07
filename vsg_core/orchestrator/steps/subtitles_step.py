@@ -796,7 +796,7 @@ class SubtitlesStep:
             item.frame_adjusted = True
 
             # Run frame audit if enabled (shortcut path bypasses plugin where audit normally runs)
-            job_name = Path(target_video).stem if target_video else "unknown"
+            job_name = self._build_audit_job_name(target_video, item)
             self._run_frame_audit_if_enabled(
                 subtitle_data=subtitle_data,
                 target_fps=target_fps,
@@ -847,7 +847,7 @@ class SubtitlesStep:
                 item.frame_adjusted = True
 
             # Run frame audit if enabled (shortcut path bypasses plugin where audit normally runs)
-            job_name = Path(target_video).stem if target_video else "unknown"
+            job_name = self._build_audit_job_name(target_video, item)
             self._run_frame_audit_if_enabled(
                 subtitle_data=subtitle_data,
                 target_fps=target_fps,
@@ -883,6 +883,7 @@ class SubtitlesStep:
                 temp_dir=ctx.temp_dir,
                 sync_exclusion_styles=item.sync_exclusion_styles,
                 sync_exclusion_mode=item.sync_exclusion_mode,
+                track_label=self._build_track_label(item),
             )
 
             if result.success:
@@ -1363,6 +1364,26 @@ class SubtitlesStep:
 
         except Exception as e:
             runner._log_message(f"[FrameAudit] WARNING: Audit failed - {e}")
+
+    @staticmethod
+    def _build_track_label(item) -> str:
+        """Build a unique label for a track (used in audit report filenames)."""
+        track_id = item.track.id
+        source = item.track.source.replace(" ", "")
+        if item.is_generated:
+            return f"{source}_t{track_id}_gen"
+        return f"{source}_t{track_id}"
+
+    @staticmethod
+    def _build_audit_job_name(target_video: Path | None, item) -> str:
+        """Build a unique job name for frame audit reports.
+
+        Combines target video stem with track label to prevent
+        reports from different tracks overwriting each other.
+        """
+        video_stem = Path(target_video).stem if target_video else "unknown"
+        track_label = SubtitlesStep._build_track_label(item)
+        return f"{video_stem}_{track_label}"
 
     def _apply_video_verified_for_bitmap(
         self, item, ctx: Context, runner: CommandRunner, source1_file: Path | None
