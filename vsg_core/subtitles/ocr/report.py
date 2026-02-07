@@ -85,6 +85,9 @@ class SubtitleOCRResult:
     position_x: int = 0
     position_y: int = 0
     is_positioned: bool = False  # True if not at default bottom
+    line_regions: list[str] = field(
+        default_factory=list
+    )  # Per-line: "top"/"middle"/"bottom"
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -131,6 +134,7 @@ class OCRReport:
     positioned_subtitles: int = 0  # Non-bottom positioned
     top_positioned: int = 0
     middle_positioned: int = 0
+    split_subtitles: int = 0  # Subtitles with lines in multiple regions
 
     def add_subtitle_result(self, result: SubtitleOCRResult):
         """Add a subtitle result and update statistics."""
@@ -155,6 +159,14 @@ class OCRReport:
         # Update position stats
         if result.is_positioned:
             self.positioned_subtitles += 1
+        if result.line_regions:
+            regions = set(result.line_regions)
+            if "top" in regions:
+                self.top_positioned += 1
+            if "middle" in regions:
+                self.middle_positioned += 1
+            if len(regions) > 1:
+                self.split_subtitles += 1
 
     def add_unknown_word(
         self, word: str, context: str = "", timestamp: str = "", confidence: float = 0.0

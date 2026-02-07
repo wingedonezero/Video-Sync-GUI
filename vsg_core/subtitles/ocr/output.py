@@ -52,6 +52,15 @@ class OutputConfig:
 
 
 @dataclass(slots=True)
+class LineRegion:
+    """A single OCR line with its classified screen region."""
+
+    text: str
+    region: str  # "top", "middle", or "bottom"
+    y_center: float = 0.0  # Y center in source image pixels
+
+
+@dataclass(slots=True)
 class SubtitleEntry:
     """A single subtitle entry for output."""
 
@@ -64,6 +73,7 @@ class SubtitleEntry:
     frame_width: int = 720
     frame_height: int = 480
     is_forced: bool = False
+    line_regions: list[LineRegion] = field(default_factory=list)
 
 
 class SubtitleWriter:
@@ -157,24 +167,70 @@ class SubtitleWriter:
             ]
         )
 
-        # Add dialogue lines
-        # Note: Position preservation is disabled - always use default bottom alignment
-        # This matches behavior of SubtitleEdit and other tools which don't preserve
-        # positions from VobSub/PGS sources because it's error-prone
+        # Add dialogue lines with position-aware output
         for sub in subtitles:
             start = self._ms_to_ass_time(sub.start_ms)
             end = self._ms_to_ass_time(sub.end_ms)
-            text = self._escape_ass_text(sub.text)
 
-            # Build dialogue line with default style (bottom center)
-            dialogue = (
-                f"Dialogue: 0,{start},{end},{self.config.style_name},,0,0,0,,{text}"
-            )
-            lines.append(dialogue)
+            if (
+                self.config.preserve_positions
+                and sub.line_regions
+                and self._has_multiple_regions(sub.line_regions)
+            ):
+                # Split into separate dialogue events per region
+                for region, region_lines in self._group_by_region(sub.line_regions):
+                    region_text = self._escape_ass_text(
+                        "\n".join(lr.text for lr in region_lines)
+                    )
+                    style = "Top" if region == "top" else self.config.style_name
+                    dialogue = (
+                        f"Dialogue: 0,{start},{end},{style},,0,0,0,,{region_text}"
+                    )
+                    lines.append(dialogue)
+            elif (
+                self.config.preserve_positions
+                and sub.line_regions
+                and all(lr.region == "top" for lr in sub.line_regions)
+            ):
+                # All lines are top-positioned
+                text = self._escape_ass_text(sub.text)
+                dialogue = f"Dialogue: 0,{start},{end},Top,,0,0,0,,{text}"
+                lines.append(dialogue)
+            else:
+                # Default: bottom-aligned (no line_regions or all bottom)
+                text = self._escape_ass_text(sub.text)
+                dialogue = (
+                    f"Dialogue: 0,{start},{end},{self.config.style_name},,0,0,0,,{text}"
+                )
+                lines.append(dialogue)
 
         # Write file with Windows line endings (ASS standard)
         with open(output_path, "w", encoding="utf-8-sig", newline="\r\n") as f:
             f.write("\n".join(lines))
+
+    @staticmethod
+    def _has_multiple_regions(line_regions: list[LineRegion]) -> bool:
+        """Check if lines span more than one screen region."""
+        regions = {lr.region for lr in line_regions}
+        return len(regions) > 1
+
+    @staticmethod
+    def _group_by_region(
+        line_regions: list[LineRegion],
+    ) -> list[tuple[str, list[LineRegion]]]:
+        """Group lines by region, preserving order within each group.
+
+        Returns list of (region, lines) tuples ordered: top, middle, bottom.
+        """
+        groups: dict[str, list[LineRegion]] = {}
+        for lr in line_regions:
+            groups.setdefault(lr.region, []).append(lr)
+        # Return in top-first order so ASS events render correctly
+        result: list[tuple[str, list[LineRegion]]] = []
+        for region in ("top", "middle", "bottom"):
+            if region in groups:
+                result.append((region, groups[region]))
+        return result
 
     def _write_srt(self, subtitles: list[SubtitleEntry], output_path: Path):
         """Write SRT format (no position support)."""

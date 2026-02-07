@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 from .debug import OCRDebugger, create_debugger
 from .engine import OCREngine, create_ocr_engine
 from .output import (
+    LineRegion,
     OCRSubtitleResult,
     OutputConfig,
     SubtitleEntry,
@@ -482,7 +483,34 @@ class OCRPipeline:
                 potential_issues=list(post_result.fixes_applied.keys()),
             )
 
-        # Determine if positioned
+        # Classify each OCR line's screen region using y_center + VobSub offset
+        line_regions: list[LineRegion] = []
+        if (
+            self.config.preserve_positions
+            and sub_image.frame_height > 0
+            and ocr_result.lines
+        ):
+            for ocr_line in ocr_result.lines:
+                if ocr_line.y_center > 0:
+                    abs_y = ocr_line.y_center + sub_image.y
+                    y_pct = (abs_y / sub_image.frame_height) * 100
+                    if y_pct <= 25.0:
+                        region = "top"
+                    elif y_pct >= self.config.bottom_threshold_percent:
+                        region = "bottom"
+                    else:
+                        region = "middle"
+                else:
+                    region = "bottom"
+                line_regions.append(
+                    LineRegion(
+                        text=ocr_line.text,
+                        region=region,
+                        y_center=ocr_line.y_center,
+                    )
+                )
+
+        # Determine if positioned (legacy: whole-subtitle check)
         is_positioned = not sub_image.is_bottom_positioned(
             self.config.bottom_threshold_percent
         )
@@ -498,6 +526,7 @@ class OCRPipeline:
             frame_width=sub_image.frame_width,
             frame_height=sub_image.frame_height,
             is_forced=sub_image.is_forced,
+            line_regions=line_regions,
         )
 
         # Create report entry
@@ -513,6 +542,7 @@ class OCRPipeline:
             position_x=sub_image.x,
             position_y=sub_image.y,
             is_positioned=is_positioned,
+            line_regions=[lr.region for lr in line_regions],
         )
 
         return entry, sub_result
@@ -603,7 +633,36 @@ class OCRPipeline:
                 potential_issues=list(post_result.fixes_applied.keys()),
             )
 
-        # Determine if positioned
+        # Classify each OCR line's screen region using y_center + VobSub offset
+        line_regions: list[LineRegion] = []
+        if (
+            self.config.preserve_positions
+            and sub_image.frame_height > 0
+            and ocr_result.lines
+        ):
+            for ocr_line in ocr_result.lines:
+                if ocr_line.y_center > 0:
+                    # Map line's Y within cropped image to absolute frame Y
+                    abs_y = ocr_line.y_center + sub_image.y
+                    y_pct = (abs_y / sub_image.frame_height) * 100
+                    if y_pct <= 25.0:
+                        region = "top"
+                    elif y_pct >= self.config.bottom_threshold_percent:
+                        region = "bottom"
+                    else:
+                        region = "middle"
+                else:
+                    # No y_center info (e.g. Tesseract) — assume bottom
+                    region = "bottom"
+                line_regions.append(
+                    LineRegion(
+                        text=ocr_line.text,
+                        region=region,
+                        y_center=ocr_line.y_center,
+                    )
+                )
+
+        # Determine if positioned (legacy: whole-subtitle check)
         is_positioned = not sub_image.is_bottom_positioned(
             self.config.bottom_threshold_percent
         )
@@ -657,6 +716,7 @@ class OCRPipeline:
             frame_width=sub_image.frame_width,
             frame_height=sub_image.frame_height,
             is_forced=sub_image.is_forced,
+            line_regions=line_regions,
         )
 
         # Create report entry
@@ -672,6 +732,7 @@ class OCRPipeline:
             position_x=sub_image.x,
             position_y=sub_image.y,
             is_positioned=is_positioned,
+            line_regions=[lr.region for lr in line_regions],
         )
 
         return ocr_subtitle_result, entry, sub_result
