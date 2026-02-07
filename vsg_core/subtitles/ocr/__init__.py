@@ -118,6 +118,8 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         "ocr_save_debug_images": get_val("ocr_save_debug_images", False),
         # Debug output - saves images and text files for problem subtitles
         "ocr_debug_output": get_val("ocr_debug_output", False),
+        # Parallel processing
+        "ocr_max_workers": get_val("ocr_max_workers", 1),
     }
 
 

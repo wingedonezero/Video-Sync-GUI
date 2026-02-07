@@ -445,6 +445,7 @@ class AppSettings(BaseModel):
     ocr_run_in_subprocess: bool = True
     ocr_font_size_ratio: float = 5.80
     ocr_generate_report: bool = True
+    ocr_max_workers: int = 1
 
     # =========================================================================
     # Class-level constants (excluded from serialization)

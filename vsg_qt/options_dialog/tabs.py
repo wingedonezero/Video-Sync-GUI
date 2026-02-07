@@ -167,10 +167,20 @@ class OCRTab(QWidget):
             "Characters to exclude from OCR results (e.g., '|/_~')."
         )
 
+        self.widgets["ocr_max_workers"] = QSpinBox()
+        self.widgets["ocr_max_workers"].setRange(1, 24)
+        self.widgets["ocr_max_workers"].setSuffix(" workers")
+        self.widgets["ocr_max_workers"].setToolTip(
+            "Number of parallel OCR workers. Higher values use more CPU cores\n"
+            "and RAM but process subtitles faster. Each worker loads its own\n"
+            "OCR engine instance. Set to 1 to disable parallel processing."
+        )
+
         ocr_layout.addRow(self.widgets["ocr_enabled"])
         ocr_layout.addRow("OCR Engine:", self.widgets["ocr_engine"])
         ocr_layout.addRow("Language:", self.widgets["ocr_language"])
         ocr_layout.addRow("Character Blacklist:", self.widgets["ocr_char_blacklist"])
+        ocr_layout.addRow("Parallel Workers:", self.widgets["ocr_max_workers"])
         main_layout.addWidget(ocr_group)
 
         # --- Preprocessing Group ---

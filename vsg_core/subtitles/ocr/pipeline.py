@@ -15,8 +15,11 @@ Usage:
     result = pipeline.process(input_path, output_path)
 """
 
+import logging
+import queue
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -121,6 +124,7 @@ class OCRPipeline:
         self._preprocessor: ImagePreprocessor | None = None
         self._engine: OCREngine | None = None
         self._postprocessor: OCRPostProcessor | None = None
+        self._extra_engines: list = []  # Additional engines for parallel processing
 
     def _create_config(self) -> PipelineConfig:
         """Create pipeline config from settings."""
@@ -136,6 +140,7 @@ class OCRPipeline:
             generate_report=self.settings.get("ocr_generate_report", True),
             save_debug_images=self.settings.get("ocr_save_debug_images", False),
             debug_output=self.settings.get("ocr_debug_output", False),
+            max_workers=self.settings.get("ocr_max_workers", 1),
         )
 
     @property
@@ -148,6 +153,20 @@ class OCRPipeline:
             )
         return self._preprocessor
 
+    def _create_single_engine(self):
+        """Create a single OCR engine instance."""
+        logger = logging.getLogger(__name__)
+        backend = self.settings.get("ocr_engine", "tesseract")
+        if backend in ("easyocr", "paddleocr"):
+            from .engine import create_ocr_engine_v2
+
+            engine = create_ocr_engine_v2(self.settings)
+            logger.info(f"Created OCR backend: {engine.name}")
+        else:
+            engine = create_ocr_engine(self.settings)
+            logger.info("Created OCR backend: tesseract (traditional)")
+        return engine
+
     @property
     def engine(self):
         """Lazy initialization of OCR engine.
@@ -155,21 +174,10 @@ class OCRPipeline:
         Returns either traditional OCREngine or new OCRBackend based on settings.
         """
         if self._engine is None:
-            import logging
-
             logger = logging.getLogger(__name__)
             backend = self.settings.get("ocr_engine", "tesseract")
             logger.info(f"OCR engine setting: '{backend}'")
-            if backend in ("easyocr", "paddleocr"):
-                # Use new backend system
-                from .engine import create_ocr_engine_v2
-
-                self._engine = create_ocr_engine_v2(self.settings)
-                logger.info(f"Using OCR backend: {self._engine.name}")
-            else:
-                # Use traditional Tesseract engine
-                self._engine = create_ocr_engine(self.settings)
-                logger.info("Using OCR backend: tesseract (traditional)")
+            self._engine = self._create_single_engine()
         return self._engine
 
     @property
@@ -262,37 +270,16 @@ class OCRPipeline:
             )
 
             # Step 4: Process each subtitle
-            ocr_results: list[OCRSubtitleResult] = []
-            last_logged_percent = -1
+            max_workers = max(1, self.config.max_workers)
 
-            for i, sub_image in enumerate(subtitle_images):
-                progress = 0.10 + (0.80 * i / len(subtitle_images))
-                # Only log at 10% intervals to reduce log spam
-                current_percent = int((i / len(subtitle_images)) * 100)
-                if current_percent >= last_logged_percent + 10:
-                    self._log_progress(
-                        f"Processing subtitles ({current_percent}%)", progress
-                    )
-                    last_logged_percent = current_percent
-
-                try:
-                    ocr_result, sub_result = self._process_single_subtitle_unified(
-                        sub_image, report, debugger
-                    )
-                    if ocr_result is not None:
-                        ocr_results.append(ocr_result)
-                    if sub_result is not None:
-                        report.add_subtitle_result(sub_result)
-                except Exception:
-                    report.add_subtitle_result(
-                        SubtitleOCRResult(
-                            index=sub_image.index,
-                            timestamp_start=sub_image.start_time,
-                            timestamp_end=sub_image.end_time,
-                            text="",
-                            confidence=0.0,
-                        )
-                    )
+            if max_workers > 1:
+                ocr_results = self._process_subtitles_parallel(
+                    subtitle_images, max_workers, report, debugger
+                )
+            else:
+                ocr_results = self._process_subtitles_sequential(
+                    subtitle_images, report, debugger
+                )
 
             # Step 5: Finalize report
             report.finalize()
@@ -375,9 +362,360 @@ class OCRPipeline:
                 self._engine.cleanup()
             self._engine = None
 
+        # Clean up extra engines from parallel processing
+        for engine in self._extra_engines:
+            if hasattr(engine, "cleanup"):
+                engine.cleanup()
+        self._extra_engines.clear()
+
         # Clear other cached objects
         self._preprocessor = None
         self._postprocessor = None
+
+    def _process_subtitles_sequential(
+        self,
+        subtitle_images: list[SubtitleImage],
+        report: OCRReport,
+        debugger: OCRDebugger,
+    ) -> list[OCRSubtitleResult]:
+        """Process subtitles sequentially (single worker)."""
+        ocr_results: list[OCRSubtitleResult] = []
+        last_logged_percent = -1
+
+        for i, sub_image in enumerate(subtitle_images):
+            progress = 0.10 + (0.80 * i / len(subtitle_images))
+            current_percent = int((i / len(subtitle_images)) * 100)
+            if current_percent >= last_logged_percent + 10:
+                self._log_progress(
+                    f"Processing subtitles ({current_percent}%)", progress
+                )
+                last_logged_percent = current_percent
+
+            try:
+                ocr_result, sub_result = self._process_single_subtitle_unified(
+                    sub_image, report, debugger
+                )
+                if ocr_result is not None:
+                    ocr_results.append(ocr_result)
+                if sub_result is not None:
+                    report.add_subtitle_result(sub_result)
+            except Exception:
+                report.add_subtitle_result(
+                    SubtitleOCRResult(
+                        index=sub_image.index,
+                        timestamp_start=sub_image.start_time,
+                        timestamp_end=sub_image.end_time,
+                        text="",
+                        confidence=0.0,
+                    )
+                )
+
+        return ocr_results
+
+    def _process_subtitles_parallel(
+        self,
+        subtitle_images: list[SubtitleImage],
+        max_workers: int,
+        report: OCRReport,
+        debugger: OCRDebugger,
+    ) -> list[OCRSubtitleResult]:
+        """Process subtitles in parallel using a thread pool with multiple engines."""
+        logger = logging.getLogger(__name__)
+        total = len(subtitle_images)
+        logger.info(f"Parallel OCR: {max_workers} workers for {total} subtitles")
+        self._log_progress(f"Starting parallel OCR ({max_workers} workers)", 0.10)
+
+        # Create engine pool: reuse self.engine as the first, create extras
+        engine_pool: queue.Queue = queue.Queue()
+        engine_pool.put(self.engine)
+        for i in range(max_workers - 1):
+            logger.info(f"Creating OCR engine {i + 2}/{max_workers}...")
+            engine = self._create_single_engine()
+            self._extra_engines.append(engine)
+            engine_pool.put(engine)
+
+        self._log_progress(f"All {max_workers} OCR engines ready", 0.12)
+
+        # Shared preprocessor and postprocessor (stateless per-call, thread-safe)
+        preprocessor = self.preprocessor
+        postprocessor = self.postprocessor
+        debug_images_dir = self.ocr_work_dir if self.config.save_debug_images else None
+
+        # Submit all work to thread pool
+        completed_count = 0
+        last_logged_percent = -1
+        # Collect results indexed by subtitle index for ordered output
+        results_by_index: dict[int, tuple] = {}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for sub_image in subtitle_images:
+                future = executor.submit(
+                    self._ocr_worker,
+                    sub_image,
+                    engine_pool,
+                    preprocessor,
+                    postprocessor,
+                    debug_images_dir,
+                )
+                futures[future] = sub_image
+
+            for future in as_completed(futures):
+                sub_image = futures[future]
+                completed_count += 1
+
+                # Progress update
+                current_percent = int((completed_count / total) * 100)
+                if current_percent >= last_logged_percent + 10:
+                    progress = 0.12 + (0.78 * completed_count / total)
+                    self._log_progress(
+                        f"Processing subtitles ({current_percent}%)", progress
+                    )
+                    last_logged_percent = current_percent
+
+                try:
+                    worker_result = future.result()
+                    results_by_index[sub_image.index] = (
+                        sub_image,
+                        worker_result,
+                    )
+                except Exception:
+                    logger.exception(f"Worker failed for subtitle {sub_image.index}")
+                    results_by_index[sub_image.index] = (sub_image, None)
+
+        # Process results in order for report/debugger (not thread-safe)
+        ocr_results: list[OCRSubtitleResult] = []
+        for idx in sorted(results_by_index.keys()):
+            sub_image, worker_result = results_by_index[idx]
+
+            if worker_result is None:
+                report.add_subtitle_result(
+                    SubtitleOCRResult(
+                        index=sub_image.index,
+                        timestamp_start=sub_image.start_time,
+                        timestamp_end=sub_image.end_time,
+                        text="",
+                        confidence=0.0,
+                    )
+                )
+                continue
+
+            ocr_result, sub_result = self._build_subtitle_results(
+                sub_image,
+                worker_result,
+                debugger,
+            )
+            if ocr_result is not None:
+                ocr_results.append(ocr_result)
+            if sub_result is not None:
+                report.add_subtitle_result(sub_result)
+
+        return ocr_results
+
+    def _ocr_worker(
+        self,
+        sub_image: SubtitleImage,
+        engine_pool: queue.Queue,
+        preprocessor: ImagePreprocessor,
+        postprocessor: OCRPostProcessor,
+        debug_images_dir: Path | None,
+    ) -> dict:
+        """
+        Worker function for parallel OCR processing.
+
+        Grabs an engine from the pool, runs preprocess+OCR+postprocess,
+        returns the engine to the pool. Returns raw result data.
+        """
+        engine = engine_pool.get()
+        try:
+            # Preprocess
+            preprocessed = preprocessor.preprocess(sub_image, debug_images_dir)
+
+            # OCR
+            ocr_result = engine.ocr_lines_separately(preprocessed.image)
+
+            if not ocr_result.success:
+                return {
+                    "success": False,
+                    "ocr_result": ocr_result,
+                    "raw_text": "",
+                    "post_result": None,
+                }
+
+            raw_text = ocr_result.text
+
+            # Post-process
+            post_result = postprocessor.process(
+                ocr_result.text,
+                confidence=ocr_result.average_confidence,
+                timestamp=sub_image.start_time,
+            )
+
+            return {
+                "success": True,
+                "ocr_result": ocr_result,
+                "raw_text": raw_text,
+                "post_result": post_result,
+            }
+        finally:
+            engine_pool.put(engine)
+
+    def _build_subtitle_results(
+        self,
+        sub_image: SubtitleImage,
+        worker_result: dict,
+        debugger: OCRDebugger,
+    ) -> tuple[OCRSubtitleResult | None, SubtitleOCRResult | None]:
+        """
+        Build output results from worker data.
+
+        Handles report/debugger updates and position classification.
+        Called from main thread only (not thread-safe components).
+        """
+        ocr_result = worker_result["ocr_result"]
+        raw_text = worker_result["raw_text"]
+        post_result = worker_result["post_result"]
+
+        if not worker_result["success"]:
+            return (
+                None,
+                SubtitleOCRResult(
+                    index=sub_image.index,
+                    timestamp_start=sub_image.start_time,
+                    timestamp_end=sub_image.end_time,
+                    text="",
+                    confidence=0.0,
+                ),
+            )
+
+        # Add to debugger
+        debugger.add_subtitle(
+            index=sub_image.index,
+            start_time=sub_image.start_time,
+            end_time=sub_image.end_time,
+            text=post_result.text,
+            confidence=ocr_result.average_confidence,
+            image=None,  # Image not available in parallel mode
+            raw_ocr_text=raw_text,
+        )
+
+        # Track unknown words and fixes
+        for word in post_result.unknown_words:
+            debugger.add_unknown_word(sub_image.index, word)
+
+        if post_result.was_modified:
+            for fix_name, fix_count in post_result.fixes_applied.items():
+                debugger.add_fix(
+                    sub_image.index,
+                    fix_name,
+                    f"Applied {fix_count} time(s)",
+                    original_text=raw_text,
+                )
+
+        # Position classification (same logic as _process_single_subtitle_unified)
+        line_regions: list[LineRegion] = []
+        if (
+            self.config.preserve_positions
+            and sub_image.frame_height > 0
+            and ocr_result.lines
+        ):
+            line_y_pcts: list[float | None] = []
+            for ocr_line in ocr_result.lines:
+                if ocr_line.y_center > 0:
+                    abs_y = ocr_line.y_center + sub_image.y
+                    y_pct = (abs_y / sub_image.frame_height) * 100
+                    line_y_pcts.append(y_pct)
+                else:
+                    line_y_pcts.append(None)
+
+            cluster_gap = 15.0
+            clusters: list[list[int]] = []
+            for idx, y_pct in enumerate(line_y_pcts):
+                if y_pct is None:
+                    clusters.append([idx])
+                    continue
+                if clusters and line_y_pcts[clusters[-1][-1]] is not None:
+                    prev_y = line_y_pcts[clusters[-1][-1]]
+                    if abs(y_pct - prev_y) <= cluster_gap:
+                        clusters[-1].append(idx)
+                        continue
+                clusters.append([idx])
+
+            line_region_map: list[str] = ["bottom"] * len(ocr_result.lines)
+            for cluster in clusters:
+                min_pct = min(
+                    (line_y_pcts[i] for i in cluster if line_y_pcts[i] is not None),
+                    default=None,
+                )
+                if min_pct is not None and min_pct <= self.config.top_threshold_percent:
+                    for i in cluster:
+                        line_region_map[i] = "top"
+
+            for idx_l, ocr_line in enumerate(ocr_result.lines):
+                line_regions.append(
+                    LineRegion(
+                        text=ocr_line.text,
+                        region=line_region_map[idx_l],
+                        y_center=ocr_line.y_center,
+                    )
+                )
+
+        is_positioned = not sub_image.is_bottom_positioned(
+            self.config.bottom_threshold_percent
+        )
+
+        # Extract palette colors
+        subtitle_colors: list[list[int]] = []
+        dominant_color: list[int] = []
+        if sub_image.palette:
+            for color in sub_image.palette:
+                if color and len(color) >= 3:
+                    subtitle_colors.append(
+                        list(color[:4]) if len(color) >= 4 else [*list(color), 255]
+                    )
+            for color in sub_image.palette:
+                if color and len(color) >= 4 and color[3] > 128:
+                    dominant_color = list(color[:4])
+                    break
+
+        ocr_subtitle_result = OCRSubtitleResult(
+            index=sub_image.index,
+            start_ms=float(sub_image.start_ms),
+            end_ms=float(sub_image.end_ms),
+            text=post_result.text,
+            confidence=ocr_result.average_confidence,
+            raw_ocr_text=raw_text,
+            fixes_applied=dict(post_result.fixes_applied),
+            unknown_words=list(post_result.unknown_words),
+            x=sub_image.x,
+            y=sub_image.y,
+            width=sub_image.width,
+            height=sub_image.height,
+            frame_width=sub_image.frame_width,
+            frame_height=sub_image.frame_height,
+            is_forced=sub_image.is_forced,
+            subtitle_colors=subtitle_colors,
+            dominant_color=dominant_color,
+            debug_image=f"sub_{sub_image.index:04d}.png",
+            line_regions=line_regions,
+        )
+
+        sub_result = SubtitleOCRResult(
+            index=sub_image.index,
+            timestamp_start=sub_image.start_time,
+            timestamp_end=sub_image.end_time,
+            text=post_result.text,
+            confidence=ocr_result.average_confidence,
+            was_modified=post_result.was_modified,
+            fixes_applied=dict(post_result.fixes_applied),
+            unknown_words=post_result.unknown_words,
+            position_x=sub_image.x,
+            position_y=sub_image.y,
+            is_positioned=is_positioned,
+            line_regions=[lr.region for lr in line_regions],
+        )
+
+        return ocr_subtitle_result, sub_result
 
     def _process_single_subtitle_unified(
         self, sub_image: SubtitleImage, report: OCRReport, debugger: OCRDebugger
