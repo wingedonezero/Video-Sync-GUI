@@ -703,6 +703,7 @@ class OCRPipeline:
             subtitle_colors=subtitle_colors,
             dominant_color=dominant_color,
             debug_image=f"sub_{sub_image.index:04d}.png",
+            line_regions=line_regions,
         )
 
         # Create legacy output entry

@@ -409,6 +409,9 @@ class OCRSubtitleResult:
     subtitle_colors: list[list[int]] = field(default_factory=list)
     dominant_color: list[int] = field(default_factory=list)
 
+    # Per-line region classifications from pipeline
+    line_regions: list[LineRegion] = field(default_factory=list)
+
     # Debug image reference
     debug_image: str = ""  # e.g., "sub_0000.png"
 
@@ -500,10 +503,24 @@ def create_subtitle_data_from_ocr(
         margin_v=config.margin_v,
     )
 
+    # Create middle style for mid-screen text (signs, etc.)
+    middle_style = SubtitleStyle(
+        name="Middle",
+        fontname=config.font_name,
+        fontsize=float(config.font_size),
+        primary_color=config.primary_color,
+        outline_color=config.outline_color,
+        outline=config.outline_width,
+        shadow=config.shadow_depth,
+        alignment=5,  # Middle center
+        margin_v=0,
+    )
+
     data.styles = OrderedDict(
         [
             ("Default", default_style),
             ("Top", top_style),
+            ("Middle", middle_style),
         ]
     )
 
@@ -514,22 +531,13 @@ def create_subtitle_data_from_ocr(
     unknown_words_map: dict = {}  # word -> first occurrence info
     positioned_count = 0
 
-    # Convert each OCR result to SubtitleEvent
+    # Region-to-style mapping
+    _region_styles = {"top": "Top", "middle": "Middle", "bottom": "Default"}
+
+    # Convert each OCR result to SubtitleEvent(s)
     for result in ocr_results:
-        # Escape text for ASS
-        text = result.text.replace("\n", "\\N")
-
-        # Create event
-        event = SubtitleEvent(
-            start_ms=float(result.start_ms),
-            end_ms=float(result.end_ms),
-            text=text,
-            style="Default",
-            original_index=result.index,
-        )
-
-        # Create OCR metadata for this event
-        event.ocr = OCREventData(
+        # Build OCR metadata (shared across split events)
+        ocr_event_data = OCREventData(
             index=result.index,
             image=result.debug_image or f"sub_{result.index:04d}.png",
             confidence=result.confidence,
@@ -546,6 +554,58 @@ def create_subtitle_data_from_ocr(
             subtitle_colors=result.subtitle_colors,
             dominant_color=result.dominant_color,
         )
+
+        # Check if we need to split into multiple events by region
+        has_multiple = (
+            config.preserve_positions
+            and result.line_regions
+            and len({lr.region for lr in result.line_regions}) > 1
+        )
+
+        if has_multiple:
+            # Group lines by region and create separate events
+            region_groups: dict[str, list[LineRegion]] = {}
+            for lr in result.line_regions:
+                region_groups.setdefault(lr.region, []).append(lr)
+
+            for region in ("top", "middle", "bottom"):
+                if region not in region_groups:
+                    continue
+                region_text = "\\N".join(lr.text for lr in region_groups[region])
+                event = SubtitleEvent(
+                    start_ms=float(result.start_ms),
+                    end_ms=float(result.end_ms),
+                    text=region_text,
+                    style=_region_styles[region],
+                    original_index=result.index,
+                )
+                event.ocr = ocr_event_data
+                data.events.append(event)
+        elif config.preserve_positions and result.line_regions:
+            # All lines in same region — use that region's style
+            region = result.line_regions[0].region
+            text = result.text.replace("\n", "\\N")
+            event = SubtitleEvent(
+                start_ms=float(result.start_ms),
+                end_ms=float(result.end_ms),
+                text=text,
+                style=_region_styles.get(region, "Default"),
+                original_index=result.index,
+            )
+            event.ocr = ocr_event_data
+            data.events.append(event)
+        else:
+            # No line_regions or preserve disabled — default bottom
+            text = result.text.replace("\n", "\\N")
+            event = SubtitleEvent(
+                start_ms=float(result.start_ms),
+                end_ms=float(result.end_ms),
+                text=text,
+                style="Default",
+                original_index=result.index,
+            )
+            event.ocr = ocr_event_data
+            data.events.append(event)
 
         # Track statistics
         confidences.append(result.confidence)
@@ -568,8 +628,6 @@ def create_subtitle_data_from_ocr(
             y_percent = (result.y / result.frame_height) * 100
             if y_percent < config.bottom_threshold_percent:
                 positioned_count += 1
-
-        data.events.append(event)
 
     # Create document-level OCR metadata
     data.ocr_metadata = OCRMetadata(
