@@ -210,13 +210,6 @@ class OCRTab(QWidget):
             "Apply pattern-based fixes for common OCR errors (I/l confusion, rn→m, etc.)."
         )
 
-        self.widgets["ocr_cleanup_normalize_ellipsis"] = QCheckBox(
-            "Normalize ellipsis (… → ...)"
-        )
-        self.widgets["ocr_cleanup_normalize_ellipsis"].setToolTip(
-            "Replace Unicode ellipsis character with three periods."
-        )
-
         self.widgets["ocr_low_confidence_threshold"] = QDoubleSpinBox()
         self.widgets["ocr_low_confidence_threshold"].setRange(0.0, 100.0)
         self.widgets["ocr_low_confidence_threshold"].setSuffix(" %")
@@ -235,60 +228,11 @@ class OCRTab(QWidget):
         self.edit_dictionaries_btn.clicked.connect(self._open_dictionary_editor)
 
         postprocess_layout.addRow(self.widgets["ocr_cleanup_enabled"])
-        postprocess_layout.addRow(self.widgets["ocr_cleanup_normalize_ellipsis"])
         postprocess_layout.addRow(
             "Low Confidence Threshold:", self.widgets["ocr_low_confidence_threshold"]
         )
         postprocess_layout.addRow("", self.edit_dictionaries_btn)
         main_layout.addWidget(postprocess_group)
-
-        # --- Timing Corrections Group ---
-        timing_group = QGroupBox("Timing Corrections")
-        timing_layout = QFormLayout(timing_group)
-
-        self.widgets["timing_fix_enabled"] = QCheckBox(
-            "Enable subtitle timing corrections"
-        )
-        self.widgets["timing_fix_enabled"].setToolTip(
-            "Apply automated timing fixes after OCR."
-        )
-
-        self.widgets["timing_fix_overlaps"] = QCheckBox("Fix overlapping subtitles")
-        self.widgets["timing_overlap_min_gap_ms"] = QSpinBox()
-        self.widgets["timing_overlap_min_gap_ms"].setRange(0, 1000)
-        self.widgets["timing_overlap_min_gap_ms"].setSuffix(" ms")
-        self.widgets["timing_overlap_min_gap_ms"].setToolTip(
-            "Minimum gap to enforce between subtitles."
-        )
-
-        self.widgets["timing_fix_short_durations"] = QCheckBox("Fix short durations")
-        self.widgets["timing_min_duration_ms"] = QSpinBox()
-        self.widgets["timing_min_duration_ms"].setRange(100, 5000)
-        self.widgets["timing_min_duration_ms"].setSuffix(" ms")
-        self.widgets["timing_min_duration_ms"].setToolTip(
-            "Minimum subtitle display duration."
-        )
-
-        self.widgets["timing_fix_long_durations"] = QCheckBox(
-            "Enforce reading speed (CPS)"
-        )
-        self.widgets["timing_max_cps"] = QDoubleSpinBox()
-        self.widgets["timing_max_cps"].setRange(5.0, 100.0)
-        self.widgets["timing_max_cps"].setSuffix(" CPS")
-        self.widgets["timing_max_cps"].setToolTip(
-            "Maximum characters per second. Longer subtitles will be trimmed."
-        )
-
-        timing_layout.addRow(self.widgets["timing_fix_enabled"])
-        timing_layout.addRow(self.widgets["timing_fix_overlaps"])
-        timing_layout.addRow("Minimum Gap:", self.widgets["timing_overlap_min_gap_ms"])
-        timing_layout.addRow(self.widgets["timing_fix_short_durations"])
-        timing_layout.addRow(
-            "Minimum Duration:", self.widgets["timing_min_duration_ms"]
-        )
-        timing_layout.addRow(self.widgets["timing_fix_long_durations"])
-        timing_layout.addRow("Max CPS:", self.widgets["timing_max_cps"])
-        main_layout.addWidget(timing_group)
 
         # --- Output Group ---
         output_group = QGroupBox("Output")

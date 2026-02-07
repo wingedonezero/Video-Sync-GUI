@@ -105,9 +105,6 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         "ocr_low_confidence_threshold": get_val("ocr_low_confidence_threshold", 60.0),
         # Post-processing
         "ocr_cleanup_enabled": get_val("ocr_cleanup_enabled", True),
-        "ocr_cleanup_normalize_ellipsis": get_val(
-            "ocr_cleanup_normalize_ellipsis", False
-        ),
         "ocr_custom_wordlist_path": get_val("ocr_custom_wordlist_path", ""),
         # Output
         "ocr_output_format": get_val("ocr_output_format", "ass"),
@@ -349,7 +346,6 @@ def run_preview_ocr(
         "ocr_char_blacklist": "",
         "ocr_low_confidence_threshold": 60.0,
         "ocr_cleanup_enabled": True,
-        "ocr_cleanup_normalize_ellipsis": False,
         "ocr_custom_wordlist_path": "",
         "ocr_output_format": "ass",
         "ocr_preserve_positions": True,
