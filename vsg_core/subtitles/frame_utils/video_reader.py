@@ -67,147 +67,6 @@ def _get_ffms2_cache_path(video_path: str, temp_dir: Path | None) -> Path:
     return cache_dir / f"{cache_key}.ffindex"
 
 
-def get_vapoursynth_frame_info(
-    video_path: str, runner, temp_dir: Path | None = None
-) -> tuple[int, float] | None:
-    """
-    Get frame count and last frame timestamp using VapourSynth indexing.
-
-    This is MUCH faster than ffprobe -count_frames after the initial index:
-    - First run: ~30-60s (generates .lwi index file)
-    - Subsequent runs: <1s (reads cached index)
-
-    Handles CFR and VFR videos perfectly.
-
-    IMPORTANT: Properly frees memory after use to prevent RAM buildup.
-
-    Args:
-        video_path: Path to video file
-        runner: CommandRunner for logging
-        temp_dir: Optional job temp directory for index storage
-
-    Returns:
-        Tuple of (frame_count, last_frame_timestamp_ms) or None on error
-    """
-    try:
-        import vapoursynth as vs
-
-        runner._log_message(f"[VapourSynth] Indexing video: {Path(video_path).name}")
-
-        # Create new core instance for isolation
-        core = vs.core
-
-        # Generate cache path for FFMS2 index
-        index_path = _get_ffms2_cache_path(video_path, temp_dir)
-
-        # Show where index is stored
-        if temp_dir:
-            # Show relative path from job temp dir
-            try:
-                rel_path = index_path.relative_to(temp_dir)
-                location_msg = f"job_temp/{rel_path}"
-            except ValueError:
-                location_msg = str(index_path)
-        else:
-            location_msg = str(index_path)
-
-        # Load video - this auto-generates index if not present
-        # Try L-SMASH first (more accurate), fall back to FFmpegSource2
-        clip = None
-        try:
-            clip = core.lsmas.LWLibavSource(str(video_path))
-            runner._log_message("[VapourSynth] Using LWLibavSource (L-SMASH)")
-        except AttributeError:
-            # L-SMASH plugin not installed
-            runner._log_message(
-                "[VapourSynth] L-SMASH plugin not found, using FFmpegSource2"
-            )
-        except Exception as e:
-            runner._log_message(
-                f"[VapourSynth] L-SMASH failed: {e}, trying FFmpegSource2"
-            )
-
-        if clip is None:
-            try:
-                # Log whether index already exists
-                if index_path.exists():
-                    runner._log_message(
-                        f"[VapourSynth] Reusing existing index from: {location_msg}"
-                    )
-                else:
-                    runner._log_message(
-                        f"[VapourSynth] Creating new index at: {location_msg}"
-                    )
-                    runner._log_message("[VapourSynth] This may take 1-2 minutes...")
-
-                # Use FFMS2 with custom cache path
-                clip = core.ffms2.Source(
-                    source=str(video_path), cachefile=str(index_path)
-                )
-                runner._log_message("[VapourSynth] Using FFmpegSource2")
-            except Exception as e:
-                runner._log_message(
-                    f"[VapourSynth] ERROR: FFmpegSource2 also failed: {e}"
-                )
-                del core
-                gc.collect()
-                return None
-
-        # Get frame count
-        frame_count = clip.num_frames
-        runner._log_message(f"[VapourSynth] Frame count: {frame_count}")
-
-        # Get last frame timestamp
-        # VapourSynth uses rational time base, convert to milliseconds
-        last_frame_idx = frame_count - 1
-        last_frame = clip.get_frame(last_frame_idx)
-
-        # Calculate timestamp from frame properties
-        # _DurationNum / _DurationDen gives frame duration in seconds
-        fps_num = clip.fps.numerator
-        fps_den = clip.fps.denominator
-
-        # Last frame timestamp = (frame_index / fps) * 1000
-        last_frame_timestamp_ms = (last_frame_idx * fps_den * 1000.0) / fps_num
-
-        runner._log_message(
-            f"[VapourSynth] Last frame (#{last_frame_idx}) timestamp: {last_frame_timestamp_ms:.3f}ms"
-        )
-        runner._log_message(
-            f"[VapourSynth] FPS: {fps_num}/{fps_den} ({fps_num / fps_den:.3f})"
-        )
-
-        # CRITICAL: Free memory immediately
-        # VapourSynth can hold large amounts of RAM if not freed
-        del clip
-        del last_frame
-        del core
-        gc.collect()  # Force garbage collection
-
-        runner._log_message("[VapourSynth] Index loaded, memory freed")
-
-        return (frame_count, last_frame_timestamp_ms)
-
-    except ImportError:
-        runner._log_message(
-            "[VapourSynth] WARNING: VapourSynth not installed, falling back to ffprobe"
-        )
-        return None
-    except Exception as e:
-        runner._log_message(f"[VapourSynth] ERROR: Failed to index video: {e}")
-        # Ensure cleanup even on error (variables may not exist if import failed)
-        try:
-            del clip
-        except NameError:
-            pass
-        try:
-            del core
-        except NameError:
-            pass
-        gc.collect()
-        return None
-
-
 class VideoReader:
     """
     Efficient video reader that keeps video file open for fast frame access.
@@ -1052,12 +911,13 @@ class VideoReader:
             start_frame = sparse_indices[-1]
         elif pos == 0:
             start_frame = sparse_indices[0]
+        # Pick the closer bracket
+        elif abs(sparse_times[pos] - target_s) < abs(
+            sparse_times[pos - 1] - target_s
+        ):
+            start_frame = sparse_indices[pos]
         else:
-            # Pick the closer bracket
-            if abs(sparse_times[pos] - target_s) < abs(sparse_times[pos - 1] - target_s):
-                start_frame = sparse_indices[pos]
-            else:
-                start_frame = sparse_indices[pos - 1]
+            start_frame = sparse_indices[pos - 1]
 
         # Local linear scan: refine within ±step frames of the sparse match
         step = self._ts_table_step
