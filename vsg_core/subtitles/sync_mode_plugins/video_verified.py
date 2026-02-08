@@ -300,6 +300,7 @@ def calculate_video_verified_offset(
             temp_dir=temp_dir,
             deinterlace=source_deinterlace,
             content_type=source_content_type,
+            ivtc_field_order=source_analysis.field_order,
             apply_ivtc=source_apply_ivtc,
             apply_decimate=source_apply_decimate,
             settings=settings,
@@ -310,13 +311,14 @@ def calculate_video_verified_offset(
             temp_dir=temp_dir,
             deinterlace=target_deinterlace,
             content_type=target_content_type,
+            ivtc_field_order=target_analysis.field_order,
             apply_ivtc=target_apply_ivtc,
             apply_decimate=target_apply_decimate,
             settings=settings,
         )
 
         # Get processed FPS from readers (after IVTC/deinterlace/decimate)
-        # Use source reader's FPS for frame calculations
+        # Use source reader's FPS for logging and legacy calculations.
         fps = source_reader.fps if source_reader.fps else initial_fps
         target_fps = target_reader.fps if target_reader.fps else initial_fps
 
@@ -339,7 +341,11 @@ def calculate_video_verified_offset(
         else:
             log(f"[VideoVerified] FPS: {fps:.3f} (frame: {1000.0 / fps:.3f}ms)")
 
-        frame_duration_ms = 1000.0 / fps
+        # Timebase for each reader (may differ for telecine/hybrid DVD content).
+        # Keep source timebase for candidate generation and logging, but use
+        # per-reader timebases when converting checkpoint time -> frame index.
+        source_frame_duration_ms = 1000.0 / fps
+        target_frame_duration_ms = 1000.0 / target_fps
 
     except Exception as e:
         log(f"[VideoVerified] Failed to open videos: {e}")
@@ -353,7 +359,7 @@ def calculate_video_verified_offset(
         }
 
     # Generate candidate frame offsets using processed FPS
-    correlation_frames = pure_correlation_ms / frame_duration_ms
+    correlation_frames = pure_correlation_ms / source_frame_duration_ms
     candidates_frames = _generate_frame_candidates_static(
         correlation_frames, search_range_frames
     )
@@ -387,7 +393,8 @@ def calculate_video_verified_offset(
             source_reader,
             target_reader,
             fps,
-            frame_duration_ms,
+            source_frame_duration_ms,
+            target_frame_duration_ms,
             window_radius,
             hash_algorithm,
             hash_size,
@@ -397,7 +404,7 @@ def calculate_video_verified_offset(
             sequence_verify_length=sequence_length,
         )
         # Convert frame offset to approximate ms for logging
-        approx_ms = frame_offset * frame_duration_ms
+        approx_ms = frame_offset * source_frame_duration_ms
         seq_verified = quality.get("sequence_verified", 0)
         candidate_results.append(
             {
@@ -487,7 +494,7 @@ def calculate_video_verified_offset(
         source_reader,
         target_reader,
         fps,
-        frame_duration_ms,
+        source_frame_duration_ms,
         log,
         use_pts_precision=use_pts,
     )
@@ -511,7 +518,7 @@ def calculate_video_verified_offset(
     log(f"[VideoVerified] + Global shift: {global_shift_ms:+.3f}ms")
     log(f"[VideoVerified] = Final offset: {final_offset_ms:+.3f}ms")
 
-    if abs(sub_frame_offset_ms - pure_correlation_ms) > frame_duration_ms / 2:
+    if abs(sub_frame_offset_ms - pure_correlation_ms) > source_frame_duration_ms / 2:
         log("[VideoVerified] ⚠ VIDEO OFFSET DIFFERS FROM AUDIO CORRELATION")
         log(
             f"[VideoVerified] Audio said {pure_correlation_ms:+.1f}ms, "
@@ -862,7 +869,8 @@ def _measure_frame_offset_quality_static(
     source_reader,
     target_reader,
     fps: float,
-    frame_duration_ms: float,
+    source_frame_duration_ms: float,
+    target_frame_duration_ms: float,
     window_radius: int,
     hash_algorithm: str,
     hash_size: int,
@@ -923,7 +931,7 @@ def _measure_frame_offset_quality_static(
             source_frame_idx = vfr_frame
             # Debug: show VFR vs CFR frame difference (only once at offset 0)
             if frame_offset == 0 and not vfr_debug_logged:
-                cfr_frame_would_be = int(checkpoint_ms / frame_duration_ms)
+                cfr_frame_would_be = int(checkpoint_ms / source_frame_duration_ms)
                 frame_diff = source_frame_idx - cfr_frame_would_be
                 log(
                     f"[VideoVerified] VFR→CFR frame mapping at {checkpoint_ms:.0f}ms: "
@@ -932,14 +940,12 @@ def _measure_frame_offset_quality_static(
                 vfr_debug_logged = True
         else:
             # CFR: use standard calculation (unchanged)
-            source_frame_idx = int(checkpoint_ms / frame_duration_ms)
+            source_frame_idx = int(checkpoint_ms / source_frame_duration_ms)
 
         # Target frame with this offset (STRICT - no window for initial test)
-        # Target is always CFR (IVTC produces CFR)
-        # IMPORTANT: Calculate target from checkpoint_ms independently, not from source_frame_idx
-        # VFR source frame 5512 at 226s != CFR target frame 5512 at different time
-        # We want: CFR frame at checkpoint_ms + frame_offset
-        target_base_frame = int(checkpoint_ms / frame_duration_ms)
+        # Use TARGET timebase independently. This is critical for telecine/hybrid
+        # sources where source/target processed FPS may differ slightly.
+        target_base_frame = int(checkpoint_ms / target_frame_duration_ms)
         target_frame_idx = target_base_frame + frame_offset
 
         if target_frame_idx < 0:
