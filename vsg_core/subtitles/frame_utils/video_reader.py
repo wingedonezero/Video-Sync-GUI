@@ -850,6 +850,16 @@ class VideoReader:
                     "[FrameUtils] Will use 23.976fps for calculations (actual film rate)"
                 )
 
+            # Normalize VFR-ish ~30fps to canonical 30000/1001 for consistent
+            # frame-index math. FFMS2 can report slightly off rates (e.g. 29.778)
+            # for MPEG-2 with VFR timing hints or mislabeled progressive content.
+            clip_fps = clip.fps_num / clip.fps_den
+            if 29.0 < clip_fps < 31.0 and abs(clip_fps - 30000 / 1001) > 0.01:
+                clip = core.std.AssumeFPS(clip, fpsnum=30000, fpsden=1001)
+                self.runner._log_message(
+                    f"[FrameUtils] Normalized FPS ({clip_fps:.3f} -> 29.970)"
+                )
+
             # Apply IVTC or deinterlacing based on content type
             # Priority: IVTC for telecine > deinterlace for interlaced
             #         > decimate for progressive-with-pulldown > passthrough
