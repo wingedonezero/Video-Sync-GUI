@@ -542,6 +542,17 @@ class VideoReader:
         # Store original FPS before IVTC
         self.original_fps = clip.fps_num / clip.fps_den
 
+        # Normalize telecine timebase before IVTC when FFMS2 exposes odd VFR-ish
+        # rates (e.g. 29.778). This stabilizes VDecimate output cadence.
+        if (
+            29.0 < self.original_fps < 31.0
+            and abs(self.original_fps - 30000 / 1001) > 0.01
+        ):
+            clip = core.std.AssumeFPS(clip, fpsnum=30000, fpsden=1001)
+            self.runner._log_message(
+                f"[FrameUtils] Normalized pre-IVTC FPS ({self.original_fps:.3f} -> 29.970)"
+            )
+
         try:
             # Check if VIVTC is available
             if hasattr(core, "vivtc"):
@@ -552,6 +563,10 @@ class VideoReader:
                 # VDecimate: Remove duplicates (5 frames -> 4 frames)
                 # This converts 29.97fps -> 23.976fps
                 clip = core.vivtc.VDecimate(clip)
+
+                # Force canonical film rate after IVTC for stable downstream
+                # frame-index math across DVD telecine sources.
+                clip = core.std.AssumeFPS(clip, fpsnum=24000, fpsden=1001)
 
                 self.ivtc_applied = True
                 self.runner._log_message(
@@ -567,6 +582,10 @@ class VideoReader:
 
                 # TDecimate: Decimation
                 clip = core.tivtc.TDecimate(clip, mode=1)
+
+                # Force canonical film rate after IVTC for stable downstream
+                # frame-index math across DVD telecine sources.
+                clip = core.std.AssumeFPS(clip, fpsnum=24000, fpsden=1001)
 
                 self.ivtc_applied = True
                 self.runner._log_message(
