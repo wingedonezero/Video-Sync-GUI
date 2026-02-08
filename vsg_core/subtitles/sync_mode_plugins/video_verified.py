@@ -274,7 +274,7 @@ def calculate_video_verified_offset(
         log(f"[VideoVerified] Source: {source_content_type}")
         if source_apply_ivtc:
             log(
-                f"[VideoVerified]   Processing: IVTC ({source_content_type} -> progressive)"
+                f"[VideoVerified]   Processing: VFM-only ({source_content_type} -> progressive, no VDecimate)"
             )
         elif source_apply_decimate:
             log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
@@ -286,7 +286,7 @@ def calculate_video_verified_offset(
         log(f"[VideoVerified] Target: {target_content_type}")
         if target_apply_ivtc:
             log(
-                f"[VideoVerified]   Processing: IVTC ({target_content_type} -> progressive)"
+                f"[VideoVerified]   Processing: VFM-only ({target_content_type} -> progressive, no VDecimate)"
             )
         elif target_apply_decimate:
             log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
@@ -296,6 +296,10 @@ def calculate_video_verified_offset(
             log("[VideoVerified]   Processing: none (progressive)")
 
         # Create readers with per-video settings
+        # skip_decimate_in_ivtc: For cross-encode comparison, VDecimate makes
+        # different frame-drop decisions per encode, destroying frame index
+        # correspondence. VFM-only gives progressive frames at 30fps with
+        # preserved indices — duplicates don't affect comparison accuracy.
         source_reader = VideoReader(
             source_video,
             runner,
@@ -305,6 +309,7 @@ def calculate_video_verified_offset(
             ivtc_field_order=source_analysis.field_order,
             apply_ivtc=source_apply_ivtc,
             apply_decimate=source_apply_decimate,
+            skip_decimate_in_ivtc=source_apply_ivtc,
             settings=settings,
         )
         target_reader = VideoReader(
@@ -316,6 +321,7 @@ def calculate_video_verified_offset(
             ivtc_field_order=target_analysis.field_order,
             apply_ivtc=target_apply_ivtc,
             apply_decimate=target_apply_decimate,
+            skip_decimate_in_ivtc=target_apply_ivtc,
             settings=settings,
         )
 
@@ -330,6 +336,8 @@ def calculate_video_verified_offset(
             or target_reader.ivtc_applied
             or source_reader.decimate_applied
             or target_reader.decimate_applied
+            or source_reader.vfm_applied
+            or target_reader.vfm_applied
         )
         if any_fps_changed:
             log(

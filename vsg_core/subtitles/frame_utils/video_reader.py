@@ -241,6 +241,7 @@ class VideoReader:
         ivtc_field_order: str | None = None,
         apply_ivtc: bool = False,
         apply_decimate: bool = False,
+        skip_decimate_in_ivtc: bool = False,
         use_vapoursynth: bool = True,
     ):
         self.video_path = video_path
@@ -267,7 +268,9 @@ class VideoReader:
         self.ivtc_field_order = ivtc_field_order
         self.apply_ivtc = apply_ivtc  # Whether to apply IVTC for telecine content
         self.apply_decimate = apply_decimate  # Whether to apply VDecimate only (no VFM)
-        self.ivtc_applied = False  # Whether IVTC was actually applied
+        self.skip_decimate_in_ivtc = skip_decimate_in_ivtc  # VFM only, no VDecimate
+        self.ivtc_applied = False  # Whether full IVTC (VFM+VDecimate) was applied
+        self.vfm_applied = False  # Whether VFM-only was applied (no VDecimate)
         self.decimate_applied = False  # Whether VDecimate-only was applied
         self.is_vfr = False  # True if VFR container detected
         self.is_soft_telecine = False  # True if VFR from soft-telecine removal
@@ -560,6 +563,18 @@ class VideoReader:
                 # order: 1 = TFF, 0 = BFF
                 clip = core.vivtc.VFM(clip, order=1 if tff else 0)
 
+                if self.skip_decimate_in_ivtc:
+                    # VFM-only: progressive frames with preserved frame indices.
+                    # Skipping VDecimate keeps all 30fps frames so that frame
+                    # indices stay 1:1 across different encodes (VDecimate makes
+                    # different drop decisions per encode, destroying alignment).
+                    self.vfm_applied = True
+                    self.runner._log_message(
+                        f"[FrameUtils] VFM-only applied with VIVTC "
+                        f"({self.original_fps:.3f}fps, VDecimate skipped)"
+                    )
+                    return clip
+
                 # VDecimate: Remove duplicates (5 frames -> 4 frames)
                 # This converts 29.97fps -> 23.976fps
                 clip = core.vivtc.VDecimate(clip)
@@ -579,6 +594,14 @@ class VideoReader:
             elif hasattr(core, "tivtc"):
                 # TFM: Field matching
                 clip = core.tivtc.TFM(clip, order=1 if tff else 0)
+
+                if self.skip_decimate_in_ivtc:
+                    self.vfm_applied = True
+                    self.runner._log_message(
+                        f"[FrameUtils] VFM-only applied with TIVTC "
+                        f"({self.original_fps:.3f}fps, TDecimate skipped)"
+                    )
+                    return clip
 
                 # TDecimate: Decimation
                 clip = core.tivtc.TDecimate(clip, mode=1)
@@ -853,7 +876,11 @@ class VideoReader:
                 processing_status = (
                     f", soft-telecine (using {self.fps:.3f}fps for calc)"
                 )
-            if self.ivtc_applied:
+            if self.vfm_applied:
+                processing_status += (
+                    f", VFM-only ({self.original_fps:.3f}fps, no VDecimate)"
+                )
+            elif self.ivtc_applied:
                 processing_status += (
                     f", IVTC applied ({self.original_fps:.3f} -> {self.fps:.3f}fps)"
                 )
