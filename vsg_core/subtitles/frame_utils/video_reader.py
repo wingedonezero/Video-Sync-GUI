@@ -433,6 +433,14 @@ class VideoReader:
         )
 
         try:
+            # Force _FieldBased property so deinterlacers actually process the clip.
+            # VapourSynth deinterlacers (bwdif, yadif, nnedi3) check _FieldBased and
+            # SKIP frames where _FieldBased=0 (progressive). FFMS2 sets _FieldBased
+            # from container flags, so mislabeled-progressive MPEG-2 gets _FieldBased=0
+            # even though the content is interlaced — deinterlacers pass it through raw.
+            # SetFieldBased(2)=TFF, SetFieldBased(1)=BFF
+            clip = core.std.SetFieldBased(clip, 2 if tff else 1)
+
             if method == "yadif":
                 # YADIF - Yet Another DeInterlacing Filter
                 # Mode 0 = output one frame per frame (not bob)
