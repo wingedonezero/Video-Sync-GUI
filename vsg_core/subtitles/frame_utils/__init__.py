@@ -80,6 +80,7 @@ from .validation import (
 from .video_properties import (
     ContentAnalysis,
     IdetResult,
+    RepeatPictResult,
     analyze_content_type,
     clear_content_analysis_cache,
     compare_video_properties,
@@ -106,6 +107,7 @@ __all__ = [
     "FrameAuditIssue",
     "FrameAuditResult",
     "IdetResult",
+    "RepeatPictResult",
     "VideoReader",
     "analyze_content_type",
     "clear_content_analysis_cache",
