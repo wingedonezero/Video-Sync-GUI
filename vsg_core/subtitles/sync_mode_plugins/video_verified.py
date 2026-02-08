@@ -1030,7 +1030,7 @@ def _measure_frame_offset_quality_static(
             # CFR: use standard calculation (unchanged)
             source_frame_idx = int(checkpoint_ms / source_frame_duration_ms)
 
-        # Target frame with this offset
+        # Target frame with this offset (STRICT - no window for initial test)
         # Use TARGET timebase independently. This is critical for telecine/hybrid
         # sources where source/target processed FPS may differ slightly.
         target_base_frame = int(checkpoint_ms / target_frame_duration_ms)
@@ -1040,75 +1040,50 @@ def _measure_frame_offset_quality_static(
             continue
 
         try:
+            # First, check if the single frame matches (strict, no window)
             source_frame = source_reader.get_frame_at_index(source_frame_idx)
             if source_frame is None:
                 continue
 
-            # For IVTC content, search ±tolerance around expected target frame
-            # to absorb VDecimate drift (different encodes drop different frames
-            # in each 5-frame group, shifting content by ±1 at the same index).
-            # For CFR (ivtc_tolerance=0), this is a strict single-frame check.
-            best_initial_distance = float("inf")
-            best_initial_match = False
-            best_target_idx = target_frame_idx
+            target_frame = target_reader.get_frame_at_index(target_frame_idx)
+            if target_frame is None:
+                continue
 
-            ivtc_candidates = [target_frame_idx]
-            if ivtc_tolerance > 0:
-                for delta in range(1, ivtc_tolerance + 1):
-                    if target_frame_idx + delta >= 0:
-                        ivtc_candidates.append(target_frame_idx + delta)
-                    if target_frame_idx - delta >= 0:
-                        ivtc_candidates.append(target_frame_idx - delta)
+            # Normalize resolution if frames differ in size
+            source_frame, target_frame = _normalize_frame_pair(
+                source_frame, target_frame
+            )
 
-            for candidate_idx in ivtc_candidates:
-                target_frame = target_reader.get_frame_at_index(candidate_idx)
-                if target_frame is None:
+            if comparison_method in ("ssim", "mse"):
+                # Use compare_frames with configurable SSIM/MSE threshold
+                initial_distance, initial_match = compare_frames(
+                    source_frame,
+                    target_frame,
+                    method=comparison_method,
+                    hash_algorithm=hash_algorithm,
+                    hash_size=hash_size,
+                    threshold=ssim_threshold,
+                )
+            else:
+                # Default: use perceptual hash comparison
+                source_hash = compute_frame_hash(
+                    source_frame, hash_size, hash_algorithm
+                )
+                if source_hash is None:
                     continue
 
-                # Normalize resolution if frames differ in size
-                src_norm, tgt_norm = _normalize_frame_pair(source_frame, target_frame)
+                target_hash = compute_frame_hash(
+                    target_frame, hash_size, hash_algorithm
+                )
+                if target_hash is None:
+                    continue
 
-                if comparison_method in ("ssim", "mse"):
-                    cand_distance, cand_match = compare_frames(
-                        src_norm,
-                        tgt_norm,
-                        method=comparison_method,
-                        hash_algorithm=hash_algorithm,
-                        hash_size=hash_size,
-                        threshold=ssim_threshold,
-                    )
-                else:
-                    source_hash = compute_frame_hash(
-                        src_norm, hash_size, hash_algorithm
-                    )
-                    if source_hash is None:
-                        continue
-
-                    target_hash = compute_frame_hash(
-                        tgt_norm, hash_size, hash_algorithm
-                    )
-                    if target_hash is None:
-                        continue
-
-                    cand_distance = compute_hamming_distance(source_hash, target_hash)
-                    cand_match = cand_distance <= hash_threshold
-
-                if cand_distance < best_initial_distance:
-                    best_initial_distance = cand_distance
-                    best_initial_match = cand_match
-                    best_target_idx = candidate_idx
-
-            initial_distance = best_initial_distance
-            initial_match = best_initial_match
-            target_frame_idx = best_target_idx
-
-            if initial_distance == float("inf"):
-                continue
+                initial_distance = compute_hamming_distance(source_hash, target_hash)
+                initial_match = initial_distance <= hash_threshold
 
             distances.append(initial_distance)
 
             # Now verify with sequence of consecutive frames
-            # Start from best_target_idx (aligned position) rather than strict index
             seq_matched, seq_avg_dist, _seq_distances = _verify_frame_sequence_static(
                 source_frame_idx,
                 target_frame_idx,
