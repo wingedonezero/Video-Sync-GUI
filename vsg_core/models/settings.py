@@ -115,6 +115,10 @@ class AppSettings(BaseModel):
     min_match_pct: float = 5.0
     videodiff_error_min: float = 0.0
     videodiff_error_max: float = 100.0
+    videodiff_sample_fps: float = 2.0
+    videodiff_match_threshold: int = 5
+    videodiff_min_matches: int = 50
+    videodiff_inlier_threshold_ms: float = 100.0
 
     # =========================================================================
     # Chapter Settings
