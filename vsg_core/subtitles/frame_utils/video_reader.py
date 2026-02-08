@@ -238,6 +238,7 @@ class VideoReader:
         deinterlace: str = "auto",
         settings: AppSettings | None = None,
         content_type: str | None = None,
+        ivtc_field_order: str | None = None,
         apply_ivtc: bool = False,
         apply_decimate: bool = False,
         use_vapoursynth: bool = True,
@@ -260,6 +261,10 @@ class VideoReader:
         self.field_order = "progressive"
         self.deinterlace_applied = False
         self.content_type = content_type  # 'progressive', 'interlaced', 'telecine'
+        # Optional field-order override from content analysis (idet/repeat_pict).
+        # This is critical when container metadata reports "progressive" for
+        # hard-telecined MPEG-2, where IVTC still needs a stable field order.
+        self.ivtc_field_order = ivtc_field_order
         self.apply_ivtc = apply_ivtc  # Whether to apply IVTC for telecine content
         self.apply_decimate = apply_decimate  # Whether to apply VDecimate only (no VFM)
         self.ivtc_applied = False  # Whether IVTC was actually applied
@@ -502,10 +507,7 @@ class VideoReader:
 
         # Also check if detected as interlaced NTSC DVD (likely telecine)
         # This handles cases where content_type wasn't passed but we detected it
-        if self.is_interlaced and self.fps and abs(self.fps - 29.97) < 0.1:
-            return True
-
-        return False
+        return bool(self.is_interlaced and self.fps and abs(self.fps - 29.97) < 0.1)
 
     def _apply_ivtc_filter(self, clip, core):
         """
@@ -524,7 +526,14 @@ class VideoReader:
         Returns:
             Progressive clip at ~23.976fps
         """
-        tff = self.field_order == "tff"
+        field_order_for_ivtc = self.field_order
+        if self.ivtc_field_order in ("tff", "bff"):
+            field_order_for_ivtc = self.ivtc_field_order
+        elif field_order_for_ivtc not in ("tff", "bff"):
+            # Safe default for NTSC DVD telecine when metadata has no field order.
+            field_order_for_ivtc = "tff"
+
+        tff = field_order_for_ivtc == "tff"
 
         self.runner._log_message(
             f"[FrameUtils] Applying IVTC (field order: {'TFF' if tff else 'BFF'})"
@@ -532,6 +541,17 @@ class VideoReader:
 
         # Store original FPS before IVTC
         self.original_fps = clip.fps_num / clip.fps_den
+
+        # Normalize telecine timebase before IVTC when FFMS2 exposes odd VFR-ish
+        # rates (e.g. 29.778). This stabilizes VDecimate output cadence.
+        if (
+            29.0 < self.original_fps < 31.0
+            and abs(self.original_fps - 30000 / 1001) > 0.01
+        ):
+            clip = core.std.AssumeFPS(clip, fpsnum=30000, fpsden=1001)
+            self.runner._log_message(
+                f"[FrameUtils] Normalized pre-IVTC FPS ({self.original_fps:.3f} -> 29.970)"
+            )
 
         try:
             # Check if VIVTC is available
@@ -543,6 +563,10 @@ class VideoReader:
                 # VDecimate: Remove duplicates (5 frames -> 4 frames)
                 # This converts 29.97fps -> 23.976fps
                 clip = core.vivtc.VDecimate(clip)
+
+                # Force canonical film rate after IVTC for stable downstream
+                # frame-index math across DVD telecine sources.
+                clip = core.std.AssumeFPS(clip, fpsnum=24000, fpsden=1001)
 
                 self.ivtc_applied = True
                 self.runner._log_message(
@@ -558,6 +582,10 @@ class VideoReader:
 
                 # TDecimate: Decimation
                 clip = core.tivtc.TDecimate(clip, mode=1)
+
+                # Force canonical film rate after IVTC for stable downstream
+                # frame-index math across DVD telecine sources.
+                clip = core.std.AssumeFPS(clip, fpsnum=24000, fpsden=1001)
 
                 self.ivtc_applied = True
                 self.runner._log_message(
@@ -886,7 +914,7 @@ class VideoReader:
         Get the Presentation Time Stamp (PTS) of a frame in milliseconds.
 
         For VFR (variable frame rate) content, this returns the actual container
-        timestamp. For CFR content, it calculates from frame index × frame duration.
+        timestamp. For CFR content, it calculates from frame index x frame duration.
 
         This is essential for sub-frame accurate timing - once we identify which
         frames match between source and target, we use their actual PTS values
