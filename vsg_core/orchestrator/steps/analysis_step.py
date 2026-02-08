@@ -705,7 +705,10 @@ class AnalysisStep:
                     )
 
         # --- Step 2: Run correlation/videodiff for other sources ---
-        is_videodiff_mode = settings.analysis_mode == "VideoDiff"
+        is_videodiff_mode = (
+            settings.analysis_mode == "VideoDiff"
+            or settings.correlation_method == "VideoDiff"
+        )
 
         if is_videodiff_mode:
             runner._log_message("\n--- Running VideoDiff (Frame Matching) Analysis ---")
