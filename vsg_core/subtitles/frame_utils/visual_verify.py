@@ -212,49 +212,43 @@ def _detect_vfr(clip: object, fps: float, num_frames: int) -> bool:
 
 
 def _build_vfr_table(
-    clip: object, num_frames: int, step: int = 50
-) -> tuple[list[float], list[int]]:
+    clip: object, num_frames: int, log: Callable[[str], None] | None = None,
+) -> list[float]:
     """
-    Build a sparse time→frame lookup table for VFR content.
+    Build a full per-frame timestamp table for VFR content.
 
-    Samples every `step` frames and records their _AbsoluteTime.
-    Always includes the last frame.
+    Reads _AbsoluteTime from every frame. This is necessary for accurate
+    time→frame lookup on VFR content where timestamps can drift
+    significantly from the nominal FPS.
 
     Args:
         clip: VapourSynth clip with _AbsoluteTime frame props.
         num_frames: Total frame count.
-        step: Sampling step (default 50).
+        log: Optional logging function for progress.
 
     Returns:
-        Tuple of (times_seconds, frame_indices) — parallel lists,
-        sorted by time. Empty lists if table cannot be built.
+        List of timestamps (seconds) indexed by frame number.
+        Falls back to 0.0 for any frame where _AbsoluteTime is unavailable.
     """
     times: list[float] = []
-    indices: list[int] = []
 
-    for i in range(0, num_frames, step):
+    for i in range(num_frames):
         try:
             props = clip.get_frame(i).props
-            t = props.get("_AbsoluteTime", None)
-            if t is not None:
-                times.append(float(t))
-                indices.append(i)
+            t = props.get("_AbsoluteTime", 0.0)
+            times.append(float(t))
         except Exception:
-            pass
+            # Fallback: interpolate from previous
+            if times:
+                times.append(times[-1] + 0.033)  # ~30fps fallback
+            else:
+                times.append(0.0)
 
-    # Always include last frame
-    last = num_frames - 1
-    if last not in indices:
-        try:
-            props = clip.get_frame(last).props
-            t = props.get("_AbsoluteTime", None)
-            if t is not None:
-                times.append(float(t))
-                indices.append(last)
-        except Exception:
-            pass
+        # Progress logging every 5000 frames
+        if log and (i + 1) % 5000 == 0:
+            log(f"[VisualVerify] VFR table progress: {i + 1}/{num_frames} frames...")
 
-    return times, indices
+    return times
 
 
 def _time_to_frame_idx(
@@ -262,76 +256,40 @@ def _time_to_frame_idx(
     fps: float,
     num_frames: int,
     vfr_times: list[float] | None = None,
-    vfr_indices: list[int] | None = None,
-    clip: object | None = None,
-    vfr_step: int = 50,
 ) -> int:
     """
     Convert a time (seconds) to a frame index.
 
     For CFR: simple ``int(time_s * fps)``.
-    For VFR: binary search in sparse table, then local refinement by
-    scanning actual frame timestamps.
+    For VFR: binary search in the full per-frame timestamp table,
+    returning the frame whose timestamp is closest to the target time.
 
     Args:
         time_s: Time in seconds.
         fps: Frame rate.
         num_frames: Total frames (for clamping).
-        vfr_times: Sparse VFR time table (seconds). None for CFR.
-        vfr_indices: Sparse VFR frame index table. None for CFR.
-        clip: VapourSynth clip (needed for VFR local refinement).
-        vfr_step: Step size used when building VFR table.
+        vfr_times: Full per-frame timestamp table (seconds). None for CFR.
 
     Returns:
         Frame index (0-based), clamped to [0, num_frames-1].
     """
-    if not vfr_times or not vfr_indices:
+    if not vfr_times:
         # CFR path
         idx = int(time_s * fps)
         return max(0, min(idx, num_frames - 1))
 
-    # VFR path: binary search in sparse table
+    # VFR path: binary search in full per-frame table
     pos = bisect.bisect_left(vfr_times, time_s)
 
     if pos >= len(vfr_times):
-        start_frame = vfr_indices[-1]
-    elif pos == 0:
-        start_frame = vfr_indices[0]
-    else:
-        # Pick closer bracket
-        if abs(vfr_times[pos] - time_s) < abs(vfr_times[pos - 1] - time_s):
-            start_frame = vfr_indices[pos]
-        else:
-            start_frame = vfr_indices[pos - 1]
+        return len(vfr_times) - 1
+    if pos == 0:
+        return 0
 
-    # Local refinement: scan ±step frames around the sparse match
-    if clip is not None:
-        lo = max(0, start_frame - vfr_step)
-        hi = min(num_frames - 1, start_frame + vfr_step)
-
-        best_frame = start_frame
-        best_diff = float("inf")
-
-        for i in range(lo, hi + 1):
-            try:
-                props = clip.get_frame(i).props
-                t = props.get("_AbsoluteTime", None)
-                if t is None:
-                    continue
-                diff = abs(t - time_s)
-                if diff < best_diff:
-                    best_diff = diff
-                    best_frame = i
-                    if diff < 0.001:  # Within 1ms — good enough
-                        break
-                elif t > time_s + 0.1:
-                    break
-            except Exception:
-                continue
-
-        return max(0, min(best_frame, num_frames - 1))
-
-    return max(0, min(start_frame, num_frames - 1))
+    # Pick the frame whose timestamp is closest
+    if abs(vfr_times[pos] - time_s) < abs(vfr_times[pos - 1] - time_s):
+        return pos
+    return pos - 1
 
 
 # ============================================================================
@@ -427,17 +385,14 @@ def _verify_sample(
     src_num_frames: int,
     tgt_num_frames: int,
     src_vfr_times: list[float] | None,
-    src_vfr_indices: list[int] | None,
     tgt_vfr_times: list[float] | None,
-    tgt_vfr_indices: list[int] | None,
     search_range: int,
     sample_index: int,
-    vfr_step: int = 50,
 ) -> SampleResult:
     """
     Verify a single sample point.
 
-    Compares source frame at time T with target frame at time T - offset,
+    Compares source frame at time T with target frame at time T + offset,
     then searches ±search_range frames for the best match.
 
     Args:
@@ -449,32 +404,27 @@ def _verify_sample(
         tgt_fps: Target FPS.
         src_num_frames: Source total frames.
         tgt_num_frames: Target total frames.
-        src_vfr_times: Source VFR time table (None for CFR).
-        src_vfr_indices: Source VFR index table (None for CFR).
-        tgt_vfr_times: Target VFR time table (None for CFR).
-        tgt_vfr_indices: Target VFR index table (None for CFR).
+        src_vfr_times: Source VFR per-frame table (None for CFR).
+        tgt_vfr_times: Target VFR per-frame table (None for CFR).
         search_range: How many frames to search (±N).
         sample_index: Index of this sample (for reporting).
-        vfr_step: Step size used for VFR tables.
 
     Returns:
         SampleResult with classification.
     """
     # Source frame at time T
     src_frame = _time_to_frame_idx(
-        time_s, src_fps, src_num_frames,
-        src_vfr_times, src_vfr_indices, src_clip, vfr_step,
+        time_s, src_fps, src_num_frames, src_vfr_times,
     )
 
-    # Target frame at time T - offset_ms
-    # offset_ms is the adjustment applied to subtitles:
-    #   If offset_ms = -1034, subs shift earlier by 1034ms.
-    #   Source content at T corresponds to target content at T - offset/1000.
-    #   T - (-1034/1000) = T + 1.034 → target content is ahead.
-    target_time_s = time_s - (offset_ms / 1000.0)
+    # Target frame at time T + offset_ms/1000
+    # offset_ms is the adjustment applied to subtitles (negative = target ahead):
+    #   If offset_ms = -1034, target content is ~1.034s ahead of source.
+    #   Source content at T corresponds to target content at T + offset/1000.
+    #   T + (-1034/1000) = T - 1.034 → look earlier in target.
+    target_time_s = time_s + (offset_ms / 1000.0)
     tgt_frame = _time_to_frame_idx(
-        target_time_s, tgt_fps, tgt_num_frames,
-        tgt_vfr_times, tgt_vfr_indices, tgt_clip, vfr_step,
+        target_time_s, tgt_fps, tgt_num_frames, tgt_vfr_times,
     )
 
     # Extract raw Y planes
@@ -513,8 +463,10 @@ def _verify_sample(
     else:
         classification = "unmatchable"
 
-    # Static frame detection: all nearby frames look similar (static/held scene)
-    is_static = abs(base_dist - best_dist) < 1.0 and base_dist < 5.0
+    # Static frame detection: base and best are nearly identical, meaning
+    # nearby frames all look the same (static/held scene, slow pan, etc.)
+    # In this case the best_delta is meaningless noise — treat as effectively exact.
+    is_static = abs(base_dist - best_dist) < 1.0
 
     return SampleResult(
         sample_index=sample_index,
@@ -551,23 +503,25 @@ def _detect_credits_region(samples: list[SampleResult]) -> CreditsInfo:
     if len(samples) < 5:
         return CreditsInfo()
 
-    # Scan backward: count consecutive unmatchable samples
-    consecutive_unmatchable = 0
+    # Scan backward: count consecutive high-distance samples
+    # Use threshold of 25 (same content but different) rather than 50
+    # to catch credits/ED sections where content is similar but not matching
+    consecutive_bad = 0
     boundary_idx = None
 
     for i in range(len(samples) - 1, -1, -1):
-        if samples[i].best_dist > 50.0:
-            consecutive_unmatchable += 1
+        if samples[i].best_dist > 25.0:
+            consecutive_bad += 1
             boundary_idx = i
         else:
             break
 
-    if consecutive_unmatchable >= 3:
+    if consecutive_bad >= 3:
         return CreditsInfo(
             detected=True,
             boundary_time_s=samples[boundary_idx].time_s,
             boundary_sample=boundary_idx,
-            num_credits_samples=consecutive_unmatchable,
+            num_credits_samples=consecutive_bad,
         )
 
     return CreditsInfo()
@@ -643,12 +597,21 @@ def _compute_region_stats(samples: list[SampleResult]) -> list[RegionStats]:
             continue
 
         total = len(region_list)
-        exact = sum(1 for s in region_list if s.classification == "exact")
+
+        def _eff_delta(s: SampleResult) -> int:
+            return 0 if s.is_static else s.best_delta
+
+        exact = sum(
+            1 for s in region_list
+            if _eff_delta(s) == 0 and s.best_dist < 50.0
+        )
         within_1 = sum(
-            1 for s in region_list if abs(s.best_delta) <= 1 and s.best_dist < 50.0
+            1 for s in region_list
+            if abs(_eff_delta(s)) <= 1 and s.best_dist < 50.0
         )
         within_2 = sum(
-            1 for s in region_list if abs(s.best_delta) <= 2 and s.best_dist < 50.0
+            1 for s in region_list
+            if abs(_eff_delta(s)) <= 2 and s.best_dist < 50.0
         )
         unmatchable = sum(1 for s in region_list if s.classification == "unmatchable")
         static = sum(1 for s in region_list if s.is_static)
@@ -776,23 +739,19 @@ def run_visual_verify(
     if tgt_is_vfr:
         _log("[VisualVerify] Target is VFR — building timestamp table...")
 
-    # Build VFR tables if needed
-    vfr_step = 50
-    src_vfr_times, src_vfr_indices = (
-        _build_vfr_table(src_clip, src_num_frames, vfr_step)
-        if src_is_vfr
-        else (None, None)
-    )
-    tgt_vfr_times, tgt_vfr_indices = (
-        _build_vfr_table(tgt_clip, tgt_num_frames, vfr_step)
-        if tgt_is_vfr
-        else (None, None)
-    )
+    # Build full per-frame VFR tables if needed
+    src_vfr_times = None
+    tgt_vfr_times = None
 
-    if src_is_vfr and src_vfr_times:
-        _log(f"[VisualVerify] Source VFR table: {len(src_vfr_times)} entries")
-    if tgt_is_vfr and tgt_vfr_times:
-        _log(f"[VisualVerify] Target VFR table: {len(tgt_vfr_times)} entries")
+    if src_is_vfr:
+        src_vfr_times = _build_vfr_table(src_clip, src_num_frames, _log)
+        _log(f"[VisualVerify] Source VFR table: {len(src_vfr_times)} entries, "
+             f"range {src_vfr_times[0]:.3f}s - {src_vfr_times[-1]:.3f}s")
+
+    if tgt_is_vfr:
+        tgt_vfr_times = _build_vfr_table(tgt_clip, tgt_num_frames, _log)
+        _log(f"[VisualVerify] Target VFR table: {len(tgt_vfr_times)} entries, "
+             f"range {tgt_vfr_times[0]:.3f}s - {tgt_vfr_times[-1]:.3f}s")
 
     # Determine video duration from shorter clip
     src_duration_s = src_num_frames / src_raw_fps
@@ -828,12 +787,9 @@ def run_visual_verify(
                 src_num_frames=src_num_frames,
                 tgt_num_frames=tgt_num_frames,
                 src_vfr_times=src_vfr_times,
-                src_vfr_indices=src_vfr_indices,
                 tgt_vfr_times=tgt_vfr_times,
-                tgt_vfr_indices=tgt_vfr_indices,
                 search_range=search_range,
                 sample_index=i,
-                vfr_step=vfr_step,
             )
             samples.append(result)
         except Exception as e:
@@ -862,14 +818,27 @@ def run_visual_verify(
     regions = _compute_region_stats(samples)
 
     # Compute main-content stats (everything except credits)
+    # Use "effective delta": for static frames (base ≈ best), the delta
+    # is meaningless noise from nearly-identical nearby frames — treat as
+    # effectively exact (delta=0).
     main_samples = [s for s in samples if s.region != "credits"]
     main_total = len(main_samples)
-    main_exact = sum(1 for s in main_samples if s.classification == "exact")
+
+    def _effective_delta(s: SampleResult) -> int:
+        """Return effective delta, treating static frames as delta=0."""
+        return 0 if s.is_static else s.best_delta
+
+    main_exact = sum(
+        1 for s in main_samples
+        if _effective_delta(s) == 0 and s.best_dist < 50.0
+    )
     main_within_1 = sum(
-        1 for s in main_samples if abs(s.best_delta) <= 1 and s.best_dist < 50.0
+        1 for s in main_samples
+        if abs(_effective_delta(s)) <= 1 and s.best_dist < 50.0
     )
     main_within_2 = sum(
-        1 for s in main_samples if abs(s.best_delta) <= 2 and s.best_dist < 50.0
+        1 for s in main_samples
+        if abs(_effective_delta(s)) <= 2 and s.best_dist < 50.0
     )
     main_unmatchable = sum(
         1 for s in main_samples if s.classification == "unmatchable"
