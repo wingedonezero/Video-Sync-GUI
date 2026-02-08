@@ -414,7 +414,19 @@ class VideoReader:
             Deinterlaced clip
         """
         method = self._get_deinterlace_method()
-        tff = self.field_order == "tff"  # True = Top Field First
+
+        # Use ivtc_field_order (from ContentAnalysis/idet) when available,
+        # falling back to self.field_order (from ffprobe metadata).
+        # This is critical when container says "progressive" but content is
+        # actually interlaced (common with MPEG-2 telecine DVDs).
+        field_order = self.field_order
+        if self.ivtc_field_order in ("tff", "bff"):
+            field_order = self.ivtc_field_order
+        elif field_order not in ("tff", "bff"):
+            # Safe default when no field order info available
+            field_order = "tff"
+
+        tff = field_order == "tff"
 
         self.runner._log_message(
             f"[FrameUtils] Applying deinterlace: {method} (field order: {'TFF' if tff else 'BFF'})"
