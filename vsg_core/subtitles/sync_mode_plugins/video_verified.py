@@ -229,14 +229,6 @@ def calculate_video_verified_offset(
             else "auto"
         )
 
-        log(f"[VideoVerified] Source: {source_content_type}")
-        if source_apply_ivtc:
-            log("[VideoVerified]   Processing: IVTC (telecine → progressive)")
-        elif source_content_type == "interlaced":
-            log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
-        else:
-            log("[VideoVerified]   Processing: none (progressive)")
-
         # Target video processing
         target_content_type = target_props.get("content_type", "progressive")
         target_apply_ivtc = (
@@ -250,9 +242,45 @@ def calculate_video_verified_offset(
             else "auto"
         )
 
+        # Detect progressive-with-pulldown: when content_type is "unknown"
+        # (progressive ~30fps DVD) and the companion is telecine, the "unknown"
+        # video likely has duplicate frames from 2:3 pulldown baked in.
+        # Apply VDecimate (no VFM) to remove duplicates and match the
+        # companion's ~24fps after IVTC.
+        source_apply_decimate = (
+            not source_apply_ivtc
+            and use_interlaced_settings
+            and settings.interlaced_use_ivtc
+            and source_content_type == "unknown"
+            and target_content_type == "telecine"
+        )
+        target_apply_decimate = (
+            not target_apply_ivtc
+            and use_interlaced_settings
+            and settings.interlaced_use_ivtc
+            and target_content_type == "unknown"
+            and source_content_type == "telecine"
+        )
+
+        log(f"[VideoVerified] Source: {source_content_type}")
+        if source_apply_ivtc:
+            log("[VideoVerified]   Processing: IVTC (telecine → progressive)")
+        elif source_apply_decimate:
+            log(
+                "[VideoVerified]   Processing: VDecimate (progressive with pulldown → ~24fps)"
+            )
+        elif source_content_type == "interlaced":
+            log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
+        else:
+            log("[VideoVerified]   Processing: none (progressive)")
+
         log(f"[VideoVerified] Target: {target_content_type}")
         if target_apply_ivtc:
             log("[VideoVerified]   Processing: IVTC (telecine → progressive)")
+        elif target_apply_decimate:
+            log(
+                "[VideoVerified]   Processing: VDecimate (progressive with pulldown → ~24fps)"
+            )
         elif target_content_type == "interlaced":
             log(f"[VideoVerified]   Processing: deinterlace ({target_deinterlace})")
         else:
@@ -266,6 +294,7 @@ def calculate_video_verified_offset(
             deinterlace=source_deinterlace,
             content_type=source_content_type,
             apply_ivtc=source_apply_ivtc,
+            apply_decimate=source_apply_decimate,
             settings=settings,
         )
         target_reader = VideoReader(
@@ -275,16 +304,23 @@ def calculate_video_verified_offset(
             deinterlace=target_deinterlace,
             content_type=target_content_type,
             apply_ivtc=target_apply_ivtc,
+            apply_decimate=target_apply_decimate,
             settings=settings,
         )
 
-        # Get processed FPS from readers (after IVTC/deinterlace)
+        # Get processed FPS from readers (after IVTC/deinterlace/decimate)
         # Use source reader's FPS for frame calculations
         fps = source_reader.fps if source_reader.fps else initial_fps
         target_fps = target_reader.fps if target_reader.fps else initial_fps
 
-        # Log FPS info, especially if IVTC changed it
-        if source_reader.ivtc_applied or target_reader.ivtc_applied:
+        # Log FPS info, especially if processing changed it
+        any_fps_changed = (
+            source_reader.ivtc_applied
+            or target_reader.ivtc_applied
+            or source_reader.decimate_applied
+            or target_reader.decimate_applied
+        )
+        if any_fps_changed:
             log(
                 f"[VideoVerified] Processed FPS: source={fps:.3f}, target={target_fps:.3f}"
             )

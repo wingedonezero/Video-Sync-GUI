@@ -239,6 +239,7 @@ class VideoReader:
         settings: AppSettings | None = None,
         content_type: str | None = None,
         apply_ivtc: bool = False,
+        apply_decimate: bool = False,
         use_vapoursynth: bool = True,
     ):
         self.video_path = video_path
@@ -251,7 +252,7 @@ class VideoReader:
         self.use_ffms2 = False
         self.use_opencv = False
         self.fps = None
-        self.original_fps = None  # FPS before IVTC (if applied)
+        self.original_fps = None  # FPS before IVTC/decimate (if applied)
         self.temp_dir = temp_dir
         self.deinterlace_method = deinterlace
         self.settings = settings
@@ -260,7 +261,9 @@ class VideoReader:
         self.deinterlace_applied = False
         self.content_type = content_type  # 'progressive', 'interlaced', 'telecine'
         self.apply_ivtc = apply_ivtc  # Whether to apply IVTC for telecine content
+        self.apply_decimate = apply_decimate  # Whether to apply VDecimate only (no VFM)
         self.ivtc_applied = False  # Whether IVTC was actually applied
+        self.decimate_applied = False  # Whether VDecimate-only was applied
         self.is_vfr = False  # True if VFR container detected
         self.is_soft_telecine = False  # True if VFR from soft-telecine removal
         self.target_fps = None  # Target FPS after normalization (for soft-telecine)
@@ -581,6 +584,65 @@ class VideoReader:
             self.runner._log_message("[FrameUtils] Falling back to deinterlacing")
             return self._apply_deinterlace_filter(clip, core)
 
+    def _apply_decimate_filter(self, clip, core):
+        """
+        Apply VDecimate only (no VFM) for progressive content with duplicate frames.
+
+        For progressive content with 2:3 pulldown (soft telecine), the frames are
+        already progressive but contain duplicates from the pulldown pattern.
+        VDecimate detects and removes these duplicates, converting ~30fps to ~24fps.
+
+        Unlike full IVTC (VFM + VDecimate), this skips field matching since
+        the content is already progressive.
+
+        Args:
+            clip: VapourSynth clip (progressive with duplicate frames)
+            core: VapourSynth core
+
+        Returns:
+            Decimated clip at ~23.976fps
+        """
+        self.original_fps = clip.fps_num / clip.fps_den
+
+        self.runner._log_message(
+            f"[FrameUtils] Applying VDecimate for progressive-with-pulldown "
+            f"({self.original_fps:.3f}fps)"
+        )
+
+        try:
+            if hasattr(core, "vivtc"):
+                clip = core.vivtc.VDecimate(clip)
+                self.decimate_applied = True
+                new_fps = clip.fps_num / clip.fps_den
+                self.runner._log_message(
+                    f"[FrameUtils] VDecimate applied "
+                    f"({self.original_fps:.3f}fps -> {new_fps:.3f}fps)"
+                )
+                return clip
+
+            elif hasattr(core, "tivtc"):
+                clip = core.tivtc.TDecimate(clip, mode=1)
+                self.decimate_applied = True
+                new_fps = clip.fps_num / clip.fps_den
+                self.runner._log_message(
+                    f"[FrameUtils] TDecimate applied "
+                    f"({self.original_fps:.3f}fps -> {new_fps:.3f}fps)"
+                )
+                return clip
+
+            else:
+                self.runner._log_message(
+                    "[FrameUtils] WARNING: No decimation plugin available (vivtc or tivtc)"
+                )
+                self.runner._log_message(
+                    "[FrameUtils] Duplicate frames will remain (~30fps instead of ~24fps)"
+                )
+                return clip
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] Decimation failed: {e}")
+            return clip
+
     def _get_index_cache_path(self, video_path: str, temp_dir: Path) -> Path:
         """
         Generate cache path for FFMS2 index in job's temp directory.
@@ -726,14 +788,17 @@ class VideoReader:
                 )
 
             # Apply IVTC or deinterlacing based on content type
-            # Priority: IVTC for telecine > deinterlace for interlaced > passthrough
+            # Priority: IVTC for telecine > deinterlace for interlaced
+            #         > decimate for progressive-with-pulldown > passthrough
             if self._should_apply_ivtc():
                 # Telecine content: apply IVTC to recover progressive frames
                 clip = self._apply_ivtc_filter(clip, core)
             elif self._should_deinterlace():
                 # Pure interlaced content: apply deinterlacing
                 clip = self._apply_deinterlace_filter(clip, core)
-            # else: progressive content, no processing needed
+            elif self.apply_decimate:
+                # Progressive content with duplicate frames (2:3 pulldown)
+                clip = self._apply_decimate_filter(clip, core)
 
             # Keep clip in original format (usually YUV)
             # We'll extract only luma (Y) plane for hashing - more reliable than RGB
@@ -757,6 +822,8 @@ class VideoReader:
                 processing_status += (
                     f", IVTC applied ({self.original_fps:.3f} -> {self.fps:.3f}fps)"
                 )
+            elif self.decimate_applied:
+                processing_status += f", VDecimate applied ({self.original_fps:.3f} -> {self.fps:.3f}fps)"
             elif self.deinterlace_applied:
                 processing_status += (
                     f", deinterlaced with {self._get_deinterlace_method()}"
