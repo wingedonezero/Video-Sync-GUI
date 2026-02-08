@@ -132,7 +132,6 @@ class SubtitlesStep:
             )
 
         items_to_add = []
-        _any_no_scene_fallback = False
 
         # Cache for scene detection results per source
         _scene_detection_cache = {}
@@ -266,10 +265,6 @@ class SubtitlesStep:
                     runner._log_message(
                         f"[Subtitles] Track {item.track.id}: Bitmap format {ext} - using mkvmerge --sync for delay"
                     )
-
-        # Set context flag if any track used raw delay fallback
-        if _any_no_scene_fallback:
-            ctx.correlation_snap_no_scenes_fallback = True
 
         if items_to_add:
             ctx.extracted_items.extend(items_to_add)
@@ -771,24 +766,12 @@ class SubtitlesStep:
             )
 
             # Apply the delay directly to subtitle events (like time-based mode)
-            from vsg_core.subtitles.data import OperationResult, SyncEventData
+            from vsg_core.subtitles.data import OperationResult
+            from vsg_core.subtitles.sync_utils import apply_delay_to_events
 
-            events_synced = 0
-            for event in subtitle_data.events:
-                if event.is_comment:
-                    continue
-                original_start = event.start_ms
-                original_end = event.end_ms
-                event.start_ms += cached["corrected_delay_ms"]
-                event.end_ms += cached["corrected_delay_ms"]
-                event.sync = SyncEventData(
-                    original_start_ms=original_start,
-                    original_end_ms=original_end,
-                    start_adjustment_ms=cached["corrected_delay_ms"],
-                    end_adjustment_ms=cached["corrected_delay_ms"],
-                    snapped_to_frame=False,
-                )
-                events_synced += 1
+            events_synced = apply_delay_to_events(
+                subtitle_data, cached["corrected_delay_ms"]
+            )
 
             runner._log_message(
                 f"[Sync] Applied {cached['corrected_delay_ms']:+.1f}ms to {events_synced} events"
@@ -817,28 +800,14 @@ class SubtitlesStep:
         # (Source 1 would compare against itself which produces incorrect results)
         # Just apply the delay directly (which is just global_shift for Source 1)
         if sync_mode == "video-verified" and source_key == "Source 1":
-            from vsg_core.subtitles.data import OperationResult, SyncEventData
+            from vsg_core.subtitles.data import OperationResult
+            from vsg_core.subtitles.sync_utils import apply_delay_to_events
 
             runner._log_message(
                 "[Sync] Source 1 is reference - applying delay directly without frame matching"
             )
 
-            events_synced = 0
-            for event in subtitle_data.events:
-                if event.is_comment:
-                    continue
-                original_start = event.start_ms
-                original_end = event.end_ms
-                event.start_ms += total_delay_ms
-                event.end_ms += total_delay_ms
-                event.sync = SyncEventData(
-                    original_start_ms=original_start,
-                    original_end_ms=original_end,
-                    start_adjustment_ms=total_delay_ms,
-                    end_adjustment_ms=total_delay_ms,
-                    snapped_to_frame=False,
-                )
-                events_synced += 1
+            events_synced = apply_delay_to_events(subtitle_data, total_delay_ms)
 
             runner._log_message(
                 f"[Sync] Applied {total_delay_ms:+.1f}ms to {events_synced} events (reference)"

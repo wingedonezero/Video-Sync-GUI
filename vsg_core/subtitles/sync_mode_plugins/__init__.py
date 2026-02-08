@@ -16,15 +16,9 @@ import importlib
 _MODULE_MAP = {
     "TimeBasedSync": ("time_based", "TimeBasedSync"),
     "TimebaseFrameLockedSync": ("timebase_frame_locked", "TimebaseFrameLockedSync"),
-    "DurationAlignSync": ("duration_align", "DurationAlignSync"),
-    "CorrelationFrameSnapSync": ("correlation_frame_snap", "CorrelationFrameSnapSync"),
     "SubtitleAnchoredFrameSnapSync": (
         "subtitle_anchored_frame_snap",
         "SubtitleAnchoredFrameSnapSync",
-    ),
-    "CorrelationGuidedFrameAnchorSync": (
-        "correlation_guided_frame_anchor",
-        "CorrelationGuidedFrameAnchorSync",
     ),
     "VideoVerifiedSync": ("video_verified", "VideoVerifiedSync"),
 }
@@ -32,10 +26,7 @@ _MODULE_MAP = {
 _SUBMODULES = [
     "time_based",
     "timebase_frame_locked",
-    "duration_align",
-    "correlation_frame_snap",
     "subtitle_anchored_frame_snap",
-    "correlation_guided_frame_anchor",
     "video_verified",
 ]
 
@@ -64,9 +55,6 @@ def __getattr__(name):
 
 
 __all__ = [
-    "CorrelationFrameSnapSync",
-    "CorrelationGuidedFrameAnchorSync",
-    "DurationAlignSync",
     "SubtitleAnchoredFrameSnapSync",
     "TimeBasedSync",
     "TimebaseFrameLockedSync",

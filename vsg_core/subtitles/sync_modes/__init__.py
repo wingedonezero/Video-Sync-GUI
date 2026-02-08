@@ -106,10 +106,7 @@ def _ensure_plugins_loaded():
         plugins_to_load = [
             "vsg_core.subtitles.sync_mode_plugins.time_based",
             "vsg_core.subtitles.sync_mode_plugins.timebase_frame_locked",
-            "vsg_core.subtitles.sync_mode_plugins.duration_align",
-            "vsg_core.subtitles.sync_mode_plugins.correlation_frame_snap",
             "vsg_core.subtitles.sync_mode_plugins.subtitle_anchored_frame_snap",
-            "vsg_core.subtitles.sync_mode_plugins.correlation_guided_frame_anchor",
             "vsg_core.subtitles.sync_mode_plugins.video_verified",
         ]
         for module_name in plugins_to_load:

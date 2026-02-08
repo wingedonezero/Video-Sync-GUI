@@ -94,10 +94,6 @@ class Context:
     # Store sync stability issues (correlation variance) for reporting
     sync_stability_issues: list[SyncStabilityIssue] = field(default_factory=list)
 
-    # Flag if any subtitle track used raw delay fallback due to no scene matches
-    # (correlation-frame-snap mode couldn't find scenes to verify against)
-    correlation_snap_no_scenes_fallback: bool = False
-
     # Cache video-verified subtitle sync results per source
     # Format: {"Source 2": {"original_delay_ms": 100.0, "corrected_delay_ms": 102.5, ...}}
     video_verified_sources: dict[str, VideoVerifiedResult] = field(default_factory=dict)

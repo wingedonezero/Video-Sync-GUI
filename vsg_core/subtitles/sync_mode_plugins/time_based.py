@@ -87,34 +87,13 @@ class TimeBasedSync(SyncPlugin):
             )
 
         # Raw values mode: apply delay directly
-        from ..data import SyncEventData
+        from ..sync_utils import apply_delay_to_events
 
         log("[TimeBased] === Time-Based Sync (Raw Values) ===")
         log(f"[TimeBased] Events: {len(subtitle_data.events)}")
         log(f"[TimeBased] Delay: {total_delay_ms:+.3f}ms")
 
-        events_synced = 0
-
-        for event in subtitle_data.events:
-            if event.is_comment:
-                continue
-
-            original_start = event.start_ms
-            original_end = event.end_ms
-
-            event.start_ms += total_delay_ms
-            event.end_ms += total_delay_ms
-
-            # Populate per-event sync metadata
-            event.sync = SyncEventData(
-                original_start_ms=original_start,
-                original_end_ms=original_end,
-                start_adjustment_ms=total_delay_ms,
-                end_adjustment_ms=total_delay_ms,
-                snapped_to_frame=False,
-            )
-
-            events_synced += 1
+        events_synced = apply_delay_to_events(subtitle_data, total_delay_ms)
 
         record = OperationRecord(
             operation="sync",
