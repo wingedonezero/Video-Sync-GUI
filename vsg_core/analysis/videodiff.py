@@ -101,7 +101,9 @@ def _extract_frame_hashes(
     # Determine effective fps
     if sample_fps <= 0:
         effective_fps = _probe_fps(video_path)
-        vf_filters = f"scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray"
+        # Always apply fps= filter even at native rate - this normalizes VFR
+        # content and removes pulldown frames (2:3 pulldown → true 23.976fps)
+        vf_filters = f"fps={effective_fps},scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray"
         log(
             f"[VideoDiff] Extracting at native rate ({effective_fps:.3f}fps) "
             f"from: {Path(video_path).name}"
