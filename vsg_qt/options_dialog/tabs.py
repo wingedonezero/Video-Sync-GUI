@@ -2175,6 +2175,24 @@ class SubtitleSyncTab(QWidget):
             "This is diagnostic only - no timing is modified."
         )
 
+        self.widgets["video_verified_visual_verify"] = QCheckBox()
+        self.widgets["video_verified_visual_verify"].setChecked(False)
+        self.widgets["video_verified_visual_verify"].setToolTip(
+            "Enable visual frame verification (diagnostic):\n\n"
+            "After calculating the offset, samples frames every 5 seconds\n"
+            "across the entire video and compares raw frames between source\n"
+            "and target using SSIM to verify the offset is correct.\n\n"
+            "Writes a detailed report to:\n"
+            "  .config/sync_checks/\n\n"
+            "The report includes:\n"
+            "• Overall accuracy (exact, within ±1, ±2 frames)\n"
+            "• Per-region breakdown (early, main, late, credits)\n"
+            "• Credits region auto-detection\n"
+            "• Drift map showing where frames don't align\n"
+            "• GOOD/FAIR/POOR verdict\n\n"
+            "This is diagnostic only - no timing is modified."
+        )
+
         specific_layout.addRow(
             "Zero-Check Threshold:", self.widgets["video_verified_zero_check_frames"]
         )
@@ -2195,6 +2213,9 @@ class SubtitleSyncTab(QWidget):
         )
         specific_layout.addRow(
             "Frame Alignment Audit:", self.widgets["video_verified_frame_audit"]
+        )
+        specific_layout.addRow(
+            "Visual Frame Verify:", self.widgets["video_verified_visual_verify"]
         )
 
         main_layout.addWidget(specific_group)
@@ -2475,6 +2496,7 @@ class SubtitleSyncTab(QWidget):
         self.widgets["video_verified_sequence_length"].setEnabled(is_video_verified)
         self.widgets["video_verified_use_pts_precision"].setEnabled(is_video_verified)
         self.widgets["video_verified_frame_audit"].setEnabled(is_video_verified)
+        self.widgets["video_verified_visual_verify"].setEnabled(is_video_verified)
 
         # Interlaced settings - enabled when video-verified mode AND interlaced handling enabled
         self.widgets["interlaced_handling_enabled"].setEnabled(is_video_verified)
