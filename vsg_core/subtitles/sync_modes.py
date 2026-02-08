@@ -1,4 +1,4 @@
-# vsg_core/subtitles/sync_modes/__init__.py
+# vsg_core/subtitles/sync_modes.py
 """
 Subtitle synchronization modes - Plugin system.
 
@@ -19,8 +19,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...models.settings import AppSettings
-    from ..data import OperationResult, SubtitleData
+    from ..models.settings import AppSettings
+    from .data import OperationResult, SubtitleData
 
 
 # =============================================================================
