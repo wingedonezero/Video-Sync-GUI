@@ -230,15 +230,15 @@ def calculate_video_verified_offset(
     # NOTE: We do this BEFORE calculating frame offsets because IVTC changes the FPS
     try:
         # Determine processing for each video independently based on analysis
-        # telecine_hard → VFM + VDecimate (full IVTC)
+        # telecine_hard / telecine / mixed → VFM + VDecimate (full IVTC)
         # telecine_soft → VDecimate only (progressive with pulldown/duplicates)
-        # telecine (legacy metadata) → VFM + VDecimate
         # interlaced → deinterlace
         # progressive → passthrough
+        _ivtc_types = ("telecine", "telecine_hard", "mixed")
         source_apply_ivtc = (
             use_interlaced_settings
             and settings.interlaced_use_ivtc
-            and source_content_type in ("telecine", "telecine_hard")
+            and source_content_type in _ivtc_types
         )
         source_apply_decimate = (
             not source_apply_ivtc
@@ -255,7 +255,7 @@ def calculate_video_verified_offset(
         target_apply_ivtc = (
             use_interlaced_settings
             and settings.interlaced_use_ivtc
-            and target_content_type in ("telecine", "telecine_hard")
+            and target_content_type in _ivtc_types
         )
         target_apply_decimate = (
             not target_apply_ivtc
@@ -271,7 +271,9 @@ def calculate_video_verified_offset(
 
         log(f"[VideoVerified] Source: {source_content_type}")
         if source_apply_ivtc:
-            log("[VideoVerified]   Processing: IVTC (telecine_hard -> progressive)")
+            log(
+                f"[VideoVerified]   Processing: IVTC ({source_content_type} -> progressive)"
+            )
         elif source_apply_decimate:
             log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
         elif source_content_type == "interlaced":
@@ -281,7 +283,9 @@ def calculate_video_verified_offset(
 
         log(f"[VideoVerified] Target: {target_content_type}")
         if target_apply_ivtc:
-            log("[VideoVerified]   Processing: IVTC (telecine_hard -> progressive)")
+            log(
+                f"[VideoVerified]   Processing: IVTC ({target_content_type} -> progressive)"
+            )
         elif target_apply_decimate:
             log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
         elif target_content_type == "interlaced":
