@@ -627,6 +627,8 @@ class PaddleOCRBackend(OCRBackend):
         Path(self.model_dir).mkdir(parents=True, exist_ok=True)
         os.environ["PADDLEX_HOME"] = self.model_dir
         os.environ["PADDLEOCR_HOME"] = self.model_dir
+        # Skip PaddleX connectivity check (very slow, runs per-engine in parallel mode)
+        os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
         logger.info(f"PaddleOCRBackend created with language: {self.language}")
         logger.info(f"PaddleOCR model directory: {self.model_dir}")
@@ -636,7 +638,10 @@ class PaddleOCRBackend(OCRBackend):
         """Lazy initialization of PaddleOCR."""
         if self._ocr is None:
             try:
-                # Environment variables already set in __init__
+                # Suppress noisy PaddleX/PaddlePaddle init messages
+                # (ccache warnings, model creation logs, connectivity checks)
+                import warnings
+
                 from paddleocr import PaddleOCR
 
                 # Detect GPU (PaddleOCR only supports CUDA, not ROCm)
@@ -663,13 +668,17 @@ class PaddleOCRBackend(OCRBackend):
                 logger.info(f"Device: {gpu_info}")
                 logger.info("This may take a moment if models need to be downloaded...")
 
-                self._ocr = PaddleOCR(
-                    use_doc_orientation_classify=False,  # Don't try to fix document rotation
-                    use_doc_unwarping=False,  # Don't try to unwarp document
-                    use_textline_orientation=False,  # Don't rotate text (replaces use_angle_cls)
-                    lang=self.language,
-                    device=device,  # PaddleOCR 3.0+ API
-                )
+                # Suppress PaddleX warnings during init (ccache, model source checks)
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", module="paddle")
+                    warnings.filterwarnings("ignore", module="paddlex")
+                    self._ocr = PaddleOCR(
+                        use_doc_orientation_classify=False,  # Don't try to fix document rotation
+                        use_doc_unwarping=False,  # Don't try to unwarp document
+                        use_textline_orientation=False,  # Don't rotate text (replaces use_angle_cls)
+                        lang=self.language,
+                        device=device,  # PaddleOCR 3.0+ API
+                    )
                 logger.info("PaddleOCR initialized successfully")
 
             except ImportError:
