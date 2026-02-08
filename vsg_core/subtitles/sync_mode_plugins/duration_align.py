@@ -70,7 +70,7 @@ class DurationAlignSync(SyncPlugin):
             OperationResult with statistics
         """
         from ...models.settings import AppSettings
-        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..data import OperationRecord, OperationResult
         from ..frame_utils import (
             detect_video_fps,
             frame_to_time_vfr,
@@ -78,6 +78,7 @@ class DurationAlignSync(SyncPlugin):
             validate_frame_alignment,
         )
         from ..frame_verification import verify_alignment_with_sliding_window
+        from ..sync_utils import apply_delay_to_events
 
         if settings is None:
             settings = AppSettings()
@@ -315,27 +316,7 @@ class DurationAlignSync(SyncPlugin):
             f"[DurationAlign] Applying {total_shift_ms:+.3f}ms to {len(subtitle_data.events)} events"
         )
 
-        events_synced = 0
-        for event in subtitle_data.events:
-            if event.is_comment:
-                continue
-
-            original_start = event.start_ms
-            original_end = event.end_ms
-
-            event.start_ms += total_shift_ms
-            event.end_ms += total_shift_ms
-
-            # Populate per-event sync metadata
-            event.sync = SyncEventData(
-                original_start_ms=original_start,
-                original_end_ms=original_end,
-                start_adjustment_ms=total_shift_ms,
-                end_adjustment_ms=total_shift_ms,
-                snapped_to_frame=False,
-            )
-
-            events_synced += 1
+        events_synced = apply_delay_to_events(subtitle_data, total_shift_ms)
 
         # Build summary
         summary = f"Duration-align: {events_synced} events, {total_shift_ms:+.1f}ms"

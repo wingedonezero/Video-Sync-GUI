@@ -291,7 +291,9 @@ def calculate_video_verified_offset(
 
         log(f"[VideoVerified] Source: {source_content_type}")
         if source_use_ivtc:
-            log("[VideoVerified]   Processing: Full IVTC (VFM+VDecimate → ~24fps film frames)")
+            log(
+                "[VideoVerified]   Processing: Full IVTC (VFM+VDecimate → ~24fps film frames)"
+            )
         elif source_content_type in _interlaced_types and use_interlaced_settings:
             log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
         elif source_apply_decimate:
@@ -301,7 +303,9 @@ def calculate_video_verified_offset(
 
         log(f"[VideoVerified] Target: {target_content_type}")
         if target_use_ivtc:
-            log("[VideoVerified]   Processing: Full IVTC (VFM+VDecimate → ~24fps film frames)")
+            log(
+                "[VideoVerified]   Processing: Full IVTC (VFM+VDecimate → ~24fps film frames)"
+            )
         elif target_content_type in _interlaced_types and use_interlaced_settings:
             log(f"[VideoVerified]   Processing: deinterlace ({target_deinterlace})")
         elif target_apply_decimate:
@@ -392,7 +396,10 @@ def calculate_video_verified_offset(
         source_frame_duration_ms = 1000.0 / source_index_fps
         target_frame_duration_ms = 1000.0 / target_index_fps
 
-        if abs(source_index_fps - fps) > 0.01 or abs(target_index_fps - target_fps) > 0.01:
+        if (
+            abs(source_index_fps - fps) > 0.01
+            or abs(target_index_fps - target_fps) > 0.01
+        ):
             log(
                 f"[VideoVerified] Indexing FPS: source={source_index_fps:.3f}, target={target_index_fps:.3f}"
             )
@@ -1074,8 +1081,16 @@ def _measure_frame_offset_quality_static(
         tgt_soft_tc = getattr(target_reader, "is_soft_telecine", False)
         src_di = getattr(source_reader, "deinterlace_applied", False)
         tgt_di = getattr(target_reader, "deinterlace_applied", False)
-        src_frames = len(source_reader.vs_clip) if getattr(source_reader, "vs_clip", None) else "?"
-        tgt_frames = len(target_reader.vs_clip) if getattr(target_reader, "vs_clip", None) else "?"
+        src_frames = (
+            len(source_reader.vs_clip)
+            if getattr(source_reader, "vs_clip", None)
+            else "?"
+        )
+        tgt_frames = (
+            len(target_reader.vs_clip)
+            if getattr(target_reader, "vs_clip", None)
+            else "?"
+        )
         log(
             f"[VideoVerified] DEBUG readers: "
             f"src(fps={src_fps_actual:.3f}, soft_tc={src_soft_tc}, di={src_di}, frames={src_frames}) "
@@ -1137,6 +1152,7 @@ def _measure_frame_offset_quality_static(
             if frame_offset == 0 and checkpoint_ms == checkpoint_times[0]:
                 try:
                     import tempfile
+
                     dbg_dir = Path(tempfile.gettempdir()) / "vsg_debug_frames"
                     dbg_dir.mkdir(exist_ok=True)
                     if source_frame is not None:
@@ -1526,7 +1542,8 @@ class VideoVerifiedSync(SyncPlugin):
         temp_dir: Path | None = None,
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
-        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..data import OperationRecord, OperationResult
+        from ..sync_utils import apply_delay_to_events
 
         def log(msg: str):
             if runner:
@@ -1536,27 +1553,7 @@ class VideoVerifiedSync(SyncPlugin):
             f"[VideoVerified] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
         )
 
-        events_synced = 0
-
-        for event in subtitle_data.events:
-            if event.is_comment:
-                continue
-
-            original_start = event.start_ms
-            original_end = event.end_ms
-
-            event.start_ms += final_offset_ms
-            event.end_ms += final_offset_ms
-
-            event.sync = SyncEventData(
-                original_start_ms=original_start,
-                original_end_ms=original_end,
-                start_adjustment_ms=final_offset_ms,
-                end_adjustment_ms=final_offset_ms,
-                snapped_to_frame=False,
-            )
-
-            events_synced += 1
+        events_synced = apply_delay_to_events(subtitle_data, final_offset_ms)
 
         # Run frame alignment audit if enabled
         if settings and settings.video_verified_frame_audit and target_fps:
