@@ -5,7 +5,9 @@ Shared frame timing and video utility functions for subtitle synchronization.
 This package has been modularized for better maintainability:
 - timing.py: Frame/time conversion functions (CFR and VFR support)
 - video_properties.py: Video property detection (FPS, interlacing, resolution)
+- content_analysis.py: DVD content type analysis (idet, repeat_pict, metadata)
 - video_reader.py: Multi-backend video reader (VapourSynth, FFMS2, OpenCV, FFmpeg)
+- video_filters.py: VapourSynth deinterlace/IVTC/decimate filters
 - frame_hashing.py: Perceptual hash and frame comparison functions
 - frame_audit.py: Frame alignment audit (centisecond rounding drift)
 - visual_verify.py: Visual frame verification (SSIM-based)

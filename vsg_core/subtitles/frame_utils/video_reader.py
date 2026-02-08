@@ -4,8 +4,8 @@ Video reader with multi-backend support for efficient frame extraction.
 
 Contains:
 - VideoReader class with VapourSynth, FFMS2, OpenCV, FFmpeg backends
-- Automatic deinterlacing support
-- VapourSynth frame indexing utilities
+- Video filter application delegated to video_filters.py
+- FFMS2 index cache path generation
 """
 
 from __future__ import annotations
@@ -262,121 +262,24 @@ class VideoReader:
             return "bwdif"
         return self.deinterlace_method
 
-    def _apply_deinterlace_filter(self, clip, core):
-        """
-        Apply deinterlace filter to VapourSynth clip.
-
-        Args:
-            clip: VapourSynth clip
-            core: VapourSynth core
-
-        Returns:
-            Deinterlaced clip
-        """
-        method = self._get_deinterlace_method()
-
-        # Use ivtc_field_order (from ContentAnalysis/idet) when available,
-        # falling back to self.field_order (from ffprobe metadata).
-        # This is critical when container says "progressive" but content is
-        # actually interlaced (common with MPEG-2 telecine DVDs).
-        field_order = self.field_order
+    def _get_effective_field_order(self) -> str:
+        """Get the effective field order, preferring idet/ContentAnalysis over ffprobe."""
         if self.ivtc_field_order in ("tff", "bff"):
-            field_order = self.ivtc_field_order
-        elif field_order not in ("tff", "bff"):
-            # Safe default when no field order info available
-            field_order = "tff"
+            return self.ivtc_field_order
+        if self.field_order in ("tff", "bff"):
+            return self.field_order
+        return "tff"  # Safe default
 
-        tff = field_order == "tff"
+    def _apply_deinterlace_filter(self, clip, core):
+        """Apply deinterlace filter to VapourSynth clip."""
+        from .video_filters import apply_deinterlace_filter
 
-        self.runner._log_message(
-            f"[FrameUtils] Applying deinterlace: {method} (field order: {'TFF' if tff else 'BFF'})"
+        method = self._get_deinterlace_method()
+        field_order = self._get_effective_field_order()
+        clip, applied = apply_deinterlace_filter(
+            clip, core, method, field_order, self.runner
         )
-
-        try:
-            # Force the correct field order on the clip via _FieldBased frame property.
-            # Bwdif/Yadif read _FieldBased from each frame and OVERRIDE the field/order
-            # parameter when it is set. FFMS2 sets _FieldBased per-frame based on
-            # FFmpeg's AV_FRAME_FLAG_INTERLACED, which is often wrong or inconsistent
-            # for MPEG-2 DVD content. Without this, two encodes of the same content
-            # can get different _FieldBased values from FFMS2, causing bwdif to
-            # deinterlace them with different field orders → completely different
-            # progressive output → frame comparison fails (avg_dist 40+).
-            clip = core.std.SetFieldBased(clip, 2 if tff else 1)
-            if method == "yadif":
-                # YADIF - Yet Another DeInterlacing Filter
-                # Mode 0 = output one frame per frame (not bob)
-                # Order: 1 = TFF, 0 = BFF
-                if hasattr(core, "yadifmod"):
-                    # Prefer yadifmod if available (better edge handling)
-                    clip = core.yadifmod.Yadifmod(clip, order=1 if tff else 0, mode=0)
-                elif hasattr(core, "yadif"):
-                    clip = core.yadif.Yadif(clip, order=1 if tff else 0, mode=0)
-                else:
-                    # Fallback to znedi3-based yadif alternative
-                    self.runner._log_message(
-                        "[FrameUtils] YADIF plugin not found, using std.SeparateFields + DoubleWeave"
-                    )
-                    clip = self._deinterlace_fallback(clip, core, tff)
-
-            elif method == "yadifmod":
-                # YADIFmod - improved edge handling
-                if hasattr(core, "yadifmod"):
-                    clip = core.yadifmod.Yadifmod(clip, order=1 if tff else 0, mode=0)
-                else:
-                    self.runner._log_message(
-                        "[FrameUtils] YADIFmod not available, falling back to YADIF"
-                    )
-                    return self._apply_deinterlace_filter_method(
-                        clip, core, "yadif", tff
-                    )
-
-            elif method == "bob":
-                # Bob - doubles framerate by outputting each field as frame
-                # Simple and fast, good for frame matching
-                clip = core.std.SeparateFields(clip, tff=tff)
-                clip = core.resize.Spline36(clip, height=clip.height * 2)
-
-            elif method == "bwdif":
-                # BWDIF - motion adaptive deinterlacer
-                if hasattr(core, "bwdif"):
-                    clip = core.bwdif.Bwdif(clip, field=1 if tff else 0)
-                else:
-                    self.runner._log_message(
-                        "[FrameUtils] BWDIF not available, falling back to YADIF"
-                    )
-                    return self._apply_deinterlace_filter_method(
-                        clip, core, "yadif", tff
-                    )
-
-            else:
-                self.runner._log_message(
-                    f"[FrameUtils] Unknown deinterlace method: {method}, using YADIF"
-                )
-                return self._apply_deinterlace_filter_method(clip, core, "yadif", tff)
-
-            self.deinterlace_applied = True
-            self.runner._log_message(
-                "[FrameUtils] Deinterlace filter applied successfully"
-            )
-            return clip
-
-        except Exception as e:
-            self.runner._log_message(
-                f"[FrameUtils] Deinterlace failed: {e}, using raw frames"
-            )
-            return clip
-
-    def _apply_deinterlace_filter_method(self, clip, core, method: str, tff: bool):
-        """Helper to apply a specific deinterlace method."""
-        self.deinterlace_method = method
-        return self._apply_deinterlace_filter(clip, core)
-
-    def _deinterlace_fallback(self, clip, core, tff: bool):
-        """Fallback deinterlacing using standard VapourSynth functions."""
-        # Separate fields, then weave back
-        clip = core.std.SeparateFields(clip, tff=tff)
-        clip = core.std.DoubleWeave(clip, tff=tff)
-        clip = core.std.SelectEvery(clip, 2, 0)
+        self.deinterlace_applied = applied
         return clip
 
     def _should_apply_ivtc(self) -> bool:
@@ -394,242 +297,27 @@ class VideoReader:
         return bool(self.is_interlaced and self.fps and abs(self.fps - 29.97) < 0.1)
 
     def _apply_ivtc_filter(self, clip, core):
-        """
-        Apply Inverse Telecine (IVTC) to recover progressive frames from telecine.
+        """Apply IVTC to recover progressive frames from telecine."""
+        from .video_filters import apply_ivtc_filter
 
-        Uses VIVTC (VFM + VDecimate) to:
-        1. VFM: Field match to find original progressive frames
-        2. VDecimate: Remove duplicate frames (30fps -> 24fps)
-
-        This converts 29.97i telecine content back to ~23.976p progressive.
-
-        Args:
-            clip: VapourSynth clip (interlaced telecine)
-            core: VapourSynth core
-
-        Returns:
-            Progressive clip at ~23.976fps
-        """
-        field_order_for_ivtc = self.field_order
-        if self.ivtc_field_order in ("tff", "bff"):
-            field_order_for_ivtc = self.ivtc_field_order
-        elif field_order_for_ivtc not in ("tff", "bff"):
-            # Safe default for NTSC DVD telecine when metadata has no field order.
-            field_order_for_ivtc = "tff"
-
-        tff = field_order_for_ivtc == "tff"
-
-        self.runner._log_message(
-            f"[FrameUtils] Applying IVTC (field order: {'TFF' if tff else 'BFF'})"
+        field_order = self._get_effective_field_order()
+        result = apply_ivtc_filter(
+            clip, core, field_order, self.skip_decimate_in_ivtc, self.runner
         )
-
-        # Store original FPS before IVTC
-        self.original_fps = clip.fps_num / clip.fps_den
-
-        # Normalize telecine timebase before IVTC when FFMS2 exposes odd VFR-ish
-        # rates (e.g. 29.778). This stabilizes VDecimate output cadence.
-        if (
-            29.0 < self.original_fps < 31.0
-            and abs(self.original_fps - 30000 / 1001) > 0.01
-        ):
-            clip = core.std.AssumeFPS(clip, fpsnum=30000, fpsden=1001)
-            self.runner._log_message(
-                f"[FrameUtils] Normalized pre-IVTC FPS ({self.original_fps:.3f} -> 29.970)"
-            )
-
-        try:
-            # Force correct field order in frame properties (same reason as
-            # _apply_deinterlace_filter — FFMS2's per-frame _FieldBased can be
-            # wrong for MPEG-2, and VFM reads it to override the order param).
-            clip = core.std.SetFieldBased(clip, 2 if tff else 1)
-
-            # Check if VIVTC is available
-            if hasattr(core, "vivtc"):
-                # VFM: Field matching - recovers progressive frames
-                # order: 1 = TFF, 0 = BFF
-                clip = core.vivtc.VFM(clip, order=1 if tff else 0)
-
-                if self.skip_decimate_in_ivtc:
-                    # VFM-only: progressive frames with preserved frame indices.
-                    # Skipping VDecimate keeps all 30fps frames so that frame
-                    # indices stay 1:1 across different encodes (VDecimate makes
-                    # different drop decisions per encode, destroying alignment).
-                    self.vfm_applied = True
-                    self.runner._log_message(
-                        f"[FrameUtils] VFM-only applied with VIVTC "
-                        f"({self.original_fps:.3f}fps, VDecimate skipped)"
-                    )
-                    return clip
-
-                # VDecimate: Remove duplicates (5 frames -> 4 frames)
-                # This converts 29.97fps -> 23.976fps
-                clip = core.vivtc.VDecimate(clip)
-
-                # Force canonical film rate after IVTC for stable downstream
-                # frame-index math across DVD telecine sources.
-                clip = core.std.AssumeFPS(clip, fpsnum=24000, fpsden=1001)
-
-                self.ivtc_applied = True
-                self.runner._log_message(
-                    f"[FrameUtils] IVTC applied with VIVTC "
-                    f"({self.original_fps:.3f}fps -> {clip.fps_num / clip.fps_den:.3f}fps)"
-                )
-                return clip
-
-            # Fallback: Try TIVTC if VIVTC not available
-            elif hasattr(core, "tivtc"):
-                # TFM: Field matching
-                clip = core.tivtc.TFM(clip, order=1 if tff else 0)
-
-                if self.skip_decimate_in_ivtc:
-                    self.vfm_applied = True
-                    self.runner._log_message(
-                        f"[FrameUtils] VFM-only applied with TIVTC "
-                        f"({self.original_fps:.3f}fps, TDecimate skipped)"
-                    )
-                    return clip
-
-                # TDecimate: Decimation
-                clip = core.tivtc.TDecimate(clip, mode=1)
-
-                # Force canonical film rate after IVTC for stable downstream
-                # frame-index math across DVD telecine sources.
-                clip = core.std.AssumeFPS(clip, fpsnum=24000, fpsden=1001)
-
-                self.ivtc_applied = True
-                self.runner._log_message(
-                    f"[FrameUtils] IVTC applied with TIVTC "
-                    f"({self.original_fps:.3f}fps -> {clip.fps_num / clip.fps_den:.3f}fps)"
-                )
-                return clip
-
-            else:
-                self.runner._log_message(
-                    "[FrameUtils] WARNING: No IVTC plugin available (vivtc or tivtc)"
-                )
-                self.runner._log_message(
-                    "[FrameUtils] Install vivtc plugin for VapourSynth"
-                )
-                self.runner._log_message(
-                    "[FrameUtils] Falling back to deinterlacing (may cause frame count mismatch)"
-                )
-                # Fall back to regular deinterlacing
-                return self._apply_deinterlace_filter(clip, core)
-
-        except Exception as e:
-            self.runner._log_message(f"[FrameUtils] IVTC failed: {e}")
-            self.runner._log_message("[FrameUtils] Falling back to deinterlacing")
-            return self._apply_deinterlace_filter(clip, core)
+        self.original_fps = result.original_fps
+        self.ivtc_applied = result.ivtc_applied
+        self.vfm_applied = result.vfm_applied
+        self.deinterlace_applied = result.deinterlace_applied
+        return result.clip
 
     def _apply_decimate_filter(self, clip, core):
-        """
-        Apply VDecimate only (no VFM) for progressive content with duplicate frames.
+        """Apply VDecimate only (no VFM) for progressive content with duplicates."""
+        from .video_filters import apply_decimate_filter
 
-        For progressive content with 2:3 pulldown (soft telecine), the frames are
-        already progressive but contain duplicates from the pulldown pattern.
-        VDecimate detects and removes these duplicates, converting ~30fps to ~24fps.
-
-        Unlike full IVTC (VFM + VDecimate), this skips field matching since
-        the content is already progressive.
-
-        Args:
-            clip: VapourSynth clip (progressive with duplicate frames)
-            core: VapourSynth core
-
-        Returns:
-            Decimated clip at ~23.976fps
-        """
-        self.original_fps = clip.fps_num / clip.fps_den
-
-        self.runner._log_message(
-            f"[FrameUtils] Applying VDecimate for progressive-with-pulldown "
-            f"({self.original_fps:.3f}fps)"
-        )
-
-        try:
-            if hasattr(core, "vivtc"):
-                clip = core.vivtc.VDecimate(clip)
-                self.decimate_applied = True
-                new_fps = clip.fps_num / clip.fps_den
-                self.runner._log_message(
-                    f"[FrameUtils] VDecimate applied "
-                    f"({self.original_fps:.3f}fps -> {new_fps:.3f}fps)"
-                )
-                return clip
-
-            elif hasattr(core, "tivtc"):
-                clip = core.tivtc.TDecimate(clip, mode=1)
-                self.decimate_applied = True
-                new_fps = clip.fps_num / clip.fps_den
-                self.runner._log_message(
-                    f"[FrameUtils] TDecimate applied "
-                    f"({self.original_fps:.3f}fps -> {new_fps:.3f}fps)"
-                )
-                return clip
-
-            else:
-                self.runner._log_message(
-                    "[FrameUtils] WARNING: No decimation plugin available (vivtc or tivtc)"
-                )
-                self.runner._log_message(
-                    "[FrameUtils] Duplicate frames will remain (~30fps instead of ~24fps)"
-                )
-                return clip
-
-        except Exception as e:
-            self.runner._log_message(f"[FrameUtils] Decimation failed: {e}")
-            return clip
-
-    def _get_index_cache_path(self, video_path: str, temp_dir: Path) -> Path:
-        """
-        Generate cache path for FFMS2 index in job's temp directory.
-
-        Cache key: parent_dir + filename + size + mtime (unique per file path)
-        Location: {job_temp_dir}/ffindex/{cache_key}.ffindex
-
-        The index is created in the job's temp folder so it can be:
-        1. Easily identified by filename and source
-        2. Reused within the job (multiple tracks using same source)
-        3. Cleaned up automatically when job completes
-        4. Avoid collisions when different sources have same episode numbers
-        """
-        import hashlib
-        import os
-
-        video_path_obj = Path(video_path)
-
-        # Get file metadata for cache invalidation
-        stat = os.stat(video_path)
-        file_size = stat.st_size
-        mtime = int(stat.st_mtime)
-
-        # Include parent directory to distinguish between sources
-        # E.g., "source1/1.mkv" vs "source2/1.mkv" get different indexes
-        parent_dir = video_path_obj.parent.name
-
-        # If parent is empty/root, use path hash instead
-        if not parent_dir or parent_dir == ".":
-            path_hash = hashlib.md5(str(video_path_obj.resolve()).encode()).hexdigest()[
-                :8
-            ]
-            cache_key = f"{video_path_obj.stem}_{path_hash}_{file_size}_{mtime}"
-        else:
-            cache_key = f"{parent_dir}_{video_path_obj.stem}_{file_size}_{mtime}"
-
-        # ALWAYS use job's temp_dir for index storage (for cleanup)
-        if temp_dir:
-            cache_dir = temp_dir / "ffindex"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            # Fallback: use system temp (but warn - won't be cleaned up)
-            cache_dir = Path(tempfile.gettempdir()) / "vsg_ffindex"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            self.runner._log_message(
-                "[FrameUtils] WARNING: No job temp_dir provided, index won't be auto-cleaned"
-            )
-
-        index_path = cache_dir / f"{cache_key}.ffindex"
-        return index_path
+        result = apply_decimate_filter(clip, core, self.runner)
+        self.original_fps = result.original_fps
+        self.decimate_applied = result.decimate_applied
+        return result.clip
 
     def _try_vapoursynth(self) -> bool:
         """
@@ -659,7 +347,7 @@ class VideoReader:
                 return False
 
             # Generate cache path
-            index_path = self._get_index_cache_path(self.video_path, self.temp_dir)
+            index_path = _get_ffms2_cache_path(self.video_path, self.temp_dir)
 
             # Show where index is stored
             if self.temp_dir:
@@ -912,9 +600,7 @@ class VideoReader:
         elif pos == 0:
             start_frame = sparse_indices[0]
         # Pick the closer bracket
-        elif abs(sparse_times[pos] - target_s) < abs(
-            sparse_times[pos - 1] - target_s
-        ):
+        elif abs(sparse_times[pos] - target_s) < abs(sparse_times[pos - 1] - target_s):
             start_frame = sparse_indices[pos]
         else:
             start_frame = sparse_indices[pos - 1]
