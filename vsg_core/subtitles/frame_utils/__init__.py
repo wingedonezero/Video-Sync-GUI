@@ -28,6 +28,18 @@ from .frame_audit import (
 )
 
 # ============================================================================
+# Visual frame verification (diagnostic)
+# ============================================================================
+from .visual_verify import (
+    CreditsInfo,
+    RegionStats,
+    SampleResult,
+    VisualVerifyResult,
+    run_visual_verify,
+    write_visual_verify_report,
+)
+
+# ============================================================================
 # Frame hashing and comparison
 # ============================================================================
 from .frame_hashing import (
@@ -104,11 +116,15 @@ from .video_reader import (
 # ============================================================================
 __all__ = [
     "ContentAnalysis",
+    "CreditsInfo",
     "FrameAuditIssue",
     "FrameAuditResult",
     "IdetResult",
+    "RegionStats",
     "RepeatPictResult",
+    "SampleResult",
     "VideoReader",
+    "VisualVerifyResult",
     "analyze_content_type",
     "clear_content_analysis_cache",
     "clear_vfr_cache",
@@ -132,10 +148,12 @@ __all__ = [
     "get_video_duration_ms",
     "get_video_properties",
     "run_frame_audit",
+    "run_visual_verify",
     "time_to_frame_aegisub",
     "time_to_frame_floor",
     "time_to_frame_middle",
     "time_to_frame_vfr",
     "validate_frame_alignment",
     "write_audit_report",
+    "write_visual_verify_report",
 ]

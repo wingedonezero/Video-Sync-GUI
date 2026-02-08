@@ -59,6 +59,9 @@ class RepeatPictResult:
     repeat_pict_other: int  # Any other values (rare)
     interlaced_frames: int  # Frames with interlaced_frame=1
     progressive_frames: int  # Frames with interlaced_frame=0
+    # DGIndex-style film percentage from TRF cycling pattern analysis
+    film_purity: int = 0  # Frames following 3:2 pulldown cadence
+    video_purity: int = 0  # Frames breaking cadence
 
 
 @dataclass(frozen=True, slots=True)
@@ -534,10 +537,22 @@ def analyze_content_type(
     if rp is not None and rp.total_frames > 0:
         rp_ratio = rp.repeat_pict_1 / rp.total_frames
         interlaced_ratio_rp = rp.interlaced_frames / rp.total_frames
+
+        # DGIndex-style film percentage from TRF cycling pattern
+        film_total = rp.film_purity + rp.video_purity
+        film_percent = (
+            (rp.film_purity / film_total * 100.0) if film_total > 0 else 0.0
+        )
+
         runner._log_message(
             f"[ContentAnalysis] repeat_pict: {rp.repeat_pict_0} normal, "
             f"{rp.repeat_pict_1} RFF ({rp_ratio:.1%}), "
             f"interlaced={interlaced_ratio_rp:.1%}"
+        )
+        runner._log_message(
+            f"[ContentAnalysis] DGIndex-style TRF cycling: "
+            f"film_purity={rp.film_purity}, video_purity={rp.video_purity}, "
+            f"film={film_percent:.1f}%"
         )
 
         # Soft telecine: ~50% RFF flags + progressive frames
@@ -556,8 +571,9 @@ def analyze_content_type(
             )
             return result
 
-        # Hard telecine with RFF: interlaced + pulldown flags (rare but possible)
-        if rp_ratio > 0.3 and interlaced_ratio_rp > 0.5:
+        # Hard telecine with RFF: interlaced + pulldown flags AND film cycling
+        # Only classify as telecine_hard if TRF cycling confirms 3:2 cadence
+        if rp_ratio > 0.3 and interlaced_ratio_rp > 0.5 and film_percent > 50.0:
             result = ContentAnalysis(
                 content_type="telecine_hard",
                 field_order="tff" if rp.interlaced_frames > 0 else "progressive",
@@ -568,7 +584,27 @@ def analyze_content_type(
             _content_analysis_cache[video_path] = result
             runner._log_message(
                 f"[ContentAnalysis] Result: {result.content_type} "
-                f"(interlaced + RFF flags, confidence={result.confidence:.0%})"
+                f"(interlaced + RFF flags + film cycling, confidence={result.confidence:.0%})"
+            )
+            return result
+
+        # Native interlaced: no RFF flags (or very few) + no film cycling
+        # This is the key distinction from telecine — DGIndex reports "Video"
+        if rp_ratio < 0.1 and interlaced_ratio_rp > 0.5 and film_percent < 50.0:
+            # Determine field order from the dominant field
+            fo: FieldOrderStr = "tff"  # Default for NTSC DVD
+            result = ContentAnalysis(
+                content_type="interlaced",
+                field_order=fo,
+                confidence=0.90,
+                repeat_pict_ratio=rp_ratio,
+                analysis_source="repeat_pict",
+            )
+            _content_analysis_cache[video_path] = result
+            runner._log_message(
+                f"[ContentAnalysis] Result: {result.content_type} "
+                f"(native interlaced — no RFF flags, film={film_percent:.1f}%, "
+                f"confidence={result.confidence:.0%})"
             )
             return result
     else:
@@ -622,9 +658,15 @@ def _analyze_repeat_pict(video_path: str, runner) -> RepeatPictResult | None:
     """
     Layer 1: Analyze repeat_pict flags using ffprobe (no decode needed).
 
-    Reads per-frame interlaced_frame and repeat_pict flags directly from the
-    MPEG-2 stream headers. This is fast and the most reliable way to detect
-    soft telecine when pulldown flags are present.
+    Reads per-frame interlaced_frame, repeat_pict, and top_field_first flags
+    directly from the MPEG-2 stream headers. This is fast and the most reliable
+    way to detect soft telecine when pulldown flags are present.
+
+    In addition to simple RFF ratio, this implements DGIndex-style TRF cycling
+    analysis: the 2-bit value trf = (top_field_first << 1) | repeat_first_field
+    should cycle through 0→1→2→3→0... for true 3:2 pulldown (film content).
+    Native interlaced content has constant TFF and no RFF, so trf stays constant
+    and the cycling check fails → correctly classified as video/interlaced.
 
     repeat_pict=1 maps to MPEG-2 repeat_first_field=1 (3:2 pulldown marker).
     ~50% of frames having repeat_pict=1 = soft telecine.
@@ -634,7 +676,7 @@ def _analyze_repeat_pict(video_path: str, runner) -> RepeatPictResult | None:
         runner: CommandRunner for logging
 
     Returns:
-        RepeatPictResult with flag counts, or None on failure.
+        RepeatPictResult with flag counts and film/video purity, or None on failure.
     """
     env = _get_subprocess_env()
 
@@ -646,7 +688,7 @@ def _analyze_repeat_pict(video_path: str, runner) -> RepeatPictResult | None:
         "v:0",
         "-show_frames",
         "-show_entries",
-        "frame=interlaced_frame,repeat_pict",
+        "frame=interlaced_frame,repeat_pict,top_field_first",
         "-of",
         "csv=p=0",
         str(video_path),
@@ -670,13 +712,21 @@ def _analyze_repeat_pict(video_path: str, runner) -> RepeatPictResult | None:
     if result.returncode != 0:
         return None
 
-    # Parse CSV output: each line is "interlaced_frame,repeat_pict"
+    # Parse CSV output: each line is "interlaced_frame,repeat_pict,top_field_first"
     total = 0
     rp_0 = 0
     rp_1 = 0
     rp_other = 0
     interlaced = 0
     progressive = 0
+
+    # DGIndex-style TRF cycling analysis
+    # trf = (top_field_first << 1) | repeat_first_field
+    # For 3:2 pulldown film: trf cycles 0→1→2→3→0→1→2→3...
+    # For native interlaced: trf stays constant (e.g., always 2 for TFF, no RFF)
+    film_purity = 0
+    video_purity = 0
+    old_trf: int | None = None
 
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -688,6 +738,8 @@ def _analyze_repeat_pict(video_path: str, runner) -> RepeatPictResult | None:
         try:
             interlaced_flag = int(parts[0])
             repeat_pict = int(parts[1])
+            # top_field_first may not be present in all ffprobe outputs
+            tff_flag = int(parts[2]) if len(parts) >= 3 else 0
         except (ValueError, IndexError):
             continue
 
@@ -704,6 +756,20 @@ def _analyze_repeat_pict(video_path: str, runner) -> RepeatPictResult | None:
         else:
             progressive += 1
 
+        # DGIndex-style TRF cycling check
+        # repeat_pict maps to repeat_first_field (RFF), tff_flag to top_field_first
+        rff = 1 if repeat_pict >= 1 else 0
+        trf = (tff_flag << 1) | rff
+
+        if old_trf is not None:
+            # Film: trf should increment cyclically (mod 4)
+            # i.e., (trf & 3) == ((old_trf + 1) & 3)
+            if (trf & 3) == ((old_trf + 1) & 3):
+                film_purity += 1
+            else:
+                video_purity += 1
+        old_trf = trf
+
     if total == 0:
         return None
 
@@ -714,6 +780,8 @@ def _analyze_repeat_pict(video_path: str, runner) -> RepeatPictResult | None:
         repeat_pict_other=rp_other,
         interlaced_frames=interlaced,
         progressive_frames=progressive,
+        film_purity=film_purity,
+        video_purity=video_purity,
     )
 
 
@@ -852,12 +920,22 @@ def _classify_from_idet(
     Classify content type from idet results (Layer 2).
 
     Uses multi-frame detection as primary metric (more accurate than single).
-    Modeled after Remux-Toolkit telecine_detector classification.
+
+    IMPORTANT: idet CANNOT reliably distinguish hard telecine from native
+    interlaced. Both produce frames with combing artifacts that idet detects
+    as "interlaced". The key difference is the 3:2 pulldown cadence, which
+    idet does not track. Therefore:
+
+    - If Layer 1 (repeat_pict) already returned a result, we don't reach here
+    - If we're here, repeat_pict didn't find pulldown flags
+    - Without pulldown flags AND without pixel-level cadence detection,
+      we CANNOT reliably say content is telecine vs native interlaced
+    - The safe default is "interlaced" (bwdif deinterlace works acceptably
+      for both; IVTC on native interlaced produces corrupted output)
 
     Decision tree:
-    - Progressive >= 90% → telecine_soft (film content, like Remux-Toolkit "Telecined (Film)")
-      BUT only if MPEG-2 DVD at ~30fps (otherwise just progressive)
-    - Interlaced > progressive → telecine_hard (if DVD ~30fps) or interlaced
+    - Progressive >= 90% on DVD at ~30fps → telecine_soft (film)
+    - Interlaced > progressive → interlaced (NOT telecine_hard)
     - Progressive > interlaced → progressive
     - Otherwise → mixed
     """
@@ -871,7 +949,7 @@ def _classify_from_idet(
             analysis_source="idet",
         )
 
-    # Use multi-frame detection as primary (like Remux-Toolkit)
+    # Use multi-frame detection as primary
     interlaced_count = idet.multi_tff + idet.multi_bff
     interlaced_ratio = interlaced_count / total
     progressive_ratio = idet.multi_progressive / total
@@ -905,32 +983,42 @@ def _classify_from_idet(
     content_type: ContentTypeStr
     confidence: float
 
-    # Check for telecine with repeated fields first
-    if interlaced_ratio > 0.5 and repeated_ratio > 0.05:
-        content_type = "telecine_hard"
-        confidence = min(0.95, interlaced_ratio)
-    elif progressive_ratio > 0.7 and repeated_ratio > 0.05:
+    if progressive_ratio >= 0.9:
+        if is_dvd_30fps:
+            # High progressive on MPEG-2 DVD at ~30fps = likely film content
+            # with baked-in telecine that idet sees as progressive due to
+            # frame-level progressive_frame flag. Matches Remux-Toolkit
+            # "Telecined (Film)" classification.
+            content_type = "telecine_soft"
+            confidence = 0.90
+        else:
+            content_type = "progressive"
+            confidence = min(0.95, progressive_ratio)
+    elif progressive_ratio > 0.7 and repeated_ratio > 0.3:
+        # Strong progressive with substantial repeated fields = soft telecine
+        # Use higher repeated_ratio threshold (0.3) to avoid false positives
         content_type = "telecine_soft"
-        confidence = min(0.95, progressive_ratio)
-    elif progressive_ratio >= 0.9 and is_dvd_30fps:
-        # High progressive on MPEG-2 DVD at ~30fps = film content (baked-in telecine)
-        # Matches Remux-Toolkit "Telecined (Film)" classification
-        content_type = "telecine_soft"
-        confidence = 0.90
+        confidence = min(0.90, progressive_ratio)
     elif interlaced_count > idet.multi_progressive:
         # More interlaced than progressive
-        if is_dvd_30fps:
-            content_type = "telecine_hard"
-            confidence = min(0.90, interlaced_ratio)
-        else:
-            content_type = "interlaced"
-            confidence = min(0.95, interlaced_ratio)
+        # CRITICAL: Do NOT classify as telecine_hard based on idet alone.
+        # idet cannot distinguish hard telecine from native interlaced.
+        # Without Layer 1 (repeat_pict) confirming pulldown flags, the safe
+        # default is "interlaced" — bwdif works acceptably for both cases,
+        # while IVTC on native interlaced produces corrupted output.
+        content_type = "interlaced"
+        confidence = min(0.90, interlaced_ratio)
     elif idet.multi_progressive > interlaced_count:
         content_type = "progressive"
         confidence = min(0.95, progressive_ratio)
     else:
         content_type = "mixed"
         confidence = 0.7
+
+    runner._log_message(
+        f"[ContentAnalysis] idet classification: {content_type} "
+        f"(confidence={confidence:.0%})"
+    )
 
     return ContentAnalysis(
         content_type=content_type,
@@ -946,7 +1034,10 @@ def _classify_from_metadata(props: dict[str, Any], runner) -> ContentAnalysis:
     Layer 3: Classify from metadata when Layers 1 and 2 fail.
 
     For progressive MPEG-2 DVD at ~30fps, assume telecine_soft (baked-in pulldown).
-    This is reliable because of the MPEG-2 codec gate — no false positives on encodes.
+    For interlaced MPEG-2 DVD, classify as interlaced (NOT telecine_hard) because
+    without flag-based or pixel-based confirmation, we cannot distinguish native
+    interlaced from hard telecine. The safe default is interlaced (bwdif works
+    acceptably; IVTC on native interlaced produces corruption).
     """
     is_dvd = props.get("is_dvd", False)
     fps = props.get("fps", 0)
@@ -955,8 +1046,11 @@ def _classify_from_metadata(props: dict[str, Any], runner) -> ContentAnalysis:
 
     if is_dvd and abs(fps - 29.97) < 0.1:
         if interlaced:
-            content_type: ContentTypeStr = "telecine_hard"
-            confidence = 0.75
+            # Cannot distinguish telecine_hard from native interlaced without
+            # pulldown flags (Layer 1) or cadence analysis. Default to interlaced
+            # which is the safer processing path.
+            content_type: ContentTypeStr = "interlaced"
+            confidence = 0.65
         else:
             # Progressive MPEG-2 DVD at ~30fps with no flags = baked-in telecine
             content_type = "telecine_soft"

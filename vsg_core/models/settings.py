@@ -234,6 +234,7 @@ class AppSettings(BaseModel):
     video_verified_sequence_length: int = 10
     video_verified_use_pts_precision: bool = False
     video_verified_frame_audit: bool = False
+    video_verified_visual_verify: bool = False
 
     # =========================================================================
     # Interlaced Video Settings

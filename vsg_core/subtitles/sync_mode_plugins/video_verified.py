@@ -235,43 +235,64 @@ def calculate_video_verified_offset(
         # For cross-encode comparison, VFM (IVTC field matching) is NOT used:
         # VFM makes non-deterministic field-matching decisions that differ between
         # encodes, producing incomparable progressive frames.  Instead, all
-        # interlaced/telecine content gets deterministic deinterlacing (yadif/bwdif)
-        # which produces consistent output for the same scene across encodes.
+        # Processing strategy for different content types:
         #
-        # telecine_hard / telecine / mixed → deinterlace (not VFM)
+        # telecine_hard/telecine → Full IVTC (VFM + VDecimate → ~24fps film)
+        #   Bwdif/yadif CANNOT fix telecine: different encodes have different
+        #   telecine phase, so frame N deinterlaced from encode A ≠ frame N
+        #   from encode B (avg_dist 35+). VFM-only (no VDecimate) also fails
+        #   because VFM makes encode-dependent field-match decisions.
+        #   Full IVTC recovers real progressive film frames at ~24fps.
+        #   After VDecimate + AssumeFPS(24000/1001), time-based frame lookup
+        #   gives the correct film frame regardless of which telecine frames
+        #   VDecimate dropped — exactly like the soft-telecine case.
+        #
         # telecine_soft → passthrough (pulldown already removed by container)
-        # interlaced → deinterlace
+        # interlaced/mixed → deinterlace (bwdif/yadif)
         # progressive → passthrough
         _interlaced_types = ("telecine", "telecine_hard", "mixed", "interlaced")
+        _telecine_types = ("telecine", "telecine_hard")
+
+        # Determine per-video processing strategy
+        source_use_ivtc = (
+            use_interlaced_settings and source_content_type in _telecine_types
+        )
+        target_use_ivtc = (
+            use_interlaced_settings and target_content_type in _telecine_types
+        )
 
         source_apply_decimate = (
             use_interlaced_settings
             and settings.interlaced_use_ivtc
             and source_content_type == "telecine_soft"
         )
-        # Use explicit deinterlace method (not "auto") for all interlaced/telecine
-        # content. "auto" checks ffprobe's scan_type which can be wrong (e.g.
-        # container says progressive for actually-interlaced telecine MPEG-2).
-        # An explicit method forces deinterlacing regardless of container flags.
-        source_deinterlace = (
-            settings.interlaced_deinterlace_method
-            if use_interlaced_settings and source_content_type in _interlaced_types
-            else "auto"
-        )
+        # For telecine: full IVTC handles everything, no bwdif needed.
+        # For pure interlaced/mixed: use explicit deinterlace method.
+        # "auto" checks ffprobe's scan_type which can be wrong (e.g.
+        # container says progressive for actually-interlaced MPEG-2).
+        if source_use_ivtc:
+            source_deinterlace = "none"  # IVTC handles it
+        elif use_interlaced_settings and source_content_type in _interlaced_types:
+            source_deinterlace = settings.interlaced_deinterlace_method
+        else:
+            source_deinterlace = "auto"
 
         target_apply_decimate = (
             use_interlaced_settings
             and settings.interlaced_use_ivtc
             and target_content_type == "telecine_soft"
         )
-        target_deinterlace = (
-            settings.interlaced_deinterlace_method
-            if use_interlaced_settings and target_content_type in _interlaced_types
-            else "auto"
-        )
+        if target_use_ivtc:
+            target_deinterlace = "none"  # IVTC handles it
+        elif use_interlaced_settings and target_content_type in _interlaced_types:
+            target_deinterlace = settings.interlaced_deinterlace_method
+        else:
+            target_deinterlace = "auto"
 
         log(f"[VideoVerified] Source: {source_content_type}")
-        if source_content_type in _interlaced_types and use_interlaced_settings:
+        if source_use_ivtc:
+            log("[VideoVerified]   Processing: Full IVTC (VFM+VDecimate → ~24fps film frames)")
+        elif source_content_type in _interlaced_types and use_interlaced_settings:
             log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
         elif source_apply_decimate:
             log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
@@ -279,7 +300,9 @@ def calculate_video_verified_offset(
             log("[VideoVerified]   Processing: none (progressive)")
 
         log(f"[VideoVerified] Target: {target_content_type}")
-        if target_content_type in _interlaced_types and use_interlaced_settings:
+        if target_use_ivtc:
+            log("[VideoVerified]   Processing: Full IVTC (VFM+VDecimate → ~24fps film frames)")
+        elif target_content_type in _interlaced_types and use_interlaced_settings:
             log(f"[VideoVerified]   Processing: deinterlace ({target_deinterlace})")
         elif target_apply_decimate:
             log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
@@ -287,7 +310,11 @@ def calculate_video_verified_offset(
             log("[VideoVerified]   Processing: none (progressive)")
 
         # Create readers with per-video settings
-        # apply_ivtc=False: VFM not used for comparison (non-deterministic)
+        # For telecine: apply_ivtc=True runs full IVTC (VFM + VDecimate)
+        # to recover real ~24fps progressive film frames. After VDecimate +
+        # AssumeFPS(24000/1001), time-based frame lookup aligns correctly
+        # across encodes — same as the proven soft-telecine path.
+        # skip_decimate_in_ivtc=False: we WANT VDecimate to produce real 24fps.
         source_reader = VideoReader(
             source_video,
             runner,
@@ -295,7 +322,8 @@ def calculate_video_verified_offset(
             deinterlace=source_deinterlace,
             content_type=source_content_type,
             ivtc_field_order=source_analysis.field_order,
-            apply_ivtc=False,
+            apply_ivtc=source_use_ivtc,
+            skip_decimate_in_ivtc=False,
             apply_decimate=source_apply_decimate,
             settings=settings,
         )
@@ -306,7 +334,8 @@ def calculate_video_verified_offset(
             deinterlace=target_deinterlace,
             content_type=target_content_type,
             ivtc_field_order=target_analysis.field_order,
-            apply_ivtc=False,
+            apply_ivtc=target_use_ivtc,
+            skip_decimate_in_ivtc=False,
             apply_decimate=target_apply_decimate,
             settings=settings,
         )
@@ -337,11 +366,36 @@ def calculate_video_verified_offset(
         else:
             log(f"[VideoVerified] FPS: {fps:.3f} (frame: {1000.0 / fps:.3f}ms)")
 
-        # Timebase for each reader (may differ for telecine/hybrid DVD content).
-        # Keep source timebase for candidate generation and logging, but use
-        # per-reader timebases when converting checkpoint time -> frame index.
-        source_frame_duration_ms = 1000.0 / fps
-        target_frame_duration_ms = 1000.0 / target_fps
+        # Timebase for frame index calculation.
+        # Two cases:
+        # 1. IVTC/VDecimate applied: VDecimate actually removes frames, so
+        #    the post-IVTC fps (23.976) IS the real frame rate. Use reader.fps.
+        # 2. AssumeFPS-only (no frame removal): AssumeFPS only relabels fps,
+        #    frame count unchanged. Must use real_fps (pre-AssumeFPS) so that
+        #    time→index math matches the actual frame count. E.g. FFMS2
+        #    reports 29.778fps (42195 frames), AssumeFPS says 29.970 but
+        #    get_frame(N) still returns the Nth of 42195 frames.
+        def _get_indexing_fps(reader, processed_fps):
+            """Get the correct FPS for time→frame index conversion."""
+            if getattr(reader, "ivtc_applied", False):
+                # VDecimate changed the frame count — post-IVTC fps is correct
+                return processed_fps
+            if getattr(reader, "decimate_applied", False):
+                # Same: VDecimate changed the frame count
+                return processed_fps
+            # No decimation — use real FFMS2 fps (before AssumeFPS relabeling)
+            real = getattr(reader, "real_fps", None)
+            return real if real else processed_fps
+
+        source_index_fps = _get_indexing_fps(source_reader, fps)
+        target_index_fps = _get_indexing_fps(target_reader, target_fps)
+        source_frame_duration_ms = 1000.0 / source_index_fps
+        target_frame_duration_ms = 1000.0 / target_index_fps
+
+        if abs(source_index_fps - fps) > 0.01 or abs(target_index_fps - target_fps) > 0.01:
+            log(
+                f"[VideoVerified] Indexing FPS: source={source_index_fps:.3f}, target={target_index_fps:.3f}"
+            )
 
     except Exception as e:
         log(f"[VideoVerified] Failed to open videos: {e}")
@@ -392,15 +446,22 @@ def calculate_video_verified_offset(
     else:
         ssim_threshold = None
 
-    # Determine IVTC tolerance for sequence verification
-    # When either reader had IVTC applied, VDecimate drops different frames
-    # per encode, causing ±1 frame drift in the sequence
+    # Determine IVTC/VFM tolerance for sequence verification.
+    # VFM field-matching is content-dependent: different encodes of the same
+    # content produce different field-match decisions for some frames (near
+    # scene changes, high motion). This means frame N after VFM on encode A
+    # may correspond to frame N±1 after VFM on encode B. Allow ±1 frame
+    # tolerance so sequence verification can handle this.
     source_ivtc = getattr(source_reader, "ivtc_applied", False)
     target_ivtc = getattr(target_reader, "ivtc_applied", False)
-    ivtc_tolerance = 1 if (source_ivtc or target_ivtc) else 0
+    source_vfm = getattr(source_reader, "vfm_applied", False)
+    target_vfm = getattr(target_reader, "vfm_applied", False)
+    any_field_processing = source_ivtc or target_ivtc or source_vfm or target_vfm
+    ivtc_tolerance = 1 if any_field_processing else 0
     if ivtc_tolerance > 0:
+        reason = "VFM" if (source_vfm or target_vfm) else "IVTC"
         log(
-            "[VideoVerified] IVTC detected — using ±1 frame tolerance in sequence verification"
+            f"[VideoVerified] {reason} detected — using ±1 frame tolerance in sequence verification"
         )
 
     log(
@@ -425,6 +486,7 @@ def calculate_video_verified_offset(
             sequence_verify_length=sequence_length,
             ssim_threshold=ssim_threshold,
             ivtc_tolerance=ivtc_tolerance,
+            use_global_ssim=use_interlaced_settings,
         )
         # Convert frame offset to approximate ms for logging
         approx_ms = frame_offset * source_frame_duration_ms
@@ -562,6 +624,8 @@ def calculate_video_verified_offset(
         "use_interlaced_settings": use_interlaced_settings,
         "source_content_type": source_props.get("content_type", "unknown"),
         "target_content_type": target_props.get("content_type", "unknown"),
+        "source_fps": fps,
+        "target_fps": target_fps,
     }
 
 
@@ -772,6 +836,7 @@ def _verify_frame_sequence_static(
     comparison_method: str = "hash",
     ssim_threshold: int | None = None,
     ivtc_tolerance: int = 0,
+    use_global_ssim: bool = False,
 ) -> tuple[int, float, list[int]]:
     """
     Verify that a sequence of consecutive frames match between source and target.
@@ -853,6 +918,7 @@ def _verify_frame_sequence_static(
                         hash_algorithm=hash_algorithm,
                         hash_size=hash_size,
                         threshold=effective_ssim_threshold,
+                        use_global_ssim=use_global_ssim,
                     )
                 else:
                     source_hash = compute_frame_hash(
@@ -958,6 +1024,7 @@ def _measure_frame_offset_quality_static(
     sequence_verify_length: int = 10,
     ssim_threshold: int | None = None,
     ivtc_tolerance: int = 0,
+    use_global_ssim: bool = False,
 ) -> dict[str, Any]:
     """
     Measure quality of a candidate frame offset using sequence verification.
@@ -999,43 +1066,87 @@ def _measure_frame_offset_quality_static(
     # Debug: log VFR frame differences once per run (only at offset 0)
     vfr_debug_logged = False
 
+    # Debug: log frame mapping details for first candidate only
+    if frame_offset == 0:
+        src_fps_actual = getattr(source_reader, "fps", 0)
+        tgt_fps_actual = getattr(target_reader, "fps", 0)
+        src_soft_tc = getattr(source_reader, "is_soft_telecine", False)
+        tgt_soft_tc = getattr(target_reader, "is_soft_telecine", False)
+        src_di = getattr(source_reader, "deinterlace_applied", False)
+        tgt_di = getattr(target_reader, "deinterlace_applied", False)
+        src_frames = len(source_reader.vs_clip) if getattr(source_reader, "vs_clip", None) else "?"
+        tgt_frames = len(target_reader.vs_clip) if getattr(target_reader, "vs_clip", None) else "?"
+        log(
+            f"[VideoVerified] DEBUG readers: "
+            f"src(fps={src_fps_actual:.3f}, soft_tc={src_soft_tc}, di={src_di}, frames={src_frames}) "
+            f"tgt(fps={tgt_fps_actual:.3f}, soft_tc={tgt_soft_tc}, di={tgt_di}, frames={tgt_frames})"
+        )
+        log(
+            f"[VideoVerified] DEBUG frame_duration: "
+            f"src={source_frame_duration_ms:.3f}ms, tgt={target_frame_duration_ms:.3f}ms"
+        )
+
     for checkpoint_ms in checkpoint_times:
         # Source frame at checkpoint time
-        # For soft-telecine VFR sources, use VideoTimestamps to get correct frame index
-        # CFR sources continue to use simple calculation (unchanged)
-        is_source_vfr = getattr(source_reader, "is_soft_telecine", False)
-        source_path = getattr(source_reader, "video_path", "")
-
-        vfr_frame = _get_vfr_frame_for_time(
-            source_path, checkpoint_ms, is_source_vfr, log
-        )
-        if vfr_frame is not None:
-            source_frame_idx = vfr_frame
-            # Debug: show VFR vs CFR frame difference (only once at offset 0)
-            if frame_offset == 0 and not vfr_debug_logged:
-                cfr_frame_would_be = int(checkpoint_ms / source_frame_duration_ms)
-                frame_diff = source_frame_idx - cfr_frame_would_be
-                log(
-                    f"[VideoVerified] VFR→CFR frame mapping at {checkpoint_ms:.0f}ms: "
-                    f"VFR={source_frame_idx}, CFR={cfr_frame_would_be} (diff={frame_diff})"
-                )
-                vfr_debug_logged = True
+        # Use timestamp-based lookup (handles VFR/non-linear timestamps correctly)
+        # Falls back to CFR math when timestamps are linear
+        ts_frame = source_reader.get_frame_index_for_time(checkpoint_ms)
+        if ts_frame is not None:
+            source_frame_idx = ts_frame
         else:
-            # CFR: use standard calculation (unchanged)
-            source_frame_idx = int(checkpoint_ms / source_frame_duration_ms)
+            # Fallback: try VFR VideoTimestamps, then CFR
+            is_source_vfr = getattr(source_reader, "is_soft_telecine", False)
+            source_path = getattr(source_reader, "video_path", "")
+            vfr_frame = _get_vfr_frame_for_time(
+                source_path, checkpoint_ms, is_source_vfr, log
+            )
+            if vfr_frame is not None:
+                source_frame_idx = vfr_frame
+            else:
+                source_frame_idx = int(checkpoint_ms / source_frame_duration_ms)
 
         # Target frame with this offset (STRICT - no window for initial test)
-        # Use TARGET timebase independently. This is critical for telecine/hybrid
-        # sources where source/target processed FPS may differ slightly.
-        target_base_frame = int(checkpoint_ms / target_frame_duration_ms)
-        target_frame_idx = target_base_frame + frame_offset
+        # Convert frame_offset to a TIME offset using source frame duration,
+        # then find the target frame at (checkpoint_time + offset_time).
+        # This correctly handles VFR targets where frame indices don't map
+        # linearly to time (e.g., MPEG-2 DVDs with non-constant frame durations).
+        offset_time_ms = frame_offset * source_frame_duration_ms
+        target_time_ms = checkpoint_ms + offset_time_ms
+
+        ts_tgt = target_reader.get_frame_index_for_time(target_time_ms)
+        if ts_tgt is not None:
+            target_frame_idx = ts_tgt
+        else:
+            target_frame_idx = int(target_time_ms / target_frame_duration_ms)
 
         if target_frame_idx < 0:
             continue
 
+        # Debug: log frame indices for first candidate
+        if frame_offset == 0:
+            log(
+                f"[VideoVerified] DEBUG checkpoint {checkpoint_ms:.0f}ms: "
+                f"src_frame={source_frame_idx}, tgt_frame={target_frame_idx}"
+            )
+
         try:
             # First, check if the single frame matches (strict, no window)
             source_frame = source_reader.get_frame_at_index(source_frame_idx)
+
+            # Debug: save first checkpoint frames at offset 0 for visual inspection
+            if frame_offset == 0 and checkpoint_ms == checkpoint_times[0]:
+                try:
+                    import tempfile
+                    dbg_dir = Path(tempfile.gettempdir()) / "vsg_debug_frames"
+                    dbg_dir.mkdir(exist_ok=True)
+                    if source_frame is not None:
+                        source_frame.save(dbg_dir / f"src_{source_frame_idx}.png")
+                    tgt_dbg = target_reader.get_frame_at_index(target_frame_idx)
+                    if tgt_dbg is not None:
+                        tgt_dbg.save(dbg_dir / f"tgt_{target_frame_idx}.png")
+                    log(f"[VideoVerified] DEBUG: saved frames to {dbg_dir}")
+                except Exception as dbg_err:
+                    log(f"[VideoVerified] DEBUG: frame save failed: {dbg_err}")
             if source_frame is None:
                 continue
 
@@ -1057,6 +1168,7 @@ def _measure_frame_offset_quality_static(
                     hash_algorithm=hash_algorithm,
                     hash_size=hash_size,
                     threshold=ssim_threshold,
+                    use_global_ssim=use_global_ssim,
                 )
             else:
                 # Default: use perceptual hash comparison
@@ -1090,6 +1202,7 @@ def _measure_frame_offset_quality_static(
                 comparison_method=comparison_method,
                 ssim_threshold=ssim_threshold,
                 ivtc_tolerance=ivtc_tolerance,
+                use_global_ssim=use_global_ssim,
             )
 
             # Sequence is verified if majority of frames match
@@ -1390,6 +1503,9 @@ class VideoVerifiedSync(SyncPlugin):
             settings=settings,
             target_fps=target_fps,
             job_name=job_name,
+            source_video=source_video,
+            target_video=target_video,
+            temp_dir=temp_dir,
         )
 
     def _apply_offset(
@@ -1405,6 +1521,9 @@ class VideoVerifiedSync(SyncPlugin):
         settings: AppSettings | None = None,
         target_fps: float | None = None,
         job_name: str = "unknown",
+        source_video: str | None = None,
+        target_video: str | None = None,
+        temp_dir: Path | None = None,
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
         from ..data import OperationRecord, OperationResult, SyncEventData
@@ -1447,6 +1566,23 @@ class VideoVerifiedSync(SyncPlugin):
                 offset_ms=final_offset_ms,
                 job_name=job_name,
                 settings=settings,
+                log=log,
+            )
+
+        # Run visual frame verification if enabled
+        if (
+            settings
+            and settings.video_verified_visual_verify
+            and source_video
+            and target_video
+        ):
+            self._run_visual_verify(
+                source_video=source_video,
+                target_video=target_video,
+                details=details,
+                job_name=job_name,
+                settings=settings,
+                temp_dir=temp_dir,
                 log=log,
             )
 
@@ -1561,3 +1697,70 @@ class VideoVerifiedSync(SyncPlugin):
             ("ceil", result.ceil_issues),
         ]
         return min(modes, key=lambda x: x[1])[0]
+
+    def _run_visual_verify(
+        self,
+        source_video: str,
+        target_video: str,
+        details: dict,
+        job_name: str,
+        settings: AppSettings,
+        temp_dir: Path | None,
+        log,
+    ) -> None:
+        """Run visual frame verification across entire video and write report.
+
+        This opens both videos raw with FFMS2 (no deinterlace/IVTC), samples
+        frames at regular intervals, and compares them using global SSIM to
+        verify the calculated offset is correct.
+        """
+        from ..frame_utils.visual_verify import (
+            run_visual_verify,
+            write_visual_verify_report,
+        )
+
+        log("[VisualVerify] Running visual frame verification...")
+
+        offset_ms = details.get("video_offset_ms", 0.0)
+        frame_offset = details.get("frame_offset", 0)
+        source_fps = details.get("source_fps", 29.97)
+        target_fps = details.get("target_fps", 29.97)
+        source_content_type = details.get("source_content_type", "unknown")
+        target_content_type = details.get("target_content_type", "unknown")
+
+        try:
+            result = run_visual_verify(
+                source_video=source_video,
+                target_video=target_video,
+                offset_ms=offset_ms,
+                frame_offset=frame_offset,
+                source_fps=source_fps,
+                target_fps=target_fps,
+                job_name=job_name,
+                temp_dir=temp_dir,
+                source_content_type=source_content_type,
+                target_content_type=target_content_type,
+                log=log,
+            )
+
+            # Determine output directory
+            config_dir = Path.cwd() / ".config" / "sync_checks"
+
+            # Write the report
+            report_path = write_visual_verify_report(result, config_dir, log)
+
+            # Log summary
+            log(
+                f"[VisualVerify] Samples: {result.total_samples}, "
+                f"Main content accuracy (±2): {result.accuracy_pct:.1f}%"
+            )
+            if result.credits.detected:
+                log(
+                    f"[VisualVerify] Credits detected at "
+                    f"{result.credits.boundary_time_s:.0f}s"
+                )
+            log(f"[VisualVerify] Report saved: {report_path}")
+
+        except Exception as e:
+            log(f"[VisualVerify] ERROR: Visual verification failed: {e}")
+            log("[VisualVerify] Skipping visual verification")
