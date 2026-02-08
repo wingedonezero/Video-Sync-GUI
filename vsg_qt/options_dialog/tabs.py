@@ -1886,6 +1886,21 @@ class SubtitleSyncTab(QWidget):
         frame_layout.addRow(
             "Comparison Method:", self.widgets["frame_comparison_method"]
         )
+
+        self.widgets["frame_ssim_threshold"] = QSpinBox()
+        self.widgets["frame_ssim_threshold"].setRange(1, 50)
+        self.widgets["frame_ssim_threshold"].setValue(10)
+        self.widgets["frame_ssim_threshold"].setToolTip(
+            "SSIM/MSE distance threshold for progressive/CFR content:\n\n"
+            "Only used when Comparison Method is 'ssim' or 'mse'.\n"
+            "Distance = (1 - SSIM) * 100, so lower = stricter.\n\n"
+            "• 5: Very strict (SSIM > 0.95)\n"
+            "• 10 (Default): Standard (SSIM > 0.90)\n"
+            "• 15: Tolerant (SSIM > 0.85)\n"
+            "• 25: Very tolerant (SSIM > 0.75)"
+        )
+        frame_layout.addRow("SSIM Threshold:", self.widgets["frame_ssim_threshold"])
+
         main_layout.addWidget(frame_group)
 
         # ===== SHARED OUTPUT SETTINGS =====
@@ -2354,6 +2369,27 @@ class SubtitleSyncTab(QWidget):
         interlaced_layout.addRow(
             "Comparison Method:", self.widgets["interlaced_comparison_method"]
         )
+
+        self.widgets["interlaced_ssim_threshold"] = QSpinBox()
+        self.widgets["interlaced_ssim_threshold"].setRange(5, 60)
+        self.widgets["interlaced_ssim_threshold"].setValue(25)
+        self.widgets["interlaced_ssim_threshold"].setToolTip(
+            "SSIM/MSE distance threshold for interlaced content:\n\n"
+            "Only used when Comparison Method is 'ssim' or 'mse'.\n"
+            "Distance = (1 - SSIM) * 100, so lower = stricter.\n\n"
+            "Interlaced content needs higher threshold due to:\n"
+            "• Deinterlacing artifacts between different encodes\n"
+            "• Field blending differences\n"
+            "• Different IVTC decimation patterns\n\n"
+            "• 15: Strict (SSIM > 0.85)\n"
+            "• 25 (Default): Balanced (SSIM > 0.75)\n"
+            "• 35: Tolerant (SSIM > 0.65)\n"
+            "• 45: Very tolerant (SSIM > 0.55)"
+        )
+        interlaced_layout.addRow(
+            "SSIM Threshold:", self.widgets["interlaced_ssim_threshold"]
+        )
+
         interlaced_layout.addRow("Use IVTC:", self.widgets["interlaced_use_ivtc"])
         interlaced_layout.addRow(
             "Fallback to Audio:", self.widgets["interlaced_fallback_to_audio"]
@@ -2463,6 +2499,8 @@ class SubtitleSyncTab(QWidget):
             "interlaced_num_checkpoints",
             "interlaced_search_range_frames",
             "interlaced_deinterlace_method",
+            "interlaced_comparison_method",
+            "interlaced_ssim_threshold",
             "interlaced_use_ivtc",
             "interlaced_fallback_to_audio",
         ]
