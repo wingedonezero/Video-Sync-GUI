@@ -2,14 +2,10 @@
 """
 VideoDiff: Visual frame matching to find timing offset between two video files.
 
-Two modes:
-- Native: Built-in Python implementation using perceptual hashing + RANSAC
-- External: Wrapper around the Gronis/videodiff Rust binary (legacy fallback)
-
-The native implementation extracts frames at a low sample rate (default 2fps),
-computes perceptual hashes (dhash), matches frames between the two videos by
-hamming distance, then uses RANSAC regression to find the optimal global offset
-while rejecting outlier matches.
+Extracts frames at a low sample rate (default 2fps), computes perceptual hashes
+(dhash), matches frames between the two videos by hamming distance, then uses
+RANSAC regression to find the optimal global offset while rejecting outlier
+matches.
 """
 
 from __future__ import annotations
@@ -335,8 +331,10 @@ def _ransac_offset(
     ref_times = np.array([m[0] for m in matches], dtype=np.float64)
     target_times = np.array([m[1] for m in matches], dtype=np.float64)
 
-    # All candidate offsets: target - ref for each match
-    all_offsets = target_times - ref_times
+    # All candidate offsets: ref - target for each match
+    # Convention: positive offset means target is ahead (needs delay added)
+    # This matches the audio correlation sign convention
+    all_offsets = ref_times - target_times
     n = len(matches)
 
     best_inlier_count = 0
@@ -397,16 +395,21 @@ def _detect_speed_drift(
         [m[1] for m, inl in zip(matches, inlier_mask) if inl], dtype=np.float64
     )
 
-    # Residuals after removing constant offset
-    residuals = (target_times - ref_times) - offset_ms
+    # Residuals after removing constant offset (same sign convention as _ransac_offset)
+    residuals = (ref_times - target_times) - offset_ms
 
     # Correlation between time position and residual
     if len(ref_times) < 2:
         return False
 
+    # Guard against zero stddev (all residuals identical) which causes np.corrcoef
+    # to produce NaN with a RuntimeWarning
+    if np.std(residuals) == 0.0:
+        return False
+
     corrcoef = np.corrcoef(ref_times, residuals)[0, 1]
     # Strong correlation (|r| > 0.7) suggests systematic drift
-    return abs(corrcoef) > 0.7
+    return bool(abs(corrcoef) > 0.7)
 
 
 # =============================================================================
