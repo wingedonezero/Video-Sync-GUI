@@ -6,13 +6,15 @@ from .source_separation import (
     is_audio_separator_available,
     list_available_models,
 )
-from .videodiff import run_videodiff
+from .videodiff import VideoDiffResult, run_native_videodiff, run_videodiff
 
 __all__ = [
     "SEPARATION_MODES",
+    "VideoDiffResult",
     "diagnose_audio_issue",
     "is_audio_separator_available",
     "list_available_models",
     "run_audio_correlation",
+    "run_native_videodiff",
     "run_videodiff",
 ]

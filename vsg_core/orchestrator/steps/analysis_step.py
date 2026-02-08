@@ -704,8 +704,13 @@ class AnalysisStep:
                         f"This will be added to all correlation results."
                     )
 
-        # --- Step 2: Run correlation for other sources ---
-        runner._log_message("\n--- Running Audio Correlation Analysis ---")
+        # --- Step 2: Run correlation/videodiff for other sources ---
+        is_videodiff_mode = settings.analysis_mode == "VideoDiff"
+
+        if is_videodiff_mode:
+            runner._log_message("\n--- Running VideoDiff (Frame Matching) Analysis ---")
+        else:
+            runner._log_message("\n--- Running Audio Correlation Analysis ---")
 
         # Track which sources have stepping for final report
         stepping_sources = []
@@ -715,6 +720,71 @@ class AnalysisStep:
                 continue
 
             runner._log_message(f"\n[Analyzing {source_key}]")
+
+            # ===================================================================
+            # VideoDiff mode: frame-based analysis (no audio tracks needed)
+            # ===================================================================
+            if is_videodiff_mode:
+                from vsg_core.analysis.videodiff import run_native_videodiff
+
+                vd_result = run_native_videodiff(
+                    str(source1_file),
+                    str(source_file),
+                    settings,
+                    runner,
+                    ctx.tool_paths,
+                )
+
+                correlation_delay_ms = vd_result.offset_ms
+                correlation_delay_raw = vd_result.raw_offset_ms
+
+                # Container delay chain still applies (video container delays)
+                actual_container_delay = source1_video_container_delay
+
+                final_delay_ms = round(correlation_delay_ms + actual_container_delay)
+                final_delay_raw = correlation_delay_raw + actual_container_delay
+
+                runner._log_message(f"[Delay Calculation] {source_key} delay chain:")
+                runner._log_message(
+                    f"[Delay Calculation]   VideoDiff offset: {correlation_delay_raw:+.3f}ms (raw) → {correlation_delay_ms:+d}ms (rounded)"
+                )
+                if actual_container_delay != 0:
+                    runner._log_message(
+                        f"[Delay Calculation]   + Container delay:  {actual_container_delay:+.3f}ms"
+                    )
+                    runner._log_message(
+                        f"[Delay Calculation]   = Final delay:      {final_delay_raw:+.3f}ms (raw) → {final_delay_ms:+d}ms (rounded)"
+                    )
+
+                runner._log_message(
+                    f"[VideoDiff] Confidence: {vd_result.confidence} "
+                    f"(inliers: {vd_result.inlier_count}/{vd_result.matched_frames}, "
+                    f"residual: {vd_result.mean_residual_ms:.1f}ms)"
+                )
+
+                if vd_result.speed_drift_detected:
+                    runner._log_message(
+                        "[VideoDiff] WARNING: Speed drift detected between sources. "
+                        "The offset is valid but timing may drift over the video duration."
+                    )
+
+                source_delays[source_key] = final_delay_ms
+                raw_source_delays[source_key] = final_delay_raw
+
+                if ctx.audit:
+                    ctx.audit.record_delay_calculation(
+                        source_key=source_key,
+                        correlation_raw_ms=correlation_delay_raw,
+                        correlation_rounded_ms=correlation_delay_ms,
+                        container_delay_ms=actual_container_delay,
+                        final_raw_ms=final_delay_raw,
+                        final_rounded_ms=final_delay_ms,
+                        selection_method="VideoDiff",
+                        accepted_chunks=vd_result.inlier_count,
+                        total_chunks=vd_result.matched_frames,
+                    )
+
+                continue  # Skip audio correlation path for this source
 
             # Get per-source settings for this source
             per_source_settings = ctx.source_settings.get(source_key, {})
@@ -844,7 +914,9 @@ class AnalysisStep:
                 continue
 
             # Check if multi-correlation comparison is enabled (Analyze Only mode only)
-            multi_corr_enabled = settings.multi_correlation_enabled and (not ctx.and_merge)
+            multi_corr_enabled = settings.multi_correlation_enabled and (
+                not ctx.and_merge
+            )
 
             if multi_corr_enabled:
                 # Run multiple correlation methods for comparison
