@@ -1758,10 +1758,7 @@ class SubtitleSyncTab(QWidget):
             [
                 "time-based",
                 "timebase-frame-locked-timestamps",
-                "duration-align",
-                "correlation-frame-snap",
                 "subtitle-anchored-frame-snap",
-                "correlation-guided-frame-anchor",
                 "video-verified",
             ]
         )
@@ -1769,10 +1766,7 @@ class SubtitleSyncTab(QWidget):
             "Subtitle synchronization method:\n\n"
             "• time-based: Simple delay via mkvmerge --sync (fastest)\n"
             "• timebase-frame-locked: Time-based + VideoTimestamps frame-alignment\n"
-            "• duration-align: Align by video duration difference\n"
-            "• correlation-frame-snap: Correlation + scene-based frame verification\n"
             "• subtitle-anchored-frame-snap: Visual-only using subtitle positions\n"
-            "• correlation-guided-frame-anchor: Correlation-guided robust matching\n"
             "• video-verified: Audio correlation verified against video frames\n"
             "  (catches cases where audio is offset but subs should be 0ms)"
         )
@@ -1934,68 +1928,6 @@ class SubtitleSyncTab(QWidget):
         )
         specific_layout.addRow("", self.widgets["time_based_use_raw_values"])
 
-        # --- Duration-align options ---
-        self.widgets["duration_align_validate"] = QCheckBox("Validate frame alignment")
-        self.widgets["duration_align_validate"].setChecked(True)
-        self.widgets["duration_align_validate"].setToolTip(
-            "Verify videos are actually frame-aligned using perceptual hashing."
-        )
-
-        self.widgets["duration_align_validate_points"] = QComboBox()
-        self.widgets["duration_align_validate_points"].addItem("1 point (fast)", 1)
-        self.widgets["duration_align_validate_points"].addItem("3 points (thorough)", 3)
-        self.widgets["duration_align_validate_points"].setCurrentIndex(1)
-        self.widgets["duration_align_validate_points"].setToolTip(
-            "Number of checkpoints to validate (first, middle, last)."
-        )
-
-        self.widgets["duration_align_strictness"] = QSpinBox()
-        self.widgets["duration_align_strictness"].setRange(50, 100)
-        self.widgets["duration_align_strictness"].setValue(80)
-        self.widgets["duration_align_strictness"].setSuffix("%")
-        self.widgets["duration_align_strictness"].setToolTip(
-            "Percentage of frames that must match at each checkpoint."
-        )
-
-        self.widgets["duration_align_verify_with_frames"] = QCheckBox(
-            "Hybrid mode: verify with sliding window"
-        )
-        self.widgets["duration_align_verify_with_frames"].setToolTip(
-            "Combine duration-align with sliding window frame matching for higher accuracy."
-        )
-
-        self.widgets["duration_align_skip_validation_generated_tracks"] = QCheckBox(
-            "Skip validation for generated tracks"
-        )
-        self.widgets["duration_align_skip_validation_generated_tracks"].setChecked(True)
-        self.widgets["duration_align_skip_validation_generated_tracks"].setToolTip(
-            "Generated tracks inherit timing from source - no need to re-validate."
-        )
-
-        self.widgets["duration_align_fallback_mode"] = QComboBox()
-        self.widgets["duration_align_fallback_mode"].addItems(
-            ["none", "abort", "duration-offset"]
-        )
-        self.widgets["duration_align_fallback_mode"].setToolTip(
-            "What to do if validation fails:\n"
-            "• none: Warn but continue\n"
-            "• abort: Fail the job\n"
-            "• duration-offset: Use duration calculation only"
-        )
-
-        specific_layout.addRow("", self.widgets["duration_align_validate"])
-        specific_layout.addRow(
-            "Validation Points:", self.widgets["duration_align_validate_points"]
-        )
-        specific_layout.addRow("Strictness:", self.widgets["duration_align_strictness"])
-        specific_layout.addRow("", self.widgets["duration_align_verify_with_frames"])
-        specific_layout.addRow(
-            "", self.widgets["duration_align_skip_validation_generated_tracks"]
-        )
-        specific_layout.addRow(
-            "DA Fallback:", self.widgets["duration_align_fallback_mode"]
-        )
-
         # --- Timebase-frame-locked options ---
         self.widgets["frame_lock_submillisecond_precision"] = QCheckBox(
             "Use sub-millisecond precision"
@@ -2025,21 +1957,6 @@ class SubtitleSyncTab(QWidget):
             "Frame Snap Mode:", self.widgets["videotimestamps_snap_mode"]
         )
 
-        # --- Correlation-frame-snap options ---
-        self.widgets["correlation_snap_fallback_mode"] = QComboBox()
-        self.widgets["correlation_snap_fallback_mode"].addItems(
-            ["snap-to-frame", "use-raw", "abort"]
-        )
-        self.widgets["correlation_snap_fallback_mode"].setToolTip(
-            "What to do if frame verification fails:\n"
-            "• snap-to-frame: Snap correlation to nearest frame\n"
-            "• use-raw: Use raw correlation delay\n"
-            "• abort: Fail the job"
-        )
-        specific_layout.addRow(
-            "CorrSnap Fallback:", self.widgets["correlation_snap_fallback_mode"]
-        )
-
         # --- Subtitle-anchored options ---
         self.widgets["sub_anchor_fallback_mode"] = QComboBox()
         self.widgets["sub_anchor_fallback_mode"].addItems(["abort", "use-median"])
@@ -2050,40 +1967,6 @@ class SubtitleSyncTab(QWidget):
         )
         specific_layout.addRow(
             "SubAnchor Fallback:", self.widgets["sub_anchor_fallback_mode"]
-        )
-
-        # --- Correlation-guided options ---
-        self.widgets["corr_anchor_fallback_mode"] = QComboBox()
-        self.widgets["corr_anchor_fallback_mode"].addItems(
-            ["use-correlation", "use-median", "abort"]
-        )
-        self.widgets["corr_anchor_fallback_mode"].setToolTip(
-            "What to do if checkpoints disagree:\n"
-            "• use-correlation: Fall back to correlation baseline\n"
-            "• use-median: Use median offset anyway\n"
-            "• abort: Fail the job"
-        )
-
-        self.widgets["corr_anchor_refine_per_line"] = QCheckBox(
-            "Refine each subtitle to exact frames"
-        )
-        self.widgets["corr_anchor_refine_per_line"].setToolTip(
-            "After checkpoint validation, refine each subtitle line to exact frames."
-        )
-
-        self.widgets["corr_anchor_refine_workers"] = QSpinBox()
-        self.widgets["corr_anchor_refine_workers"].setRange(1, 16)
-        self.widgets["corr_anchor_refine_workers"].setValue(4)
-        self.widgets["corr_anchor_refine_workers"].setToolTip(
-            "Number of parallel workers for per-line refinement."
-        )
-
-        specific_layout.addRow(
-            "CorrGuided Fallback:", self.widgets["corr_anchor_fallback_mode"]
-        )
-        specific_layout.addRow("", self.widgets["corr_anchor_refine_per_line"])
-        specific_layout.addRow(
-            "Refine Workers:", self.widgets["corr_anchor_refine_workers"]
         )
 
         # --- Video-verified options ---
@@ -2429,21 +2312,11 @@ class SubtitleSyncTab(QWidget):
         """Show/hide settings based on selected sync mode."""
         is_time_based = text == "time-based"
         is_frame_locked = text == "timebase-frame-locked-timestamps"
-        is_duration_align = text == "duration-align"
-        is_correlation_snap = text == "correlation-frame-snap"
         is_sub_anchor_snap = text == "subtitle-anchored-frame-snap"
-        is_corr_guided_anchor = text == "correlation-guided-frame-anchor"
         is_video_verified = text == "video-verified"
 
         # Frame-based modes need frame matching settings
-        is_frame_based = (
-            is_frame_locked
-            or is_duration_align
-            or is_correlation_snap
-            or is_sub_anchor_snap
-            or is_corr_guided_anchor
-            or is_video_verified
-        )
+        is_frame_based = is_frame_locked or is_sub_anchor_snap or is_video_verified
 
         # Shared frame matching settings (enabled for all frame-based modes)
         for key in [
@@ -2465,26 +2338,8 @@ class SubtitleSyncTab(QWidget):
         self.widgets["frame_lock_submillisecond_precision"].setEnabled(is_frame_locked)
         self.widgets["videotimestamps_snap_mode"].setEnabled(is_frame_locked)
 
-        # Duration-align specific
-        self.widgets["duration_align_validate"].setEnabled(is_duration_align)
-        self.widgets["duration_align_validate_points"].setEnabled(is_duration_align)
-        self.widgets["duration_align_strictness"].setEnabled(is_duration_align)
-        self.widgets["duration_align_verify_with_frames"].setEnabled(is_duration_align)
-        self.widgets["duration_align_skip_validation_generated_tracks"].setEnabled(
-            is_duration_align
-        )
-        self.widgets["duration_align_fallback_mode"].setEnabled(is_duration_align)
-
-        # Correlation-frame-snap specific
-        self.widgets["correlation_snap_fallback_mode"].setEnabled(is_correlation_snap)
-
         # Subtitle-anchored specific
         self.widgets["sub_anchor_fallback_mode"].setEnabled(is_sub_anchor_snap)
-
-        # Correlation-guided specific
-        self.widgets["corr_anchor_fallback_mode"].setEnabled(is_corr_guided_anchor)
-        self.widgets["corr_anchor_refine_per_line"].setEnabled(is_corr_guided_anchor)
-        self.widgets["corr_anchor_refine_workers"].setEnabled(is_corr_guided_anchor)
 
         # Video-verified specific
         self.widgets["video_verified_zero_check_frames"].setEnabled(is_video_verified)

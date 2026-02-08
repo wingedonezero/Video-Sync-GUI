@@ -28,18 +28,6 @@ from .frame_audit import (
 )
 
 # ============================================================================
-# Visual frame verification (diagnostic)
-# ============================================================================
-from .visual_verify import (
-    CreditsInfo,
-    RegionStats,
-    SampleResult,
-    VisualVerifyResult,
-    run_visual_verify,
-    write_visual_verify_report,
-)
-
-# ============================================================================
 # Frame hashing and comparison
 # ============================================================================
 from .frame_hashing import (
@@ -67,7 +55,6 @@ from .timing import (
     frame_to_time_aegisub,
     frame_to_time_floor,
     frame_to_time_middle,
-    frame_to_time_vfr,
     get_vfr_timestamps,
     # MODE 2: Aegisub-style
     time_to_frame_aegisub,
@@ -76,14 +63,6 @@ from .timing import (
     # MODE 1: Middle of frame
     time_to_frame_middle,
     time_to_frame_vfr,
-)
-
-# ============================================================================
-# Frame validation
-# ============================================================================
-from .validation import (
-    extract_frame_as_image,
-    validate_frame_alignment,
 )
 
 # ============================================================================
@@ -108,7 +87,18 @@ from .video_properties import (
 from .video_reader import (
     VideoReader,
     _get_ffms2_cache_path,  # Internal but used by validation.py
-    get_vapoursynth_frame_info,
+)
+
+# ============================================================================
+# Visual frame verification (diagnostic)
+# ============================================================================
+from .visual_verify import (
+    CreditsInfo,
+    RegionStats,
+    SampleResult,
+    VisualVerifyResult,
+    run_visual_verify,
+    write_visual_verify_report,
 )
 
 # ============================================================================
@@ -138,12 +128,9 @@ __all__ = [
     "detect_scene_changes",
     "detect_video_fps",
     "detect_video_properties",
-    "extract_frame_as_image",
     "frame_to_time_aegisub",
     "frame_to_time_floor",
     "frame_to_time_middle",
-    "frame_to_time_vfr",
-    "get_vapoursynth_frame_info",
     "get_vfr_timestamps",
     "get_video_duration_ms",
     "get_video_properties",
@@ -153,7 +140,6 @@ __all__ = [
     "time_to_frame_floor",
     "time_to_frame_middle",
     "time_to_frame_vfr",
-    "validate_frame_alignment",
     "write_audit_report",
     "write_visual_verify_report",
 ]

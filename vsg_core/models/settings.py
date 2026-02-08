@@ -29,13 +29,10 @@ from pydantic import BaseModel, ConfigDict
 
 from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     AnalysisModeStr,
-    CorrAnchorFallbackStr,
     CorrelationMethodSourceSepStr,
     CorrelationMethodStr,
-    CorrelationSnapFallbackStr,
     DeinterlaceMethodStr,
     DelaySelectionModeStr,
-    DurationAlignFallbackStr,
     FilteringMethodStr,
     FrameComparisonMethodStr,
     FrameHashAlgorithmStr,
@@ -191,33 +188,9 @@ class AppSettings(BaseModel):
     frame_ssim_threshold: int = 10  # SSIM distance threshold (0-100, lower=stricter)
 
     # =========================================================================
-    # Correlation Snap Settings
-    # =========================================================================
-    correlation_snap_fallback_mode: CorrelationSnapFallbackStr = "snap-to-frame"
-    correlation_snap_use_scene_changes: bool = True
-
-    # =========================================================================
-    # Correlation-Guided Frame Anchor Settings
-    # =========================================================================
-    corr_anchor_fallback_mode: CorrAnchorFallbackStr = "use-correlation"
-    corr_anchor_anchor_positions: list[int] = [10, 50, 90]
-    corr_anchor_refine_per_line: bool = False
-    corr_anchor_refine_workers: int = 4
-
-    # =========================================================================
     # Subtitle-Anchored Frame Snap Settings
     # =========================================================================
     sub_anchor_fallback_mode: SubAnchorFallbackStr = "abort"
-
-    # =========================================================================
-    # Duration Align Settings
-    # =========================================================================
-    duration_align_verify_with_frames: bool = False
-    duration_align_validate: bool = True
-    duration_align_fallback_mode: DurationAlignFallbackStr = "none"
-    duration_align_validate_points: int = 3
-    duration_align_strictness: int = 80
-    duration_align_skip_validation_generated_tracks: bool = True
 
     # =========================================================================
     # Frame Lock Settings

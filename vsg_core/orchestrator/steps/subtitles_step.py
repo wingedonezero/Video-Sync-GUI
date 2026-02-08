@@ -132,7 +132,6 @@ class SubtitlesStep:
             )
 
         items_to_add = []
-        _any_no_scene_fallback = False
 
         # Cache for scene detection results per source
         _scene_detection_cache = {}
@@ -266,10 +265,6 @@ class SubtitlesStep:
                     runner._log_message(
                         f"[Subtitles] Track {item.track.id}: Bitmap format {ext} - using mkvmerge --sync for delay"
                     )
-
-        # Set context flag if any track used raw delay fallback
-        if _any_no_scene_fallback:
-            ctx.correlation_snap_no_scenes_fallback = True
 
         if items_to_add:
             ctx.extracted_items.extend(items_to_add)

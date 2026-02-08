@@ -28,10 +28,7 @@ SnapModeStr = Literal["previous", "nearest"]
 SubtitleSyncModeStr = Literal[
     "time-based",
     "timebase-frame-locked-timestamps",
-    "duration-align",
-    "correlation-frame-snap",
     "subtitle-anchored-frame-snap",
-    "correlation-guided-frame-anchor",
     "video-verified",
 ]
 
@@ -61,17 +58,8 @@ FrameComparisonMethodStr = Literal["hash", "ssim", "mse"]
 # Fallback Modes (what to do when sync mode fails)
 # =========================================================================
 
-# Duration-align fallback
-DurationAlignFallbackStr = Literal["none", "abort", "duration-offset"]
-
-# Correlation-frame-snap fallback
-CorrelationSnapFallbackStr = Literal["snap-to-frame", "use-raw", "abort"]
-
 # Subtitle-anchored-frame-snap fallback
 SubAnchorFallbackStr = Literal["abort", "use-median"]
-
-# Correlation-guided-frame-anchor fallback
-CorrAnchorFallbackStr = Literal["use-correlation", "use-median", "abort"]
 
 # =========================================================================
 # Interlaced / Telecine Settings

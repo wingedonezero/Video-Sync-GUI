@@ -2,7 +2,6 @@
 import re
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -28,9 +27,7 @@ class SubtitleFormatsAuditor(BaseAuditor):
         """
         issues = 0
         subtitle_items = [
-            item
-            for item in self.ctx.extracted_items
-            if item.track.type == "subtitles"
+            item for item in self.ctx.extracted_items if item.track.type == "subtitles"
         ]
 
         if not subtitle_items:
@@ -129,17 +126,6 @@ class SubtitleFormatsAuditor(BaseAuditor):
                 issues += self._verify_font_size(plan_item, track_label)
 
             final_subtitle_idx += 1
-
-        # Check if any subtitle tracks used raw delay fallback due to no scene matches
-        if getattr(self.ctx, "correlation_snap_no_scenes_fallback", False):
-            self.log(
-                "[WARNING] One or more subtitle tracks used raw delay (no scene matches found)"
-            )
-            self.log(
-                "          → Frame verification was skipped, using correlation only"
-            )
-            self.log("          → Review logs to confirm timing is correct")
-            issues += 1
 
         if issues == 0:
             self.log("✅ All subtitle processing verified correctly.")
