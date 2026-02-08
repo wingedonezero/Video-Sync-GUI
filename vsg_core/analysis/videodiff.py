@@ -55,6 +55,28 @@ _FRAME_W = 32
 _FRAME_H = 32
 
 
+def _probe_fps(video_path: str) -> float:
+    """Probe the native frame rate of a video using ffprobe."""
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate",
+        "-of", "csv=p=0",
+        video_path,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        # r_frame_rate is a fraction like "24000/1001" or "25/1"
+        rate_str = result.stdout.strip()
+        if "/" in rate_str:
+            num, den = rate_str.split("/")
+            return float(num) / float(den)
+        return float(rate_str)
+    except Exception:
+        return 23.976  # Safe fallback
+
+
 def _extract_frame_hashes(
     video_path: str,
     sample_fps: float,
@@ -63,25 +85,41 @@ def _extract_frame_hashes(
     """
     Extract frames from video at sample_fps and compute dhash for each.
 
-    Uses ffmpeg to pipe raw RGB frames at a fixed sample rate.
-    This handles any input FPS/interlacing transparently - ffmpeg
-    decodes and resamples to our target rate.
+    Uses ffmpeg to pipe raw frames. When sample_fps > 0, resamples to that
+    rate. When sample_fps == 0, uses the video's native frame rate for
+    maximum precision.
 
     Args:
         video_path: Path to video file
-        sample_fps: Frames per second to sample (e.g. 2.0)
+        sample_fps: Frames per second to sample. 0 = native frame rate.
         log: Logging callback
 
     Returns:
         (hashes, timestamps) where hashes are uint64 dhash arrays
         and timestamps are in milliseconds
     """
+    # Determine effective fps
+    if sample_fps <= 0:
+        effective_fps = _probe_fps(video_path)
+        vf_filters = f"scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray"
+        log(
+            f"[VideoDiff] Extracting at native rate ({effective_fps:.3f}fps) "
+            f"from: {Path(video_path).name}"
+        )
+    else:
+        effective_fps = sample_fps
+        vf_filters = f"fps={sample_fps},scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray"
+        log(
+            f"[VideoDiff] Extracting frames at {sample_fps}fps "
+            f"from: {Path(video_path).name}"
+        )
+
     cmd = [
         "ffmpeg",
         "-i",
         video_path,
         "-vf",
-        f"fps={sample_fps},scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray",
+        vf_filters,
         "-f",
         "rawvideo",
         "-pix_fmt",
@@ -95,11 +133,7 @@ def _extract_frame_hashes(
     frame_size = _FRAME_W * _FRAME_H  # 1 byte per pixel (grayscale)
     hashes: list[np.ndarray] = []
     timestamps: list[float] = []
-    ms_per_frame = 1000.0 / sample_fps
-
-    log(
-        f"[VideoDiff] Extracting frames at {sample_fps}fps from: {Path(video_path).name}"
-    )
+    ms_per_frame = 1000.0 / effective_fps
 
     try:
         proc = subprocess.Popen(
@@ -140,7 +174,8 @@ def _extract_frame_hashes(
     except FileNotFoundError:
         raise RuntimeError("ffmpeg not found. Required for VideoDiff frame extraction.")
 
-    log(f"[VideoDiff] Extracted {len(hashes)} frames ({len(hashes) / sample_fps:.1f}s)")
+    duration_s = len(hashes) / effective_fps if effective_fps > 0 else 0
+    log(f"[VideoDiff] Extracted {len(hashes)} frames ({duration_s:.1f}s)")
     return hashes, timestamps
 
 
@@ -469,13 +504,14 @@ def run_native_videodiff(
     log("[VideoDiff] Starting native frame-based analysis")
     log("=" * 60)
 
-    sample_fps = getattr(settings, "videodiff_sample_fps", 2.0)
+    sample_fps = getattr(settings, "videodiff_sample_fps", 0)
     max_hamming = getattr(settings, "videodiff_match_threshold", 5)
     min_matches = getattr(settings, "videodiff_min_matches", 50)
     inlier_threshold = getattr(settings, "videodiff_inlier_threshold_ms", 100.0)
 
     # Step 1: Extract and hash frames from both videos
-    log(f"\n[VideoDiff] Step 1: Frame extraction (sample rate: {sample_fps}fps)")
+    fps_label = "native" if sample_fps <= 0 else f"{sample_fps}fps"
+    log(f"\n[VideoDiff] Step 1: Frame extraction (sample rate: {fps_label})")
 
     ref_hashes, ref_timestamps = _extract_frame_hashes(ref_file, sample_fps, log)
     target_hashes, target_timestamps = _extract_frame_hashes(
@@ -563,7 +599,7 @@ def run_native_videodiff(
     log(f"\n{'=' * 60}")
     log("[VideoDiff] RESULTS")
     log(f"{'=' * 60}")
-    log(f"  Offset: {rounded_offset:+d}ms (raw: {raw_offset:+.3f}ms)")
+    log(f"  Offset: {rounded_offset}ms (raw: {raw_offset:.3f}ms)")
     log(
         f"  Matched frames: {len(matches)} / "
         f"{min(len(ref_hashes), len(target_hashes))} "
