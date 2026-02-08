@@ -806,16 +806,6 @@ class SubtitlesStep:
                 runner=runner,
             )
 
-            # Run visual verify if enabled (shortcut path bypasses plugin)
-            self._run_visual_verify_if_enabled(
-                source_video=source_video,
-                target_video=target_video,
-                details=cached.get("details", {}),
-                job_name=job_name,
-                ctx=ctx,
-                runner=runner,
-            )
-
             return OperationResult(
                 success=True,
                 operation="sync",
@@ -1275,6 +1265,17 @@ class SubtitlesStep:
                     runner._log_message(
                         f"[VideoVerified] ✓ {source_key} → Source 1: {corrected_delay_ms:+.3f}ms "
                         f"(audio: {original_delay:+.3f}ms, delta: {frame_diff_ms:+.3f}ms)"
+                    )
+
+                    # Run visual verification once per source (not per track)
+                    job_name = f"{Path(str(source_video)).stem}_vs_{Path(str(source1_file)).stem}"
+                    self._run_visual_verify_if_enabled(
+                        source_video=source_video,
+                        target_video=source1_file,
+                        details=details,
+                        job_name=job_name,
+                        ctx=ctx,
+                        runner=runner,
                     )
                 else:
                     runner._log_message(
