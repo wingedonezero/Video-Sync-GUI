@@ -824,9 +824,16 @@ class VideoReader:
             elif self._should_deinterlace():
                 # Pure interlaced content: apply deinterlacing
                 clip = self._apply_deinterlace_filter(clip, core)
-            elif self.apply_decimate:
+            elif self.apply_decimate and not self.is_soft_telecine:
                 # Progressive content with duplicate frames (2:3 pulldown)
+                # Skip when is_soft_telecine: pulldown already removed by container,
+                # FFMS2 delivers real ~24fps frames — VDecimate would destroy content.
                 clip = self._apply_decimate_filter(clip, core)
+            elif self.apply_decimate and self.is_soft_telecine:
+                self.runner._log_message(
+                    "[FrameUtils] Skipping VDecimate: soft-telecine pulldown already "
+                    "removed by container (FFMS2 sees actual film frames)"
+                )
 
             # Keep clip in original format (usually YUV)
             # We'll extract only luma (Y) plane for hashing - more reliable than RGB
