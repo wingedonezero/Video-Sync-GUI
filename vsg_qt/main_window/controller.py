@@ -182,7 +182,7 @@ class MainController:
         QThreadPool.globalInstance().start(self.worker)
 
     def job_finished(self, result: dict) -> None:
-        delays = result.get("delays", {})
+        delays = result.get("delays") or {}
         for i, label in enumerate(self.v.delay_labels):
             source_key = f"Source {i + 2}"
             delay_val = delays.get(source_key)
