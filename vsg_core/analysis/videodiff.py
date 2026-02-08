@@ -15,7 +15,6 @@ while rejecting outlier matches.
 from __future__ import annotations
 
 import logging
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -582,100 +581,8 @@ def run_native_videodiff(
 
 
 # =============================================================================
-# External videodiff binary wrapper (legacy)
+# Convenience alias
 # =============================================================================
 
-
-def run_external_videodiff(
-    ref_file: str,
-    target_file: str,
-    settings: AppSettings,
-    runner: CommandRunner,
-    tool_paths: dict[str, str | None],
-) -> tuple[int, float]:
-    """
-    Run the external Gronis/videodiff Rust binary.
-
-    Legacy fallback for when the native implementation is not suitable.
-
-    Returns:
-        (delay_ms, error_value) tuple
-    """
-    cfg_path = (settings.videodiff_path or "").strip()
-    if cfg_path:
-        if Path(cfg_path).exists():
-            exe = cfg_path
-        else:
-            exe = cfg_path
-    else:
-        exe = tool_paths.get("videodiff") or "videodiff"
-
-    out = runner.run([str(exe), str(ref_file), str(target_file)], tool_paths)
-    if not out:
-        raise RuntimeError("videodiff produced no output or failed to run.")
-
-    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
-    last_line = ""
-    for ln in reversed(lines):
-        if "[Result]" in ln and ("ss:" in ln or "itsoffset:" in ln):
-            last_line = ln
-            break
-
-    if not last_line:
-        raise RuntimeError(
-            "Could not find a valid '[Result]' line in videodiff output."
-        )
-
-    m = re.search(
-        r"(itsoffset|ss)\s*:\s*(-?\d+(?:\.\d+)?)s.*?error:\s*([0-9.]+)",
-        last_line,
-        flags=re.IGNORECASE,
-    )
-    if not m:
-        raise RuntimeError(f"Could not parse videodiff result line: '{last_line}'")
-
-    kind, s_val, err_val = m.groups()
-    seconds = float(s_val)
-    delay_ms = int(round(seconds * 1000))
-    if kind.lower() == "ss":
-        delay_ms = -delay_ms
-
-    error_value = float(err_val)
-    runner._log_message(
-        f"[VideoDiff] Result -> {kind.lower()} {seconds:.5f}s, "
-        f"error {error_value:.2f} => delay {delay_ms:+} ms"
-    )
-    return delay_ms, error_value
-
-
-# =============================================================================
-# Unified entry point (backwards compatible)
-# =============================================================================
-
-
-def run_videodiff(
-    ref_file: str,
-    target_file: str,
-    settings: AppSettings,
-    runner: CommandRunner,
-    tool_paths: dict[str, str | None],
-) -> tuple[int, float]:
-    """
-    Run VideoDiff analysis - dispatches to native or external based on settings.
-
-    If videodiff_path is configured (external binary), uses that.
-    Otherwise uses the native Python implementation.
-
-    Returns:
-        (delay_ms, error_value) tuple for backwards compatibility.
-        error_value is mean_residual_ms for native mode.
-    """
-    use_external = bool((settings.videodiff_path or "").strip())
-
-    if use_external:
-        return run_external_videodiff(
-            ref_file, target_file, settings, runner, tool_paths
-        )
-
-    result = run_native_videodiff(ref_file, target_file, settings, runner, tool_paths)
-    return result.offset_ms, result.mean_residual_ms
+# run_videodiff is the single entry point - always uses native implementation
+run_videodiff = run_native_videodiff
