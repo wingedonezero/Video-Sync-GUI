@@ -1266,6 +1266,17 @@ class SubtitlesStep:
                         f"[VideoVerified] ✓ {source_key} → Source 1: {corrected_delay_ms:+.3f}ms "
                         f"(audio: {original_delay:+.3f}ms, delta: {frame_diff_ms:+.3f}ms)"
                     )
+
+                    # Run visual verification once per source (not per track)
+                    job_name = f"{Path(str(source_video)).stem}_vs_{Path(str(source1_file)).stem}"
+                    self._run_visual_verify_if_enabled(
+                        source_video=source_video,
+                        target_video=source1_file,
+                        details=details,
+                        job_name=job_name,
+                        ctx=ctx,
+                        runner=runner,
+                    )
                 else:
                     runner._log_message(
                         f"[VideoVerified] ✗ {source_key}: frame matching failed, using audio correlation"
@@ -1364,6 +1375,75 @@ class SubtitlesStep:
 
         except Exception as e:
             runner._log_message(f"[FrameAudit] WARNING: Audit failed - {e}")
+
+    def _run_visual_verify_if_enabled(
+        self,
+        source_video,
+        target_video,
+        details: dict,
+        job_name: str,
+        ctx: Context,
+        runner: CommandRunner,
+    ) -> None:
+        """
+        Run visual frame verification if enabled in settings.
+
+        This is called from shortcut paths (cached video-verified, Source 1 reference)
+        that bypass the plugin's apply() method where verification would normally run.
+        """
+        if not ctx.settings.video_verified_visual_verify:
+            return
+        if not source_video or not target_video:
+            runner._log_message("[VisualVerify] Skipped: video paths not available")
+            return
+
+        try:
+            from vsg_core.subtitles.frame_utils.visual_verify import (
+                run_visual_verify,
+                write_visual_verify_report,
+            )
+
+            runner._log_message("[VisualVerify] Running visual frame verification...")
+
+            offset_ms = details.get("video_offset_ms", 0.0)
+            frame_offset = details.get("frame_offset", 0)
+            source_fps = details.get("source_fps", 29.97)
+            target_fps = details.get("target_fps", 29.97)
+            source_content_type = details.get("source_content_type", "unknown")
+            target_content_type = details.get("target_content_type", "unknown")
+
+            result = run_visual_verify(
+                source_video=str(source_video),
+                target_video=str(target_video),
+                offset_ms=offset_ms,
+                frame_offset=frame_offset,
+                source_fps=source_fps,
+                target_fps=target_fps,
+                job_name=job_name,
+                temp_dir=ctx.temp_dir,
+                source_content_type=source_content_type,
+                target_content_type=target_content_type,
+                log=runner._log_message,
+            )
+
+            config_dir = Path.cwd() / ".config" / "sync_checks"
+            report_path = write_visual_verify_report(
+                result, config_dir, runner._log_message
+            )
+
+            runner._log_message(
+                f"[VisualVerify] Samples: {result.total_samples}, "
+                f"Main content accuracy (±2): {result.accuracy_pct:.1f}%"
+            )
+            if result.credits.detected:
+                runner._log_message(
+                    f"[VisualVerify] Credits detected at "
+                    f"{result.credits.boundary_time_s:.0f}s"
+                )
+            runner._log_message(f"[VisualVerify] Report saved: {report_path}")
+
+        except Exception as e:
+            runner._log_message(f"[VisualVerify] WARNING: Verification failed - {e}")
 
     @staticmethod
     def _build_track_label(item) -> str:
