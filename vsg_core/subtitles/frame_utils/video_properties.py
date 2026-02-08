@@ -5,15 +5,63 @@ Video property detection functions for subtitle synchronization.
 Contains:
 - FPS detection
 - Comprehensive video property detection (interlacing, duration, resolution)
+- Content type analysis (idet + mpdecimate for MPEG-2 DVD content)
 - Video property comparison for sync strategy selection
 """
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models.types import ContentTypeStr, FieldOrderStr
+
+
+@dataclass(frozen=True, slots=True)
+class IdetResult:
+    """Raw output from ffmpeg idet filter (whole-file analysis)."""
+
+    # Repeated fields
+    repeated_neither: int
+    repeated_top: int
+    repeated_bottom: int
+    # Single-frame detection
+    single_tff: int
+    single_bff: int
+    single_progressive: int
+    single_undetermined: int
+    # Multi-frame detection
+    multi_tff: int
+    multi_bff: int
+    multi_progressive: int
+    multi_undetermined: int
+    # Duplicate detection (from mpdecimate output frame count)
+    input_frames: int
+    output_frames: int
+
+
+@dataclass(frozen=True, slots=True)
+class ContentAnalysis:
+    """Analyzed content type for a video file.
+
+    Produced by analyze_content_type() using ffmpeg idet filter on the
+    whole file. Only runs for MPEG-2 DVD content (codec + resolution gate).
+    """
+
+    content_type: ContentTypeStr
+    field_order: FieldOrderStr
+    confidence: float  # 0.0-1.0
+    duplicate_ratio: float  # ~0.2 = 3:2 telecine pattern
+    analysis_source: str  # 'idet', 'idet+mpdecimate', 'metadata_only'
+
+
+# Module-level cache for content analysis results (lives for the job)
+_content_analysis_cache: dict[str, ContentAnalysis] = {}
 
 
 def detect_video_fps(video_path: str, runner) -> float:
@@ -270,12 +318,34 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
         height = props["height"]
         props["is_sd"] = height <= 576  # 480i, 480p, 576i, 576p
 
-        # DVD detection heuristics
-        # NTSC DVD: 720x480 or 704x480
+        # DVD detection: MPEG-2 codec + DVD-Video standard resolutions
+        # DVD-Video spec only allows MPEG-2 (and rare MPEG-1).
+        # This prevents false positives on H.264/H.265 480p encodes.
+        codec = stream.get("codec_name", "")
+        is_dvd_codec = codec in ("mpeg2video", "mpeg1video")
+
+        # NTSC DVD: 720x480 or 704x480 (also 352x480, 352x240 but rare)
         # PAL DVD: 720x576 or 704x576
-        is_ntsc_dvd = height in (480, 486) and props["width"] in (720, 704, 640)
-        is_pal_dvd = height in (576, 578) and props["width"] in (720, 704)
+        is_ntsc_dvd = (
+            is_dvd_codec
+            and height in (480, 486)
+            and props["width"]
+            in (
+                720,
+                704,
+            )
+        )
+        is_pal_dvd = (
+            is_dvd_codec
+            and height in (576, 578)
+            and props["width"]
+            in (
+                720,
+                704,
+            )
+        )
         props["is_dvd"] = is_ntsc_dvd or is_pal_dvd
+        props["codec_name"] = codec
 
         # Determine content_type based on multiple factors
         # This helps decide which settings to use
@@ -380,6 +450,324 @@ def get_video_duration_ms(video_path: str, runner) -> float:
     """
     props = detect_video_properties(video_path, runner)
     return props.get("duration_ms", 0.0)
+
+
+def analyze_content_type(
+    video_path: str,
+    runner,
+    props: dict[str, Any] | None = None,
+) -> ContentAnalysis:
+    """
+    Analyze actual content type using ffmpeg idet + mpdecimate on the WHOLE file.
+
+    Only runs the full analysis for MPEG-2 DVD content (codec + resolution gate).
+    Non-DVD content returns immediately with metadata-based classification.
+    Results are cached in memory for the job duration.
+
+    Single ffmpeg pass with chained filters:
+    - idet: detects interlacing (TFF/BFF/progressive) and repeated fields (pulldown)
+    - mpdecimate: detects duplicate frames (output frame count vs input)
+
+    Args:
+        video_path: Path to video file
+        runner: CommandRunner for logging
+        props: Pre-detected properties (avoids re-running ffprobe). If None,
+               detect_video_properties() is called automatically.
+
+    Returns:
+        ContentAnalysis with precise content_type, field_order, and confidence.
+    """
+    # Check cache first
+    if video_path in _content_analysis_cache:
+        cached = _content_analysis_cache[video_path]
+        runner._log_message(
+            f"[ContentAnalysis] Using cached result: {cached.content_type} "
+            f"(confidence={cached.confidence:.0%})"
+        )
+        return cached
+
+    # Get properties if not provided
+    if props is None:
+        props = detect_video_properties(video_path, runner)
+
+    # Gate: only run full analysis for MPEG-2 DVD content
+    if not props.get("is_dvd", False):
+        # Non-DVD: use metadata classification directly
+        result = ContentAnalysis(
+            content_type=props.get("content_type", "progressive"),
+            field_order=props.get("field_order", "progressive"),
+            confidence=0.5,
+            duplicate_ratio=0.0,
+            analysis_source="metadata_only",
+        )
+        _content_analysis_cache[video_path] = result
+        return result
+
+    runner._log_message(
+        f"[ContentAnalysis] MPEG-2 DVD detected, running full idet analysis on: "
+        f"{Path(video_path).name}"
+    )
+    runner._log_message(
+        "[ContentAnalysis] Analyzing whole file (this may take 1-3 minutes)..."
+    )
+
+    # Run idet + mpdecimate in a single ffmpeg pass
+    idet = _run_idet_analysis(video_path, props.get("frame_count", 0), runner)
+
+    if idet is None:
+        # Analysis failed, fall back to metadata
+        runner._log_message(
+            "[ContentAnalysis] Analysis failed, using metadata fallback"
+        )
+        result = ContentAnalysis(
+            content_type=props.get("content_type", "unknown"),
+            field_order=props.get("field_order", "progressive"),
+            confidence=0.3,
+            duplicate_ratio=0.0,
+            analysis_source="metadata_only",
+        )
+        _content_analysis_cache[video_path] = result
+        return result
+
+    # Classify based on idet results
+    result = _classify_content(idet, props, runner)
+    _content_analysis_cache[video_path] = result
+
+    runner._log_message(
+        f"[ContentAnalysis] Result: {result.content_type} "
+        f"(field_order={result.field_order}, confidence={result.confidence:.0%}, "
+        f"duplicates={result.duplicate_ratio:.1%}, source={result.analysis_source})"
+    )
+
+    return result
+
+
+def _run_idet_analysis(
+    video_path: str, expected_frames: int, runner
+) -> IdetResult | None:
+    """
+    Run ffmpeg with idet + mpdecimate filters on the whole file.
+
+    Single decode pass gives us:
+    - idet: interlace detection (TFF/BFF/Progressive per frame) + repeated fields
+    - mpdecimate: duplicate frame detection (compares output vs input frame count)
+
+    Args:
+        video_path: Path to video file
+        expected_frames: Expected frame count from ffprobe (for duplicate ratio)
+        runner: CommandRunner for logging
+
+    Returns:
+        IdetResult with all parsed stats, or None on failure.
+    """
+    import os
+
+    try:
+        from vsg_core.system.gpu_env import get_subprocess_environment
+
+        env = get_subprocess_environment()
+    except ImportError:
+        env = os.environ.copy()
+
+    cmd = [
+        "ffmpeg",
+        "-i",
+        str(video_path),
+        "-vf",
+        "idet,mpdecimate",
+        "-an",
+        "-f",
+        "null",
+        "-",
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600, env=env
+        )
+    except subprocess.TimeoutExpired:
+        runner._log_message(
+            "[ContentAnalysis] WARNING: idet analysis timed out (10min)"
+        )
+        return None
+    except Exception as e:
+        runner._log_message(f"[ContentAnalysis] WARNING: idet analysis failed: {e}")
+        return None
+
+    stderr = result.stderr
+
+    # Parse idet output: "Repeated Fields: Neither: N Top: N Bottom: N"
+    repeated_match = re.search(
+        r"Repeated Fields: Neither:\s*(\d+)\s+Top:\s*(\d+)\s+Bottom:\s*(\d+)",
+        stderr,
+    )
+    # Parse: "Single frame detection: TFF: N BFF: N Progressive: N Undetermined: N"
+    single_match = re.search(
+        r"Single frame detection: TFF:\s*(\d+)\s+BFF:\s*(\d+)\s+"
+        r"Progressive:\s*(\d+)\s+Undetermined:\s*(\d+)",
+        stderr,
+    )
+    # Parse: "Multi frame detection: TFF: N BFF: N Progressive: N Undetermined: N"
+    multi_match = re.search(
+        r"Multi frame detection:\s+TFF:\s*(\d+)\s+BFF:\s*(\d+)\s+"
+        r"Progressive:\s*(\d+)\s+Undetermined:\s*(\d+)",
+        stderr,
+    )
+    # Parse output frame count: "frame= N fps=..."
+    frame_match = re.search(r"frame=\s*(\d+)", stderr)
+
+    if not single_match:
+        runner._log_message("[ContentAnalysis] WARNING: Could not parse idet output")
+        return None
+
+    # Build result
+    output_frames = int(frame_match.group(1)) if frame_match else expected_frames
+
+    # Input frames = sum of single-frame detection counts (all frames analyzed)
+    input_frames = (
+        int(single_match.group(1))
+        + int(single_match.group(2))
+        + int(single_match.group(3))
+        + int(single_match.group(4))
+    )
+
+    # Use expected_frames as fallback if idet sum seems wrong
+    if input_frames == 0 and expected_frames > 0:
+        input_frames = expected_frames
+
+    return IdetResult(
+        repeated_neither=int(repeated_match.group(1)) if repeated_match else 0,
+        repeated_top=int(repeated_match.group(2)) if repeated_match else 0,
+        repeated_bottom=int(repeated_match.group(3)) if repeated_match else 0,
+        single_tff=int(single_match.group(1)),
+        single_bff=int(single_match.group(2)),
+        single_progressive=int(single_match.group(3)),
+        single_undetermined=int(single_match.group(4)),
+        multi_tff=int(multi_match.group(1)) if multi_match else 0,
+        multi_bff=int(multi_match.group(2)) if multi_match else 0,
+        multi_progressive=int(multi_match.group(3)) if multi_match else 0,
+        multi_undetermined=int(multi_match.group(4)) if multi_match else 0,
+        input_frames=input_frames,
+        output_frames=output_frames,
+    )
+
+
+def _classify_content(
+    idet: IdetResult, props: dict[str, Any], runner
+) -> ContentAnalysis:
+    """
+    Classify content type based on idet analysis results.
+
+    Classification logic:
+    - Mostly TFF/BFF + repeated fields → telecine_hard (needs VFM + VDecimate)
+    - Mostly progressive + repeated fields → telecine_soft (needs VDecimate only)
+    - Mostly TFF/BFF, few repeated → interlaced (needs deinterlace)
+    - Mostly progressive + duplicates (~20%) → telecine_soft (baked-in pulldown)
+    - Mostly progressive, no duplicates → progressive (passthrough)
+    - Mix → mixed
+    """
+    total = idet.input_frames
+    if total == 0:
+        return ContentAnalysis(
+            content_type="unknown",
+            field_order=props.get("field_order", "progressive"),
+            confidence=0.0,
+            duplicate_ratio=0.0,
+            analysis_source="idet",
+        )
+
+    # Calculate ratios
+    interlaced_count = idet.single_tff + idet.single_bff
+    interlaced_ratio = interlaced_count / total
+    progressive_ratio = idet.single_progressive / total
+    repeated_count = idet.repeated_top + idet.repeated_bottom
+    repeated_ratio = repeated_count / total if total > 0 else 0.0
+
+    # Duplicate ratio from mpdecimate (output vs input frame count)
+    if idet.input_frames > 0 and idet.output_frames > 0:
+        duplicate_ratio = 1.0 - (idet.output_frames / idet.input_frames)
+    else:
+        duplicate_ratio = 0.0
+
+    # Determine field order from whichever dominates
+    if idet.single_tff > idet.single_bff:
+        field_order: FieldOrderStr = "tff"
+    elif idet.single_bff > idet.single_tff:
+        field_order = "bff"
+    else:
+        field_order = "progressive"
+
+    # Log detailed stats
+    runner._log_message(
+        f"[ContentAnalysis] idet: interlaced={interlaced_ratio:.1%} "
+        f"(TFF={idet.single_tff}, BFF={idet.single_bff}), "
+        f"progressive={progressive_ratio:.1%} ({idet.single_progressive}), "
+        f"undetermined={idet.single_undetermined}"
+    )
+    runner._log_message(
+        f"[ContentAnalysis] Repeated fields: top={idet.repeated_top}, "
+        f"bottom={idet.repeated_bottom}, neither={idet.repeated_neither} "
+        f"(ratio={repeated_ratio:.1%})"
+    )
+    runner._log_message(
+        f"[ContentAnalysis] Duplicates: {idet.output_frames}/{idet.input_frames} "
+        f"output frames (duplicate_ratio={duplicate_ratio:.1%})"
+    )
+
+    # Classification decision tree
+    content_type: ContentTypeStr
+    confidence: float
+    analysis_source: str
+
+    if interlaced_ratio > 0.5 and repeated_ratio > 0.05:
+        # Mostly interlaced + repeated fields = hard telecine
+        content_type = "telecine_hard"
+        confidence = min(0.95, interlaced_ratio)
+        analysis_source = "idet"
+
+    elif progressive_ratio > 0.7 and repeated_ratio > 0.05:
+        # Mostly progressive + repeated fields = soft telecine (flags present)
+        content_type = "telecine_soft"
+        confidence = min(0.95, progressive_ratio)
+        analysis_source = "idet"
+
+    elif interlaced_ratio > 0.5:
+        # Mostly interlaced, few/no repeated fields = pure interlaced
+        content_type = "interlaced"
+        confidence = min(0.95, interlaced_ratio)
+        analysis_source = "idet"
+
+    elif progressive_ratio > 0.7 and duplicate_ratio > 0.15:
+        # Mostly progressive but ~20% duplicates = baked-in pulldown
+        # (flags were stripped but duplicate frames remain)
+        content_type = "telecine_soft"
+        confidence = 0.85
+        analysis_source = "idet+mpdecimate"
+
+    elif progressive_ratio > 0.7:
+        # Mostly progressive, no duplicates = true progressive
+        content_type = "progressive"
+        confidence = min(0.95, progressive_ratio)
+        analysis_source = "idet+mpdecimate"
+
+    else:
+        # Mix of interlaced and progressive sections
+        content_type = "mixed"
+        confidence = 0.7
+        analysis_source = "idet"
+
+    return ContentAnalysis(
+        content_type=content_type,
+        field_order=field_order,
+        confidence=confidence,
+        duplicate_ratio=duplicate_ratio,
+        analysis_source=analysis_source,
+    )
+
+
+def clear_content_analysis_cache() -> None:
+    """Clear the in-memory content analysis cache."""
+    _content_analysis_cache.clear()
 
 
 def compare_video_properties(

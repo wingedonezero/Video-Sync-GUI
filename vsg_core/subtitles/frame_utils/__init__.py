@@ -78,6 +78,10 @@ from .validation import (
 # Video property detection
 # ============================================================================
 from .video_properties import (
+    ContentAnalysis,
+    IdetResult,
+    analyze_content_type,
+    clear_content_analysis_cache,
     compare_video_properties,
     detect_video_fps,
     detect_video_properties,
@@ -98,9 +102,13 @@ from .video_reader import (
 # Public API
 # ============================================================================
 __all__ = [
+    "ContentAnalysis",
     "FrameAuditIssue",
     "FrameAuditResult",
+    "IdetResult",
     "VideoReader",
+    "analyze_content_type",
+    "clear_content_analysis_cache",
     "clear_vfr_cache",
     "compare_frames",
     "compare_video_properties",
