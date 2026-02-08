@@ -229,77 +229,65 @@ def calculate_video_verified_offset(
     log(f"[VideoVerified] Source duration: ~{source_duration / 1000:.1f}s")
 
     # Open video readers with per-video processing based on content type
-    # NOTE: We do this BEFORE calculating frame offsets because IVTC changes the FPS
+    # NOTE: We do this BEFORE calculating frame offsets because processing may change FPS
     try:
-        # Determine processing for each video independently based on analysis
-        # telecine_hard / telecine / mixed → VFM + VDecimate (full IVTC)
-        # telecine_soft → VDecimate only (progressive with pulldown/duplicates)
+        # Determine processing for each video independently based on analysis.
+        # For cross-encode comparison, VFM (IVTC field matching) is NOT used:
+        # VFM makes non-deterministic field-matching decisions that differ between
+        # encodes, producing incomparable progressive frames.  Instead, all
+        # interlaced/telecine content gets deterministic deinterlacing (yadif/bwdif)
+        # which produces consistent output for the same scene across encodes.
+        #
+        # telecine_hard / telecine / mixed → deinterlace (not VFM)
+        # telecine_soft → passthrough (pulldown already removed by container)
         # interlaced → deinterlace
         # progressive → passthrough
-        _ivtc_types = ("telecine", "telecine_hard", "mixed")
-        source_apply_ivtc = (
-            use_interlaced_settings
-            and settings.interlaced_use_ivtc
-            and source_content_type in _ivtc_types
-        )
+        _interlaced_types = ("telecine", "telecine_hard", "mixed", "interlaced")
+
         source_apply_decimate = (
-            not source_apply_ivtc
-            and use_interlaced_settings
+            use_interlaced_settings
             and settings.interlaced_use_ivtc
             and source_content_type == "telecine_soft"
         )
+        # Use explicit deinterlace method (not "auto") for all interlaced/telecine
+        # content. "auto" checks ffprobe's scan_type which can be wrong (e.g.
+        # container says progressive for actually-interlaced telecine MPEG-2).
+        # An explicit method forces deinterlacing regardless of container flags.
         source_deinterlace = (
             settings.interlaced_deinterlace_method
-            if use_interlaced_settings and source_content_type == "interlaced"
+            if use_interlaced_settings and source_content_type in _interlaced_types
             else "auto"
         )
 
-        target_apply_ivtc = (
-            use_interlaced_settings
-            and settings.interlaced_use_ivtc
-            and target_content_type in _ivtc_types
-        )
         target_apply_decimate = (
-            not target_apply_ivtc
-            and use_interlaced_settings
+            use_interlaced_settings
             and settings.interlaced_use_ivtc
             and target_content_type == "telecine_soft"
         )
         target_deinterlace = (
             settings.interlaced_deinterlace_method
-            if use_interlaced_settings and target_content_type == "interlaced"
+            if use_interlaced_settings and target_content_type in _interlaced_types
             else "auto"
         )
 
         log(f"[VideoVerified] Source: {source_content_type}")
-        if source_apply_ivtc:
-            log(
-                f"[VideoVerified]   Processing: VFM-only ({source_content_type} -> progressive, no VDecimate)"
-            )
+        if source_content_type in _interlaced_types and use_interlaced_settings:
+            log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
         elif source_apply_decimate:
             log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
-        elif source_content_type == "interlaced":
-            log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
         else:
             log("[VideoVerified]   Processing: none (progressive)")
 
         log(f"[VideoVerified] Target: {target_content_type}")
-        if target_apply_ivtc:
-            log(
-                f"[VideoVerified]   Processing: VFM-only ({target_content_type} -> progressive, no VDecimate)"
-            )
+        if target_content_type in _interlaced_types and use_interlaced_settings:
+            log(f"[VideoVerified]   Processing: deinterlace ({target_deinterlace})")
         elif target_apply_decimate:
             log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
-        elif target_content_type == "interlaced":
-            log(f"[VideoVerified]   Processing: deinterlace ({target_deinterlace})")
         else:
             log("[VideoVerified]   Processing: none (progressive)")
 
         # Create readers with per-video settings
-        # skip_decimate_in_ivtc: For cross-encode comparison, VDecimate makes
-        # different frame-drop decisions per encode, destroying frame index
-        # correspondence. VFM-only gives progressive frames at 30fps with
-        # preserved indices — duplicates don't affect comparison accuracy.
+        # apply_ivtc=False: VFM not used for comparison (non-deterministic)
         source_reader = VideoReader(
             source_video,
             runner,
@@ -307,9 +295,8 @@ def calculate_video_verified_offset(
             deinterlace=source_deinterlace,
             content_type=source_content_type,
             ivtc_field_order=source_analysis.field_order,
-            apply_ivtc=source_apply_ivtc,
+            apply_ivtc=False,
             apply_decimate=source_apply_decimate,
-            skip_decimate_in_ivtc=source_apply_ivtc,
             settings=settings,
         )
         target_reader = VideoReader(
@@ -319,9 +306,8 @@ def calculate_video_verified_offset(
             deinterlace=target_deinterlace,
             content_type=target_content_type,
             ivtc_field_order=target_analysis.field_order,
-            apply_ivtc=target_apply_ivtc,
+            apply_ivtc=False,
             apply_decimate=target_apply_decimate,
-            skip_decimate_in_ivtc=target_apply_ivtc,
             settings=settings,
         )
 
@@ -336,8 +322,8 @@ def calculate_video_verified_offset(
             or target_reader.ivtc_applied
             or source_reader.decimate_applied
             or target_reader.decimate_applied
-            or source_reader.vfm_applied
-            or target_reader.vfm_applied
+            or source_reader.deinterlace_applied
+            or target_reader.deinterlace_applied
         )
         if any_fps_changed:
             log(
