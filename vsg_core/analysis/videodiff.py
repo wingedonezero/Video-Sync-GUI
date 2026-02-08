@@ -563,7 +563,7 @@ def run_native_videodiff(
     log(f"\n{'=' * 60}")
     log("[VideoDiff] RESULTS")
     log(f"{'=' * 60}")
-    log(f"  Offset: {rounded_offset:+d}ms (raw: {raw_offset:+.3f}ms)")
+    log(f"  Offset: {rounded_offset}ms (raw: {raw_offset:.3f}ms)")
     log(
         f"  Matched frames: {len(matches)} / "
         f"{min(len(ref_hashes), len(target_hashes))} "
