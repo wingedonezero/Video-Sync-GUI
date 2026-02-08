@@ -497,7 +497,7 @@ class VideoReader:
             return False
 
         # Content type must be telecine (either detected or passed in)
-        if self.content_type == "telecine":
+        if self.content_type in ("telecine", "telecine_hard"):
             return True
 
         # Also check if detected as interlaced NTSC DVD (likely telecine)

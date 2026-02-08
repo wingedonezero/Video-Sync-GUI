@@ -82,6 +82,7 @@ def calculate_video_verified_offset(
     """
     from ...models.settings import AppSettings
     from ..frame_utils import detect_video_properties
+    from ..frame_utils.video_properties import analyze_content_type
 
     if settings is None:
         settings = AppSettings()
@@ -115,15 +116,25 @@ def calculate_video_verified_offset(
     interlaced_handling_enabled = settings.interlaced_handling_enabled
     force_mode = settings.interlaced_force_mode
 
-    # Check if either video is interlaced/telecine
-    source_needs_interlaced = source_props.get("content_type") in (
+    # Run content analysis for DVD content (MPEG-2 codec gate)
+    # This uses idet + mpdecimate on the whole file for precise detection
+    source_analysis = analyze_content_type(source_video, runner, source_props)
+    target_analysis = analyze_content_type(target_video, runner, target_props)
+
+    # Use analyzed content_type (more precise than metadata-only)
+    source_content_type = source_analysis.content_type
+    target_content_type = target_analysis.content_type
+
+    # Check if either video needs interlaced handling
+    _interlaced_types = (
         "interlaced",
         "telecine",
+        "telecine_hard",
+        "telecine_soft",
+        "mixed",
     )
-    target_needs_interlaced = target_props.get("content_type") in (
-        "interlaced",
-        "telecine",
-    )
+    source_needs_interlaced = source_content_type in _interlaced_types
+    target_needs_interlaced = target_content_type in _interlaced_types
     either_interlaced = source_needs_interlaced or target_needs_interlaced
 
     # Determine if we should use interlaced settings
@@ -139,11 +150,15 @@ def calculate_video_verified_offset(
         log("[VideoVerified] Using INTERLACED settings")
         if source_needs_interlaced:
             log(
-                f"[VideoVerified]   Source: {source_props.get('content_type')} ({source_props.get('width')}x{source_props.get('height')})"
+                f"[VideoVerified]   Source: {source_content_type} "
+                f"({source_props.get('width')}x{source_props.get('height')}, "
+                f"confidence={source_analysis.confidence:.0%})"
             )
         if target_needs_interlaced:
             log(
-                f"[VideoVerified]   Target: {target_props.get('content_type')} ({target_props.get('width')}x{target_props.get('height')})"
+                f"[VideoVerified]   Target: {target_content_type} "
+                f"({target_props.get('width')}x{target_props.get('height')}, "
+                f"confidence={target_analysis.confidence:.0%})"
             )
 
     # Detect FPS (initial - may be updated after IVTC)
@@ -214,14 +229,22 @@ def calculate_video_verified_offset(
     # Open video readers with per-video processing based on content type
     # NOTE: We do this BEFORE calculating frame offsets because IVTC changes the FPS
     try:
-        # Determine processing for each video independently
-        # This allows: telecine source + progressive target, etc.
-        # Source video processing
-        source_content_type = source_props.get("content_type", "progressive")
+        # Determine processing for each video independently based on analysis
+        # telecine_hard → VFM + VDecimate (full IVTC)
+        # telecine_soft → VDecimate only (progressive with pulldown/duplicates)
+        # telecine (legacy metadata) → VFM + VDecimate
+        # interlaced → deinterlace
+        # progressive → passthrough
         source_apply_ivtc = (
             use_interlaced_settings
             and settings.interlaced_use_ivtc
-            and source_content_type == "telecine"
+            and source_content_type in ("telecine", "telecine_hard")
+        )
+        source_apply_decimate = (
+            not source_apply_ivtc
+            and use_interlaced_settings
+            and settings.interlaced_use_ivtc
+            and source_content_type == "telecine_soft"
         )
         source_deinterlace = (
             settings.interlaced_deinterlace_method
@@ -229,12 +252,16 @@ def calculate_video_verified_offset(
             else "auto"
         )
 
-        # Target video processing
-        target_content_type = target_props.get("content_type", "progressive")
         target_apply_ivtc = (
             use_interlaced_settings
             and settings.interlaced_use_ivtc
-            and target_content_type == "telecine"
+            and target_content_type in ("telecine", "telecine_hard")
+        )
+        target_apply_decimate = (
+            not target_apply_ivtc
+            and use_interlaced_settings
+            and settings.interlaced_use_ivtc
+            and target_content_type == "telecine_soft"
         )
         target_deinterlace = (
             settings.interlaced_deinterlace_method
@@ -242,33 +269,11 @@ def calculate_video_verified_offset(
             else "auto"
         )
 
-        # Detect progressive-with-pulldown: when content_type is "unknown"
-        # (progressive ~30fps DVD) and the companion is telecine, the "unknown"
-        # video likely has duplicate frames from 2:3 pulldown baked in.
-        # Apply VDecimate (no VFM) to remove duplicates and match the
-        # companion's ~24fps after IVTC.
-        source_apply_decimate = (
-            not source_apply_ivtc
-            and use_interlaced_settings
-            and settings.interlaced_use_ivtc
-            and source_content_type == "unknown"
-            and target_content_type == "telecine"
-        )
-        target_apply_decimate = (
-            not target_apply_ivtc
-            and use_interlaced_settings
-            and settings.interlaced_use_ivtc
-            and target_content_type == "unknown"
-            and source_content_type == "telecine"
-        )
-
         log(f"[VideoVerified] Source: {source_content_type}")
         if source_apply_ivtc:
-            log("[VideoVerified]   Processing: IVTC (telecine → progressive)")
+            log("[VideoVerified]   Processing: IVTC (telecine_hard -> progressive)")
         elif source_apply_decimate:
-            log(
-                "[VideoVerified]   Processing: VDecimate (progressive with pulldown → ~24fps)"
-            )
+            log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
         elif source_content_type == "interlaced":
             log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
         else:
@@ -276,11 +281,9 @@ def calculate_video_verified_offset(
 
         log(f"[VideoVerified] Target: {target_content_type}")
         if target_apply_ivtc:
-            log("[VideoVerified]   Processing: IVTC (telecine → progressive)")
+            log("[VideoVerified]   Processing: IVTC (telecine_hard -> progressive)")
         elif target_apply_decimate:
-            log(
-                "[VideoVerified]   Processing: VDecimate (progressive with pulldown → ~24fps)"
-            )
+            log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
         elif target_content_type == "interlaced":
             log(f"[VideoVerified]   Processing: deinterlace ({target_deinterlace})")
         else:
