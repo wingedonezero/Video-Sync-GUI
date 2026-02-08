@@ -222,8 +222,6 @@ def get_vfr_timestamps(
         from video_timestamps import (
             FPSTimestamps,
             RoundingMethod,
-            TimeType,
-            VideoTimestamps,
         )
 
         # Get rounding method from settings (default: ROUND)
@@ -291,89 +289,4 @@ def get_vfr_timestamps(
         runner._log_message(
             f"[VideoTimestamps] WARNING: Failed to create timestamps handler: {e}"
         )
-        return None
-
-
-def frame_to_time_vfr(
-    frame_num: int,
-    video_path: str,
-    fps: float,
-    runner,
-    settings: AppSettings | None = None,
-) -> int | None:
-    """
-    MODE: VFR (VideoTimestamps-based).
-
-    For CFR videos: Uses FPSTimestamps (lightweight calculation)
-    For VFR videos: Uses VideoTimestamps (analyzes video container)
-
-    Args:
-        frame_num: Frame number
-        video_path: Path to video file
-        fps: Frame rate (used for CFR mode)
-        runner: CommandRunner for logging
-        settings: AppSettings with timing settings
-
-    Returns:
-        Timestamp in milliseconds, or None if VideoTimestamps unavailable
-    """
-    try:
-        from video_timestamps import TimeType
-
-        vts = get_vfr_timestamps(video_path, fps, runner, settings)
-        if vts is None:
-            return None
-
-        # Get exact timestamp for this frame
-        # Use EXACT time (precise frame display window) - NOT START!
-        # EXACT gives [current, next[ which matches video player behavior
-        time_ms = vts.frame_to_time(frame_num, TimeType.EXACT)
-        return int(time_ms)
-
-    except Exception as e:
-        runner._log_message(f"[VideoTimestamps] WARNING: frame_to_time_vfr failed: {e}")
-        return None
-
-
-def time_to_frame_vfr(
-    time_ms: float,
-    video_path: str,
-    fps: float,
-    runner,
-    settings: AppSettings | None = None,
-) -> int | None:
-    """
-    MODE: VFR using VideoTimestamps.
-
-    Converts timestamp to frame using appropriate timestamps handler.
-
-    Args:
-        time_ms: Timestamp in milliseconds
-        video_path: Path to video file
-        fps: Frame rate (used for CFR mode)
-        runner: CommandRunner for logging
-        settings: AppSettings with timing settings
-
-    Returns:
-        Frame number, or None if VideoTimestamps unavailable
-    """
-    try:
-        from fractions import Fraction
-
-        from video_timestamps import TimeType
-
-        vts = get_vfr_timestamps(video_path, fps, runner, settings)
-        if vts is None:
-            return None
-
-        # Convert time_ms to Fraction (required by VideoTimestamps)
-        time_frac = Fraction(int(time_ms), 1)
-
-        # Convert time to frame using EXACT (precise frame display window)
-        # EXACT gives [current, next[ which matches video player behavior
-        frame_num = vts.time_to_frame(time_frac, TimeType.EXACT)
-        return frame_num
-
-    except Exception as e:
-        runner._log_message(f"[VideoTimestamps] WARNING: time_to_frame_vfr failed: {e}")
         return None
