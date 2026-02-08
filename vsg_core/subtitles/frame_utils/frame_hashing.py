@@ -121,7 +121,11 @@ def compute_hamming_distance(hash1, hash2) -> int:
     return hash1 - hash2
 
 
-def compute_ssim(frame1: Image.Image, frame2: Image.Image) -> float:
+def compute_ssim(
+    frame1: Image.Image,
+    frame2: Image.Image,
+    use_global: bool = False,
+) -> float:
     """
     Compute Structural Similarity Index (SSIM) between two frames.
 
@@ -131,6 +135,11 @@ def compute_ssim(frame1: Image.Image, frame2: Image.Image) -> float:
     Args:
         frame1: First PIL Image object
         frame2: Second PIL Image object
+        use_global: If True, use global mean/variance SSIM instead of
+            scikit-image's windowed SSIM. This is less sensitive to local
+            pixel differences, which is important for deinterlaced content
+            where bwdif interpolation creates local variations between
+            different encodes even when the overall image is the same scene.
 
     Returns:
         SSIM value from 0.0 to 1.0. Higher = more similar.
@@ -151,17 +160,19 @@ def compute_ssim(frame1: Image.Image, frame2: Image.Image) -> float:
             frame2_resized = frame2.resize(frame1.size, PILImage.Resampling.LANCZOS)
             arr2 = np.array(frame2_resized.convert("L"))
 
-        # Try scikit-image SSIM first (most accurate)
-        try:
-            from skimage.metrics import structural_similarity
+        if not use_global:
+            # Try scikit-image SSIM first (windowed, most accurate for CFR/progressive)
+            try:
+                from skimage.metrics import structural_similarity
 
-            ssim_value = structural_similarity(arr1, arr2, data_range=255)
-            return float(ssim_value)
-        except ImportError:
-            pass
+                ssim_value = structural_similarity(arr1, arr2, data_range=255)
+                return float(ssim_value)
+            except ImportError:
+                pass
 
-        # Fallback: simplified SSIM calculation
-        # Using the formula: SSIM = (2*mu1*mu2 + C1)(2*sigma12 + C2) / ((mu1^2 + mu2^2 + C1)(sigma1^2 + sigma2^2 + C2))
+        # Global SSIM: uses whole-image mean/variance instead of windowed approach.
+        # Less sensitive to local pixel differences from deinterlace interpolation.
+        # Formula: SSIM = (2*mu1*mu2 + C1)(2*sigma12 + C2) / ((mu1^2 + mu2^2 + C1)(sigma1^2 + sigma2^2 + C2))
         C1 = (0.01 * 255) ** 2
         C2 = (0.03 * 255) ** 2
 
@@ -221,6 +232,7 @@ def compare_frames(
     hash_algorithm: str = "dhash",
     hash_size: int = 8,
     threshold: int | None = None,
+    use_global_ssim: bool = False,
 ) -> tuple:
     """
     Compare two frames using the specified method.
@@ -234,6 +246,9 @@ def compare_frames(
         threshold: Max distance for a match. If None, uses method defaults:
             hash=5, ssim=10 (SSIM>0.90), mse=5 (MSE<500).
             For SSIM distance = (1-ssim)*100, so threshold 25 = SSIM>0.75.
+        use_global_ssim: If True, use global mean/variance SSIM instead of
+            scikit-image windowed SSIM. Important for interlaced content where
+            deinterlace interpolation causes local differences between encodes.
 
     Returns:
         Tuple of (distance, is_match):
@@ -246,7 +261,7 @@ def compare_frames(
     - mse: MSE / 100 capped at 100 (0=identical, <5=match, >10=different)
     """
     if method == "ssim":
-        ssim = compute_ssim(frame1, frame2)
+        ssim = compute_ssim(frame1, frame2, use_global=use_global_ssim)
         # Convert to distance (0 = identical, higher = more different)
         distance = (1.0 - ssim) * 100  # Scale to ~0-100 range
         max_dist = threshold if threshold is not None else 10

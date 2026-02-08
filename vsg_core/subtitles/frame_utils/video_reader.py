@@ -276,6 +276,7 @@ class VideoReader:
         self.is_soft_telecine = False  # True if VFR from soft-telecine removal
         self.target_fps = None  # Target FPS after normalization (for soft-telecine)
         self.fps_normalized = False  # Whether AssumeFPS was applied
+        self.real_fps: float | None = None  # Actual FFMS2 fps before AssumeFPS
 
         # Detect video properties for interlacing info
         self._detect_interlacing()
@@ -433,6 +434,15 @@ class VideoReader:
         )
 
         try:
+            # Force the correct field order on the clip via _FieldBased frame property.
+            # Bwdif/Yadif read _FieldBased from each frame and OVERRIDE the field/order
+            # parameter when it is set. FFMS2 sets _FieldBased per-frame based on
+            # FFmpeg's AV_FRAME_FLAG_INTERLACED, which is often wrong or inconsistent
+            # for MPEG-2 DVD content. Without this, two encodes of the same content
+            # can get different _FieldBased values from FFMS2, causing bwdif to
+            # deinterlace them with different field orders → completely different
+            # progressive output → frame comparison fails (avg_dist 40+).
+            clip = core.std.SetFieldBased(clip, 2 if tff else 1)
             if method == "yadif":
                 # YADIF - Yet Another DeInterlacing Filter
                 # Mode 0 = output one frame per frame (not bob)
@@ -569,6 +579,11 @@ class VideoReader:
             )
 
         try:
+            # Force correct field order in frame properties (same reason as
+            # _apply_deinterlace_filter — FFMS2's per-frame _FieldBased can be
+            # wrong for MPEG-2, and VFM reads it to override the order param).
+            clip = core.std.SetFieldBased(clip, 2 if tff else 1)
+
             # Check if VIVTC is available
             if hasattr(core, "vivtc"):
                 # VFM: Field matching - recovers progressive frames
@@ -815,6 +830,15 @@ class VideoReader:
 
             # Get the actual FPS from FFMS2 (based on frame timestamps)
             ffms2_fps = clip.fps_num / clip.fps_den
+            # Store the real FPS before any AssumeFPS normalization.
+            # This is needed for time→frame index calculation: AssumeFPS only
+            # changes the fps label, not the number of frames. So frame N is
+            # still at position N/real_fps in the video, not N/assumed_fps.
+            self.real_fps = ffms2_fps
+            self.runner._log_message(
+                f"[FrameUtils] FFMS2 raw: {clip.fps_num}/{clip.fps_den} = {ffms2_fps:.6f}fps, "
+                f"{clip.num_frames} frames"
+            )
 
             # Detect soft-telecine: ffprobe says ~30fps but FFMS2 sees ~24fps
             # This happens when MakeMKV/mkvmerge removes soft-telecine pulldown
@@ -859,6 +883,16 @@ class VideoReader:
                 self.runner._log_message(
                     f"[FrameUtils] Normalized FPS ({clip_fps:.3f} -> 29.970)"
                 )
+
+            # Log final clip state before processing
+            final_clip_fps = clip.fps_num / clip.fps_den
+            self.runner._log_message(
+                f"[FrameUtils] Pre-process state: clip_fps={final_clip_fps:.3f}, "
+                f"is_soft_telecine={self.is_soft_telecine}, "
+                f"target_fps={self.target_fps}, "
+                f"deinterlace={self.deinterlace_method}, "
+                f"content_type={self.content_type}"
+            )
 
             # Apply IVTC or deinterlacing based on content type
             # Priority: IVTC for telecine > deinterlace for interlaced
@@ -964,6 +998,168 @@ class VideoReader:
             return self._get_frame_opencv(time_ms)
         else:
             return self._get_frame_ffmpeg(time_ms)
+
+    def get_frame_index_for_time(self, time_ms: float) -> int | None:
+        """
+        Find the frame index closest to a given timestamp using FFMS2 _AbsoluteTime.
+
+        Unlike simple ``int(time_ms / frame_duration)`` which assumes CFR, this
+        method reads actual per-frame timestamps from FFMS2 and binary-searches
+        them. This is critical for VFR content (e.g., MPEG-2 DVDs remuxed to
+        MKV where mkvmerge introduces variable frame durations).
+
+        A sparse timestamp table is built on first call (every 50 frames),
+        then refined with a local linear scan for sub-50-frame accuracy.
+
+        Falls back to CFR calculation if VapourSynth/_AbsoluteTime is not
+        available.
+
+        Args:
+            time_ms: Target time in milliseconds
+
+        Returns:
+            Frame index (0-based), or None on failure
+        """
+        import bisect
+
+        if not (self.use_vapoursynth and self.vs_clip):
+            # No VapourSynth → fall back to CFR math
+            if self.fps:
+                real = getattr(self, "real_fps", None) or self.fps
+                return int(time_ms / (1000.0 / real))
+            return None
+
+        # Build sparse timestamp table on first call
+        if not hasattr(self, "_ts_table"):
+            self._build_timestamp_table()
+
+        if not self._ts_table:
+            # Fallback: CFR
+            if self.fps:
+                real = getattr(self, "real_fps", None) or self.fps
+                return int(time_ms / (1000.0 / real))
+            return None
+
+        target_s = time_ms / 1000.0
+        sparse_times = self._ts_table_times  # seconds
+        sparse_indices = self._ts_table_indices
+
+        # Binary search in sparse table
+        pos = bisect.bisect_left(sparse_times, target_s)
+
+        # Get the bracketing sparse indices
+        if pos >= len(sparse_times):
+            start_frame = sparse_indices[-1]
+        elif pos == 0:
+            start_frame = sparse_indices[0]
+        else:
+            # Pick the closer bracket
+            if abs(sparse_times[pos] - target_s) < abs(sparse_times[pos - 1] - target_s):
+                start_frame = sparse_indices[pos]
+            else:
+                start_frame = sparse_indices[pos - 1]
+
+        # Local linear scan: refine within ±step frames of the sparse match
+        step = self._ts_table_step
+        num_frames = len(self.vs_clip)
+        lo = max(0, start_frame - step)
+        hi = min(num_frames - 1, start_frame + step)
+
+        best_frame = start_frame
+        best_diff = float("inf")
+
+        for i in range(lo, hi + 1):
+            try:
+                props = self.vs_clip.get_frame(i).props
+                t = props.get("_AbsoluteTime", None)
+                if t is None:
+                    continue
+                diff = abs(t - target_s)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_frame = i
+                    if diff < 0.001:  # Within 1ms — good enough
+                        break
+                elif t > target_s + 0.1:
+                    # Past the target, stop scanning forward
+                    break
+            except Exception:
+                continue
+
+        return best_frame
+
+    def _build_timestamp_table(self) -> None:
+        """Build a sparse _AbsoluteTime → frame_index lookup table."""
+        self._ts_table: list[tuple[int, float]] = []
+        self._ts_table_times: list[float] = []
+        self._ts_table_indices: list[int] = []
+        self._ts_table_step = 50  # Sample every 50 frames
+
+        if not (self.use_vapoursynth and self.vs_clip):
+            return
+
+        num_frames = len(self.vs_clip)
+        step = self._ts_table_step
+
+        # Check if timestamps are actually variable by sampling a few points
+        # If CFR, skip building the full table (waste of time)
+        test_indices = [0, num_frames // 4, num_frames // 2, 3 * num_frames // 4]
+        is_vfr = False
+        for idx in test_indices:
+            if idx >= num_frames:
+                continue
+            try:
+                props = self.vs_clip.get_frame(idx).props
+                actual_t = props.get("_AbsoluteTime", None)
+                if actual_t is None:
+                    # No _AbsoluteTime available — not VFR-aware
+                    self.runner._log_message(
+                        "[FrameUtils] No _AbsoluteTime in frame props — using CFR math"
+                    )
+                    return
+                real = getattr(self, "real_fps", None) or self.fps or 29.970
+                expected_t = idx / real
+                if abs(actual_t - expected_t) > 0.5:  # >500ms drift = definitely VFR
+                    is_vfr = True
+            except Exception:
+                pass
+
+        if not is_vfr:
+            self.runner._log_message(
+                "[FrameUtils] Timestamps are CFR-linear — skipping timestamp table"
+            )
+            return
+
+        self.runner._log_message(
+            f"[FrameUtils] Building timestamp table for VFR content ({num_frames} frames, step={step})..."
+        )
+
+        for i in range(0, num_frames, step):
+            try:
+                props = self.vs_clip.get_frame(i).props
+                t = props.get("_AbsoluteTime", None)
+                if t is not None:
+                    self._ts_table.append((i, t))
+                    self._ts_table_times.append(t)
+                    self._ts_table_indices.append(i)
+            except Exception:
+                pass
+
+        # Always include the last frame
+        if num_frames - 1 not in self._ts_table_indices:
+            try:
+                props = self.vs_clip.get_frame(num_frames - 1).props
+                t = props.get("_AbsoluteTime", None)
+                if t is not None:
+                    self._ts_table.append((num_frames - 1, t))
+                    self._ts_table_times.append(t)
+                    self._ts_table_indices.append(num_frames - 1)
+            except Exception:
+                pass
+
+        self.runner._log_message(
+            f"[FrameUtils] Timestamp table built: {len(self._ts_table)} entries"
+        )
 
     def get_frame_pts(self, frame_num: int) -> float | None:
         """
