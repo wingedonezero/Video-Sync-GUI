@@ -220,6 +220,7 @@ def compare_frames(
     method: str = "hash",
     hash_algorithm: str = "dhash",
     hash_size: int = 8,
+    threshold: int | None = None,
 ) -> tuple:
     """
     Compare two frames using the specified method.
@@ -230,6 +231,9 @@ def compare_frames(
         method: Comparison method ('hash', 'ssim', 'mse')
         hash_algorithm: Hash algorithm when method='hash'
         hash_size: Hash size when method='hash'
+        threshold: Max distance for a match. If None, uses method defaults:
+            hash=5, ssim=10 (SSIM>0.90), mse=5 (MSE<500).
+            For SSIM distance = (1-ssim)*100, so threshold 25 = SSIM>0.75.
 
     Returns:
         Tuple of (distance, is_match):
@@ -238,21 +242,23 @@ def compare_frames(
 
     Distance interpretation:
     - hash: Hamming distance (0=identical, <5=match, >10=different)
-    - ssim: 1.0 - SSIM (0=identical, <0.05=match, >0.2=different)
-    - mse: Normalized MSE (0=identical, <100=match, >500=different)
+    - ssim: (1.0 - SSIM) * 100 (0=identical, <10=match, >20=different)
+    - mse: MSE / 100 capped at 100 (0=identical, <5=match, >10=different)
     """
     if method == "ssim":
         ssim = compute_ssim(frame1, frame2)
         # Convert to distance (0 = identical, higher = more different)
         distance = (1.0 - ssim) * 100  # Scale to ~0-100 range
-        is_match = ssim > 0.90  # 90% similarity threshold
+        max_dist = threshold if threshold is not None else 10
+        is_match = distance <= max_dist
         return (distance, is_match)
 
     elif method == "mse":
         mse = compute_mse(frame1, frame2)
         # Normalize to ~0-100 range (assuming 8-bit images)
         distance = min(mse / 100, 100)  # Cap at 100
-        is_match = mse < 500  # Empirical threshold
+        max_dist = threshold if threshold is not None else 5
+        is_match = distance <= max_dist
         return (distance, is_match)
 
     else:  # 'hash' (default)
@@ -263,5 +269,6 @@ def compare_frames(
             return (999, False)
 
         distance = compute_hamming_distance(hash1, hash2)
-        is_match = distance <= 5  # Default threshold
+        max_dist = threshold if threshold is not None else 5
+        is_match = distance <= max_dist
         return (distance, is_match)

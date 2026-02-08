@@ -35,6 +35,8 @@ from typing import TYPE_CHECKING, Any
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
+    from PIL import Image
+
     from ...models.settings import AppSettings
     from ..data import OperationResult, SubtitleData
 
@@ -382,6 +384,31 @@ def calculate_video_verified_offset(
     else:
         sequence_length = settings.video_verified_sequence_length
 
+    # Get SSIM/MSE threshold (separate from hash threshold, different scale)
+    # Only used when comparison_method is 'ssim' or 'mse'; None = defaults
+    if comparison_method in ("ssim", "mse"):
+        if use_interlaced_settings:
+            ssim_threshold: int | None = settings.interlaced_ssim_threshold
+        else:
+            ssim_threshold = settings.frame_ssim_threshold
+        log(
+            f"[VideoVerified] SSIM/MSE distance threshold: {ssim_threshold} "
+            f"(SSIM > {1.0 - ssim_threshold / 100:.2f})"
+        )
+    else:
+        ssim_threshold = None
+
+    # Determine IVTC tolerance for sequence verification
+    # When either reader had IVTC applied, VDecimate drops different frames
+    # per encode, causing ±1 frame drift in the sequence
+    source_ivtc = getattr(source_reader, "ivtc_applied", False)
+    target_ivtc = getattr(target_reader, "ivtc_applied", False)
+    ivtc_tolerance = 1 if (source_ivtc or target_ivtc) else 0
+    if ivtc_tolerance > 0:
+        log(
+            "[VideoVerified] IVTC detected — using ±1 frame tolerance in sequence verification"
+        )
+
     log(
         f"[VideoVerified] Sequence verification: {sequence_length} consecutive frames must match"
     )
@@ -402,6 +429,8 @@ def calculate_video_verified_offset(
             comparison_method,
             log,
             sequence_verify_length=sequence_length,
+            ssim_threshold=ssim_threshold,
+            ivtc_tolerance=ivtc_tolerance,
         )
         # Convert frame offset to approximate ms for logging
         approx_ms = frame_offset * source_frame_duration_ms
@@ -711,6 +740,32 @@ def _measure_candidate_quality_static(
     }
 
 
+def _normalize_frame_pair(
+    source_frame: Image.Image, target_frame: Image.Image
+) -> tuple[Image.Image, Image.Image]:
+    """
+    Normalize two frames to the same resolution for robust comparison.
+
+    Only resizes when frames differ in size. When they do, resizes BOTH to a
+    standard comparison resolution (320x240) to avoid aspect ratio distortion
+    from resizing one to match the other's non-standard dimensions.
+
+    For same-size frames, returns them unchanged (zero overhead for CFR
+    same-source comparisons).
+    """
+    if source_frame.size == target_frame.size:
+        return source_frame, target_frame
+
+    from PIL import Image as PILImage
+
+    # Standard comparison size — small enough to smooth artifacts,
+    # large enough to preserve structural content for SSIM/hashing
+    target_size = (320, 240)
+    source_norm = source_frame.resize(target_size, PILImage.Resampling.LANCZOS)
+    target_norm = target_frame.resize(target_size, PILImage.Resampling.LANCZOS)
+    return source_norm, target_norm
+
+
 def _verify_frame_sequence_static(
     source_start_idx: int,
     target_start_idx: int,
@@ -721,6 +776,8 @@ def _verify_frame_sequence_static(
     hash_size: int,
     hash_threshold: int,
     comparison_method: str = "hash",
+    ssim_threshold: int | None = None,
+    ivtc_tolerance: int = 0,
 ) -> tuple[int, float, list[int]]:
     """
     Verify that a sequence of consecutive frames match between source and target.
@@ -729,8 +786,11 @@ def _verify_frame_sequence_static(
     then source[N], source[N+1], source[N+2], ... should match
     target[N+offset], target[N+offset+1], target[N+offset+2], ...
 
-    NO window search is used here - frames must match at exact positions.
-    This prevents false positives from window compensation.
+    For hash comparison, NO window search is used - frames must match at exact
+    positions. This prevents false positives from window compensation.
+
+    For IVTC content, ivtc_tolerance allows ±N frame tolerance per step to
+    handle VDecimate drift (different encodes drop different frames).
 
     Args:
         source_start_idx: Starting frame index in source
@@ -740,8 +800,11 @@ def _verify_frame_sequence_static(
         target_reader: VideoReader for target
         hash_algorithm: Hash algorithm to use
         hash_size: Hash size
-        hash_threshold: Maximum distance for a match
+        hash_threshold: Maximum distance for a hash match
         comparison_method: 'hash', 'ssim', or 'mse'
+        ssim_threshold: Maximum SSIM/MSE distance for a match. If None, uses
+            hash_threshold for all methods (backwards compat).
+        ivtc_tolerance: Frame tolerance for IVTC content (0=exact, 1=±1 frame)
 
     Returns:
         Tuple of (matched_count, avg_distance, distances_list)
@@ -752,55 +815,76 @@ def _verify_frame_sequence_static(
         compute_hamming_distance,
     )
 
+    # Determine the effective threshold for SSIM/MSE methods
+    effective_ssim_threshold = ssim_threshold if ssim_threshold is not None else None
+
     matched = 0
-    distances = []
+    distances: list[int] = []
 
     for i in range(sequence_length):
         source_idx = source_start_idx + i
-        target_idx = target_start_idx + i
 
-        if target_idx < 0:
-            continue
+        # For IVTC content, try ±tolerance around the expected target frame
+        # to handle VDecimate drift (different encodes drop different frames)
+        target_candidates = [target_start_idx + i]
+        if ivtc_tolerance > 0:
+            for delta in range(1, ivtc_tolerance + 1):
+                target_candidates.append(target_start_idx + i + delta)
+                target_candidates.append(target_start_idx + i - delta)
 
-        try:
-            source_frame = source_reader.get_frame_at_index(source_idx)
-            target_frame = target_reader.get_frame_at_index(target_idx)
+        best_distance = float("inf")
+        best_match = False
 
-            if source_frame is None or target_frame is None:
+        for target_idx in target_candidates:
+            if target_idx < 0:
                 continue
 
-            if comparison_method in ("ssim", "mse"):
-                # Use compare_frames for SSIM/MSE comparison
-                distance, is_match = compare_frames(
-                    source_frame,
-                    target_frame,
-                    method=comparison_method,
-                    hash_algorithm=hash_algorithm,
-                    hash_size=hash_size,
-                )
-                distances.append(distance)
-                if is_match:
-                    matched += 1
-            else:
-                # Default: use perceptual hash comparison
-                source_hash = compute_frame_hash(
-                    source_frame, hash_size, hash_algorithm
-                )
-                target_hash = compute_frame_hash(
-                    target_frame, hash_size, hash_algorithm
-                )
+            try:
+                source_frame = source_reader.get_frame_at_index(source_idx)
+                target_frame = target_reader.get_frame_at_index(target_idx)
 
-                if source_hash is None or target_hash is None:
+                if source_frame is None or target_frame is None:
                     continue
 
-                distance = compute_hamming_distance(source_hash, target_hash)
-                distances.append(distance)
+                # Normalize resolution if frames differ in size
+                source_frame, target_frame = _normalize_frame_pair(
+                    source_frame, target_frame
+                )
 
-                if distance <= hash_threshold:
-                    matched += 1
+                if comparison_method in ("ssim", "mse"):
+                    distance, is_match = compare_frames(
+                        source_frame,
+                        target_frame,
+                        method=comparison_method,
+                        hash_algorithm=hash_algorithm,
+                        hash_size=hash_size,
+                        threshold=effective_ssim_threshold,
+                    )
+                else:
+                    source_hash = compute_frame_hash(
+                        source_frame, hash_size, hash_algorithm
+                    )
+                    target_hash = compute_frame_hash(
+                        target_frame, hash_size, hash_algorithm
+                    )
 
-        except Exception:
-            continue
+                    if source_hash is None or target_hash is None:
+                        continue
+
+                    distance = compute_hamming_distance(source_hash, target_hash)
+                    is_match = distance <= hash_threshold
+
+                if distance < best_distance:
+                    best_distance = distance
+                    best_match = is_match
+
+            except Exception:
+                continue
+
+        if best_distance < float("inf"):
+            distances.append(int(best_distance))
+            if best_match:
+                matched += 1
 
     avg_dist = sum(distances) / len(distances) if distances else float("inf")
     return matched, avg_dist, distances
@@ -878,6 +962,8 @@ def _measure_frame_offset_quality_static(
     comparison_method: str,
     log,
     sequence_verify_length: int = 10,
+    ssim_threshold: int | None = None,
+    ivtc_tolerance: int = 0,
 ) -> dict[str, Any]:
     """
     Measure quality of a candidate frame offset using sequence verification.
@@ -897,6 +983,8 @@ def _measure_frame_offset_quality_static(
         frame_offset: Integer frame offset to test (target_frame = source_frame + offset)
         checkpoint_times: List of times in the source video to check
         sequence_verify_length: Number of consecutive frames to verify (default 10)
+        ssim_threshold: SSIM/MSE distance threshold (None = use compare_frames defaults)
+        ivtc_tolerance: Frame tolerance for IVTC content (0=exact, 1=±1 frame)
         ... (other args same as before)
 
     Returns:
@@ -911,7 +999,7 @@ def _measure_frame_offset_quality_static(
     total_score = 0.0
     matched_count = 0
     sequence_verified_count = 0
-    distances = []
+    distances: list[float] = []
     match_details = []
 
     # Debug: log VFR frame differences once per run (only at offset 0)
@@ -961,14 +1049,20 @@ def _measure_frame_offset_quality_static(
             if target_frame is None:
                 continue
 
+            # Normalize resolution if frames differ in size
+            source_frame, target_frame = _normalize_frame_pair(
+                source_frame, target_frame
+            )
+
             if comparison_method in ("ssim", "mse"):
-                # Use compare_frames for SSIM/MSE comparison
+                # Use compare_frames with configurable SSIM/MSE threshold
                 initial_distance, initial_match = compare_frames(
                     source_frame,
                     target_frame,
                     method=comparison_method,
                     hash_algorithm=hash_algorithm,
                     hash_size=hash_size,
+                    threshold=ssim_threshold,
                 )
             else:
                 # Default: use perceptual hash comparison
@@ -1000,6 +1094,8 @@ def _measure_frame_offset_quality_static(
                 hash_size,
                 hash_threshold,
                 comparison_method=comparison_method,
+                ssim_threshold=ssim_threshold,
+                ivtc_tolerance=ivtc_tolerance,
             )
 
             # Sequence is verified if majority of frames match

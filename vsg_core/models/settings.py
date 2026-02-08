@@ -188,6 +188,7 @@ class AppSettings(BaseModel):
     frame_agreement_tolerance_ms: int = 100
     frame_use_vapoursynth: bool = True
     frame_comparison_method: FrameComparisonMethodStr = "hash"
+    frame_ssim_threshold: int = 10  # SSIM distance threshold (0-100, lower=stricter)
 
     # =========================================================================
     # Correlation Snap Settings
@@ -245,6 +246,7 @@ class AppSettings(BaseModel):
     interlaced_hash_size: int = 8
     interlaced_hash_threshold: int = 25
     interlaced_comparison_method: FrameComparisonMethodStr = "ssim"
+    interlaced_ssim_threshold: int = 25  # SSIM distance threshold for interlaced
     interlaced_fallback_to_audio: bool = True
     interlaced_sequence_length: int = 5
     interlaced_deinterlace_method: DeinterlaceMethodStr = "bwdif"
