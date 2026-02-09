@@ -272,6 +272,18 @@ class OCRPipeline:
             # Step 4: Process each subtitle
             max_workers = max(1, self.config.max_workers)
 
+            # Reduce workers for small subtitle counts to avoid race conditions
+            # PaddleOCR can segfault if processing finishes before all workers initialize
+            subtitle_count = len(subtitle_images)
+            if subtitle_count < 30 and max_workers > 1:
+                original_workers = max_workers
+                max_workers = 1
+                self._log_progress(
+                    f"Using 1 worker for {subtitle_count} subtitles "
+                    f"(configured: {original_workers}, threshold: 30)",
+                    0.10,
+                )
+
             if max_workers > 1:
                 ocr_results = self._process_subtitles_parallel(
                     subtitle_images, max_workers, report, debugger
