@@ -30,7 +30,7 @@ from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models.context_types import ManualLayoutItem
-from vsg_core.subtitles.convert import convert_srt_to_ass
+from vsg_core.subtitles.data import SubtitleData
 from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_qt.subtitle_editor import SubtitleEditorWindow
 
@@ -218,7 +218,9 @@ class ManualSelectionDialog(QDialog):
         )
         super().accept()
 
-    def _show_source_context_menu(self, pos, source_key: str, group_box: QGroupBox) -> None:
+    def _show_source_context_menu(
+        self, pos, source_key: str, group_box: QGroupBox
+    ) -> None:
         """Show context menu for source settings."""
         menu = QMenu(self)
 
@@ -457,7 +459,14 @@ class ManualSelectionDialog(QDialog):
                 temp_path_str = extracted[0]["path"]
 
             if Path(temp_path_str).suffix.lower() == ".srt":
-                temp_path_str = convert_srt_to_ass(temp_path_str, runner, tool_paths)
+                # Convert SRT to ASS using SubtitleData
+                try:
+                    subtitle_data = SubtitleData.from_file(temp_path_str)
+                    ass_path = Path(temp_path_str).with_suffix(".ass")
+                    subtitle_data.save_ass(ass_path)
+                    temp_path_str = str(ass_path)
+                except Exception as e:
+                    self.log_callback(f"[WARNING] SRT→ASS conversion failed: {e}")
 
             widget.track_data["user_modified_path"] = temp_path_str
             return temp_path_str
@@ -680,7 +689,9 @@ class ManualSelectionDialog(QDialog):
             return
 
         # Get available styles from target file for validation
-        engine = StyleEngine(temp_path, temp_dir=self.config.get_style_editor_temp_dir())
+        engine = StyleEngine(
+            temp_path, temp_dir=self.config.get_style_editor_temp_dir()
+        )
         available_styles = set(engine.get_style_names())
 
         # Validate and collect warnings
