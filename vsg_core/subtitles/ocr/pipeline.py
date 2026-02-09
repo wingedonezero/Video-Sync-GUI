@@ -96,6 +96,7 @@ class OCRPipeline:
         settings_dict: dict,
         work_dir: Path,
         logs_dir: Path,
+        debug_output_dir: Path | None = None,
         progress_callback: Callable[[str, float], None] | None = None,
     ):
         """
@@ -105,12 +106,14 @@ class OCRPipeline:
             settings_dict: Application settings dictionary
             work_dir: Working directory for temp files
             logs_dir: Directory for reports
+            debug_output_dir: Directory for debug output (if None, uses logs_dir)
             progress_callback: Optional callback for progress updates
                               Signature: callback(message: str, progress: float)
         """
         self.settings = settings_dict
         self.work_dir = Path(work_dir)
         self.logs_dir = Path(logs_dir)
+        self.debug_output_dir = Path(debug_output_dir) if debug_output_dir else self.logs_dir
         self.progress_callback = progress_callback
 
         # Use work_dir directly (caller already provides ocr-specific dir)
@@ -263,7 +266,7 @@ class OCRPipeline:
 
             # Create debugger (only active if debug_output is enabled)
             debugger = create_debugger(
-                logs_dir=self.logs_dir,
+                logs_dir=self.debug_output_dir,
                 base_name=input_path.stem,
                 timestamp=timestamp,
                 settings_dict=self.settings,

@@ -37,6 +37,11 @@ def main() -> int:
         "--logs-dir", required=True, help="Directory for OCR logs/reports"
     )
     parser.add_argument(
+        "--debug-output-dir",
+        required=False,
+        help="Directory for OCR debug output (if not provided, uses logs-dir)",
+    )
+    parser.add_argument(
         "--track-id", required=True, type=int, help="Track ID for OCR output"
     )
     args = parser.parse_args()
@@ -45,6 +50,7 @@ def main() -> int:
     output_path = Path(args.output_json)
     work_dir = Path(args.work_dir)
     logs_dir = Path(args.logs_dir)
+    debug_output_dir = Path(args.debug_output_dir) if args.debug_output_dir else logs_dir
 
     try:
         with open(config_path, encoding="utf-8") as f:
@@ -68,6 +74,7 @@ def main() -> int:
             settings,
             work_dir=work_dir,
             logs_dir=logs_dir,
+            debug_output_dir=debug_output_dir,
             track_id=args.track_id,
         )
     except Exception as exc:

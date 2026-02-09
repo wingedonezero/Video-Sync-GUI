@@ -125,6 +125,7 @@ def apply_sync_mode(
             sync_exclusion_styles=item.sync_exclusion_styles,
             sync_exclusion_mode=item.sync_exclusion_mode,
             track_label=_build_track_label(item),
+            debug_paths=ctx.debug_paths,
         )
 
         if result.success:
@@ -306,7 +307,11 @@ def _run_frame_audit_if_enabled(
         )
 
         # Determine output directory
-        config_dir = Path.cwd() / ".config" / "sync_checks"
+        # Use debug_paths if available (new organized structure), fallback to old location
+        if ctx.debug_paths and ctx.debug_paths.frame_audit_dir:
+            config_dir = ctx.debug_paths.frame_audit_dir
+        else:
+            config_dir = Path.cwd() / ".config" / "sync_checks"
 
         # Write the report
         report_path = write_audit_report(result, config_dir, runner._log_message)

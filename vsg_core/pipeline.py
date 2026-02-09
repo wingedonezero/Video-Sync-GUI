@@ -60,6 +60,7 @@ class JobPipeline:
         manual_layout: list[ManualLayoutItem] | None = None,
         attachment_sources: list[str] | None = None,
         source_settings: dict[str, dict[str, Any]] | None = None,
+        debug_paths=None,
     ) -> PipelineResult:
         """
         Runs a complete sync job.
@@ -72,6 +73,7 @@ class JobPipeline:
             attachment_sources: List of attachment source paths
             source_settings: Per-source correlation settings, e.g.:
                 {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {...}}
+            debug_paths: DebugOutputPaths for this job (from DebugOutputManager)
 
         Returns:
             PipelineResult with status, delays, output path, and diagnostic info.
@@ -132,6 +134,7 @@ class JobPipeline:
                 manual_layout=manual_layout or [],
                 attachment_sources=attachment_sources or [],
                 source_settings=source_settings or {},
+                debug_paths=debug_paths,
             )
             ctx_temp_dir = ctx.temp_dir
 

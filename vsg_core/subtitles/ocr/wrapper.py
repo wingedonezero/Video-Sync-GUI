@@ -43,6 +43,11 @@ def process_ocr_with_preservation(
     ocr_work_dir = ctx.temp_dir / "ocr"
     logs_dir = Path(ctx.settings.logs_folder or ctx.temp_dir)
 
+    # Determine debug output directory - use debug_paths if available, fallback to logs_dir
+    debug_output_dir = logs_dir
+    if ctx.debug_paths and ctx.debug_paths.ocr_debug_dir:
+        debug_output_dir = ctx.debug_paths.ocr_debug_dir
+
     # Run OCR (subprocess or in-process)
     if ctx.settings.ocr_run_in_subprocess:
         subtitle_data = _run_ocr_subprocess(
@@ -51,6 +56,7 @@ def process_ocr_with_preservation(
             runner=runner,
             ocr_work_dir=ocr_work_dir,
             logs_dir=logs_dir,
+            debug_output_dir=debug_output_dir,
         )
     else:
         subtitle_data = run_ocr_unified(
@@ -61,6 +67,7 @@ def process_ocr_with_preservation(
             ctx.settings,
             work_dir=ocr_work_dir,
             logs_dir=logs_dir,
+            debug_output_dir=debug_output_dir,
             track_id=item.track.id,
         )
 
@@ -113,7 +120,12 @@ def process_ocr_with_preservation(
 
 
 def _run_ocr_subprocess(
-    item, ctx: Context, runner: CommandRunner, ocr_work_dir: Path, logs_dir: Path
+    item,
+    ctx: Context,
+    runner: CommandRunner,
+    ocr_work_dir: Path,
+    logs_dir: Path,
+    debug_output_dir: Path,
 ) -> SubtitleData | None:
     """
     Run OCR in subprocess and return SubtitleData.
@@ -150,6 +162,8 @@ def _run_ocr_subprocess(
         str(ocr_work_dir),
         "--logs-dir",
         str(logs_dir),
+        "--debug-output-dir",
+        str(debug_output_dir),
         "--track-id",
         str(item.track.id),
     ]

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     )
     from vsg_core.models.jobs import Delays, PlanItem
     from vsg_core.models.settings import AppSettings
+    from vsg_core.reporting import DebugOutputPaths
 
 
 @dataclass(slots=True)
@@ -34,6 +35,7 @@ class Context:
     output_dir: str
     temp_dir: Path
     audit: AuditTrail | None = None  # Pipeline audit trail for debugging
+    debug_paths: DebugOutputPaths | None = None  # Debug output paths for this job
     sources: dict[str, str] = field(default_factory=dict)
     and_merge: bool = False
     manual_layout: list[ManualLayoutItem] = field(default_factory=list)

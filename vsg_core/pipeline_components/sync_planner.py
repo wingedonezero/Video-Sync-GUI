@@ -28,6 +28,7 @@ class SyncPlanner:
         manual_layout: list[ManualLayoutItem],
         attachment_sources: list[str],
         source_settings: dict[str, dict[str, Any]] | None = None,
+        debug_paths=None,
     ) -> Any:
         """
         Plans the sync operation by analyzing sources and preparing merge tokens.
@@ -46,6 +47,7 @@ class SyncPlanner:
             attachment_sources: List of attachment source paths
             source_settings: Per-source correlation settings, e.g.:
                 {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}}
+            debug_paths: DebugOutputPaths for this job
 
         Returns:
             Context object containing:
@@ -67,4 +69,5 @@ class SyncPlanner:
             manual_layout=manual_layout,
             attachment_sources=attachment_sources,
             source_settings=source_settings or {},
+            debug_paths=debug_paths,
         )

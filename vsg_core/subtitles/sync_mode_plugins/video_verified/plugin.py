@@ -180,6 +180,9 @@ class VideoVerifiedSync(SyncPlugin):
 
         events_synced = apply_delay_to_events(subtitle_data, final_offset_ms)
 
+        # Extract debug_paths from kwargs if available
+        debug_paths = kwargs.get("debug_paths")
+
         # Run frame alignment audit if enabled
         if settings and settings.video_verified_frame_audit and target_fps:
             self._run_frame_audit(
@@ -188,6 +191,7 @@ class VideoVerifiedSync(SyncPlugin):
                 offset_ms=final_offset_ms,
                 job_name=job_name,
                 settings=settings,
+                debug_paths=debug_paths,
                 log=log,
             )
 
@@ -205,6 +209,7 @@ class VideoVerifiedSync(SyncPlugin):
                 job_name=job_name,
                 settings=settings,
                 temp_dir=temp_dir,
+                debug_paths=debug_paths,
                 log=log,
             )
 
@@ -258,6 +263,7 @@ class VideoVerifiedSync(SyncPlugin):
         offset_ms: float,
         job_name: str,
         settings: AppSettings,
+        debug_paths,
         log,
     ) -> None:
         """Run frame alignment audit and write report.
@@ -283,8 +289,11 @@ class VideoVerifiedSync(SyncPlugin):
         )
 
         # Determine output directory
-        # Use the program's .config directory (same as other config files)
-        config_dir = Path.cwd() / ".config" / "sync_checks"
+        # Use debug_paths if available (new organized structure), fallback to old location
+        if debug_paths and debug_paths.frame_audit_dir:
+            config_dir = debug_paths.frame_audit_dir
+        else:
+            config_dir = Path.cwd() / ".config" / "sync_checks"
 
         # Write the report
         report_path = write_audit_report(result, config_dir, log)
@@ -328,6 +337,7 @@ class VideoVerifiedSync(SyncPlugin):
         job_name: str,
         settings: AppSettings,
         temp_dir: Path | None,
+        debug_paths,
         log,
     ) -> None:
         """Run visual frame verification across entire video and write report.
@@ -366,7 +376,11 @@ class VideoVerifiedSync(SyncPlugin):
             )
 
             # Determine output directory
-            config_dir = Path.cwd() / ".config" / "sync_checks"
+            # Use debug_paths if available (new organized structure), fallback to old location
+            if debug_paths and debug_paths.visual_verify_dir:
+                config_dir = debug_paths.visual_verify_dir
+            else:
+                config_dir = Path.cwd() / ".config" / "sync_checks"
 
             # Write the report
             report_path = write_visual_verify_report(result, config_dir, log)
