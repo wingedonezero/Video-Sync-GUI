@@ -47,7 +47,7 @@ class SubtitlesStep:
         # Video-Verified Pre-Processing (once per source)
         # ================================================================
         # If video-verified mode is enabled, run frame matching once per
-        # unique source and update ctx.delays. This ensures all subtitle
+        # unique source and update ctx.subtitle_delays_ms. This ensures all subtitle
         # tracks (text, bitmap, OCR'd, preserved) use the corrected delay.
         subtitle_sync_mode = ctx.settings.subtitle_sync_mode
         if subtitle_sync_mode == "video-verified" and source1_file:
