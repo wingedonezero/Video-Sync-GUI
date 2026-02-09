@@ -70,11 +70,15 @@ class FinalAuditor:
                     if item.track.source == "External"
                     else item.track.source
                 )
-                actual_delay = (
-                    self.ctx.delays.source_delays_ms.get(sync_key, 0)
-                    if self.ctx.delays
-                    else 0
-                )
+                # Check subtitle-specific delays first, then fall back to correlation delays
+                if item.track.type == "subtitles" and sync_key in self.ctx.subtitle_delays_ms:
+                    actual_delay = round(self.ctx.subtitle_delays_ms.get(sync_key, 0))
+                else:
+                    actual_delay = (
+                        self.ctx.delays.source_delays_ms.get(sync_key, 0)
+                        if self.ctx.delays
+                        else 0
+                    )
 
             max_applied_delay = max(max_applied_delay, abs(actual_delay))
 

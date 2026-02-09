@@ -23,6 +23,7 @@ class MuxStep:
             delays=ctx.delays or Delays(),
             chapters_xml=Path(ctx.chapters_xml) if ctx.chapters_xml else None,
             attachments=[Path(a) for a in (ctx.attachments or [])],
+            subtitle_delays_ms=ctx.subtitle_delays_ms,
         )
 
         builder = MkvmergeOptionsBuilder()
