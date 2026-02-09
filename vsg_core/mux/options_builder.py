@@ -239,6 +239,14 @@ class MkvmergeOptionsBuilder:
             return 0
 
         sync_key = item.sync_to if tr.source == "External" else tr.source
+
+        # SUBTITLE-SPECIFIC DELAYS: Check if this subtitle has a sync-mode-specific delay
+        # (e.g., from video-verified mode). These are separate from audio delays.
+        if tr.type == "subtitles" and sync_key in plan.subtitle_delays_ms:
+            delay = plan.subtitle_delays_ms[sync_key]
+            return round(delay)
+
+        # DEFAULT: Use correlation delay from analysis (for audio and subtitles)
         delay = plan.delays.source_delays_ms.get(sync_key, 0)
         # Use round() for proper rounding of negative values (safety for future refactoring)
         return round(delay)

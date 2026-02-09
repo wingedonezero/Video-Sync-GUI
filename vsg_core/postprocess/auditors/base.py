@@ -196,7 +196,12 @@ class BaseAuditor:
 
         # For other sources, the delay from the context already includes the global shift
         sync_key = plan_item.sync_to if tr.source == "External" else tr.source
-        delay = self.ctx.delays.source_delays_ms.get(sync_key, 0)
+
+        # Check subtitle-specific delays first (e.g., from video-verified mode)
+        if tr.type == "subtitles" and sync_key in self.ctx.subtitle_delays_ms:
+            delay = self.ctx.subtitle_delays_ms.get(sync_key, 0)
+        else:
+            delay = self.ctx.delays.source_delays_ms.get(sync_key, 0)
 
         return float(delay)
 
