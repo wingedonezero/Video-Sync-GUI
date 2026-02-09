@@ -149,6 +149,7 @@ def run_ocr_unified(
     settings: AppSettings,
     work_dir: Path | None = None,
     logs_dir: Path | None = None,
+    debug_output_dir: Path | None = None,
     track_id: int = 0,
 ) -> SubtitleData | None:
     """
@@ -166,6 +167,7 @@ def run_ocr_unified(
         settings: The application's typed settings
         work_dir: Working directory for temp files
         logs_dir: Directory for OCR reports
+        debug_output_dir: Directory for OCR debug output (if None, uses logs_dir)
         track_id: Track ID for organizing work files
 
     Returns:
@@ -196,6 +198,8 @@ def run_ocr_unified(
         work_dir = sub_path.parent / "ocr_work"
     if logs_dir is None:
         logs_dir = sub_path.parent
+    if debug_output_dir is None:
+        debug_output_dir = logs_dir
 
     runner._log_message(f"[OCR] Starting OCR on {sub_path.name}...")
     runner._log_message(f"[OCR] Language: {lang}, Mode: Unified (SubtitleData)")
@@ -213,6 +217,7 @@ def run_ocr_unified(
             settings_dict=ocr_settings,
             work_dir=work_dir,
             logs_dir=logs_dir,
+            debug_output_dir=debug_output_dir,
             progress_callback=progress_callback,
         )
 

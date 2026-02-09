@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from vsg_core.job_discovery import discover_jobs
 from vsg_core.job_layouts import JobLayoutManager
-from vsg_core.reporting import ReportWriter
+from vsg_core.reporting import DebugOutputManager, ReportWriter
 from vsg_qt.job_queue_dialog import JobQueueDialog
 from vsg_qt.options_dialog import OptionsDialog
 from vsg_qt.report_dialogs import BatchCompletionDialog
@@ -30,8 +30,9 @@ class MainController:
         self.layout_manager = JobLayoutManager(
             temp_root=self.config.get("temp_root"), log_callback=self.append_log
         )
-        # Report tracking
+        # Report and debug tracking
         self.report_writer: ReportWriter | None = None
+        self.debug_manager: DebugOutputManager | None = None
         self._job_counter: int = 0
 
     def open_options_dialog(self) -> None:
@@ -168,12 +169,19 @@ class MainController:
         )
         self.append_log(f"[Report] Created: {report_path}")
 
+        # Create debug output manager for this batch
+        self.debug_manager = DebugOutputManager(
+            output_dir=Path(output_dir),
+            is_batch=is_batch,
+            settings=self.config.settings,
+        )
+
         # Create a snapshot copy of settings for the worker thread to avoid
         # sharing the same AppSettings instance between the main thread and worker.
         # Concurrent access to the shared object (even read-only) can cause segfaults
         # in PySide6/shiboken6 when the GIL is released during C++ calls.
         worker_settings = self.config.settings.model_copy(deep=True)
-        self.worker = JobWorker(worker_settings, jobs, and_merge, output_dir)
+        self.worker = JobWorker(worker_settings, jobs, and_merge, output_dir, self.debug_manager)
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.progress.connect(self.update_progress)
         self.worker.signals.status.connect(self.update_status)
@@ -208,6 +216,10 @@ class MainController:
 
         if is_batch and self.v.archive_logs_check.isChecked() and output_dir:
             QTimer.singleShot(0, lambda: self._archive_logs_for_batch(output_dir))
+
+        # Finalize debug output (zip debug folders in batch mode)
+        if self.debug_manager:
+            self.debug_manager.finalize_batch(self.append_log)
 
         # Finalize the report - this is the single source of truth for all stats
         report_path = None

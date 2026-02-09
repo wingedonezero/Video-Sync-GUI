@@ -49,6 +49,7 @@ class Orchestrator:
         manual_layout: list[ManualLayoutItem],
         attachment_sources: list[str],
         source_settings: dict[str, dict[str, Any]] | None = None,
+        debug_paths=None,
     ) -> Context:
         """
         Executes the pipeline steps with validation.
@@ -56,6 +57,7 @@ class Orchestrator:
 
         Args:
             settings: AppSettings instance
+            debug_paths: DebugOutputPaths for this job
         """
         source1_file = sources.get("Source 1")
         if not source1_file:
@@ -98,6 +100,7 @@ class Orchestrator:
             output_dir=str(output_dir),
             temp_dir=job_temp,
             audit=audit,
+            debug_paths=debug_paths,
             sources=sources,
             and_merge=bool(and_merge),
             manual_layout=manual_layout or [],

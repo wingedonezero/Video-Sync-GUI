@@ -323,7 +323,11 @@ def _run_visual_verify_if_enabled(
             log=runner._log_message,
         )
 
-        config_dir = Path.cwd() / ".config" / "sync_checks"
+        # Use debug_paths if available (new organized structure), fallback to old location
+        if ctx.debug_paths and ctx.debug_paths.visual_verify_dir:
+            config_dir = ctx.debug_paths.visual_verify_dir
+        else:
+            config_dir = Path.cwd() / ".config" / "sync_checks"
         report_path = write_visual_verify_report(
             result, config_dir, runner._log_message
         )

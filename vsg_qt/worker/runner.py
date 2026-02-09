@@ -13,13 +13,19 @@ from .signals import WorkerSignals
 
 class JobWorker(QRunnable):
     def __init__(
-        self, config: AppSettings, jobs: list[dict], and_merge: bool, output_dir: str
+        self,
+        config: AppSettings,
+        jobs: list[dict],
+        and_merge: bool,
+        output_dir: str,
+        debug_manager=None,
     ):
         super().__init__()
         self.config = config
         self.jobs = jobs
         self.and_merge = and_merge
         self.output_dir = output_dir
+        self.debug_manager = debug_manager
         self.signals = WorkerSignals()
         self.cancelled = False
 
@@ -102,6 +108,14 @@ class JobWorker(QRunnable):
             # Store original Source 1 path for batch output folder logic in controller
             job_data["ref_path_for_batch_check"] = source1_file
 
+            # Register job with debug manager to get debug paths
+            debug_paths = None
+            if self.debug_manager:
+                from vsg_core.reporting import DebugPathResolver
+
+                job_name = DebugPathResolver.sanitize_job_name(source1_file)
+                debug_paths = self.debug_manager.register_job(job_name)
+
             try:
                 self._safe_status(
                     f"Processing {i}/{total_jobs}: {Path(source1_file).name}"
@@ -114,6 +128,7 @@ class JobWorker(QRunnable):
                     manual_layout=job_data.get("manual_layout"),
                     attachment_sources=job_data.get("attachment_sources"),
                     source_settings=job_data.get("source_settings"),
+                    debug_paths=debug_paths,
                 )
 
                 # Convert to dict for signal emission, add runner tracking data
