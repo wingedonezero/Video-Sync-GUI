@@ -186,11 +186,31 @@ def _run_ocr_subprocess(
 
     return_code = process.wait()
 
-    # Log stderr
+    # Log stderr (filter out C++ tracebacks and noise)
     if process.stderr:
+        skip_traceback = False
         for line in process.stderr:
             line = line.rstrip("\n")
-            if line:
+            if not line:
+                continue
+
+            # Skip C++ traceback blocks (paddle internal crashes)
+            if "C++ Traceback" in line or "------" in line:
+                skip_traceback = True
+                continue
+            if skip_traceback and (
+                "Error Message Summary" in line or line.startswith("  ")
+            ):
+                continue
+            if skip_traceback and not line.startswith("["):
+                continue  # Skip traceback lines
+            skip_traceback = False
+
+            # Log meaningful errors only
+            if any(
+                marker in line
+                for marker in ["ERROR", "WARNING", "WARN", "Error", "[OCR]"]
+            ):
                 runner._log_message(f"[OCR] {line}")
 
     # Check result
