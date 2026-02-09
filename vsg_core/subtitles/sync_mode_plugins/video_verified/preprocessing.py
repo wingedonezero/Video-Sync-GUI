@@ -31,15 +31,15 @@ def run_per_source_preprocessing(
     Run video-verified frame matching once per unique source.
 
     This pre-computes the frame-corrected delays for all sources that have
-    subtitle tracks, updating ctx.delays so that ALL subtitle tracks from
-    each source (text, bitmap, OCR'd, preserved) use the corrected delay.
+    subtitle tracks, storing them in ctx.subtitle_delays_ms so that ALL subtitle
+    tracks from each source (text, bitmap, OCR'd, preserved) use the corrected delay.
 
+    CRITICAL: Does NOT modify ctx.delays.source_delays_ms (used by audio tracks).
     Only runs in video-verified mode.
 
     Updates:
         ctx.video_verified_sources: Cache of computed delays per source
-        ctx.delays.source_delays_ms: Rounded delays for mkvmerge
-        ctx.delays.raw_source_delays_ms: Raw float delays for SubtitleData
+        ctx.subtitle_delays_ms: Frame-corrected delays for subtitle tracks only
     """
     runner._log_message(
         "[VideoVerified] ═══════════════════════════════════════════════════════"
