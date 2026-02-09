@@ -194,7 +194,24 @@ def _run_ocr_subprocess(
             if not line:
                 continue
 
-            # Skip C++ traceback blocks (paddle internal crashes)
+            # Skip PaddleOCR internal spam
+            if any(
+                skip in line
+                for skip in [
+                    "Model files already exist",
+                    "Creating model:",
+                    "Checking connectivity",
+                    "which: no ccache",
+                    "UserWarning:",
+                    "warnings.warn",
+                    "[32m",  # ANSI green
+                    "[33m",  # ANSI yellow
+                    "[0m",  # ANSI reset
+                ]
+            ):
+                continue
+
+            # Skip C++ traceback blocks (paddle crashes)
             if "C++ Traceback" in line or "------" in line:
                 skip_traceback = True
                 continue
