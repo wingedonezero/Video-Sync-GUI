@@ -16,15 +16,14 @@ from .types import ContainerDelayInfo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from vsg_core.io.runner import CommandRunner
 
 
 def get_container_delay_info(
-    source_file: Path,
+    source_file: str,
     runner: CommandRunner,
-    tool_paths: dict[str, Path],
+    tool_paths: dict[str, str | None],
     log: Callable[[str], None],
 ) -> ContainerDelayInfo | None:
     """

@@ -59,10 +59,14 @@ def _probe_fps(video_path: str) -> float:
     """Probe the native frame rate of a video using ffprobe."""
     cmd = [
         "ffprobe",
-        "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=r_frame_rate",
-        "-of", "csv=p=0",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=r_frame_rate",
+        "-of",
+        "csv=p=0",
         video_path,
     ]
     try:
@@ -103,14 +107,18 @@ def _extract_frame_hashes(
         effective_fps = _probe_fps(video_path)
         # Always apply fps= filter even at native rate - this normalizes VFR
         # content and removes pulldown frames (2:3 pulldown → true 23.976fps)
-        vf_filters = f"fps={effective_fps},scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray"
+        vf_filters = (
+            f"fps={effective_fps},scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray"
+        )
         log(
             f"[VideoDiff] Extracting at native rate ({effective_fps:.3f}fps) "
             f"from: {Path(video_path).name}"
         )
     else:
         effective_fps = sample_fps
-        vf_filters = f"fps={sample_fps},scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray"
+        vf_filters = (
+            f"fps={sample_fps},scale={_FRAME_W}:{_FRAME_H}:flags=area,format=gray"
+        )
         log(
             f"[VideoDiff] Extracting frames at {sample_fps}fps "
             f"from: {Path(video_path).name}"

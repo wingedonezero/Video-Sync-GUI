@@ -1418,7 +1418,7 @@ def apply_source_separation(
     """
     Apply source separation to both reference and target audio, or neither.
 
-    This is the main entry point called from audio_corr.py.
+    This is the main entry point called from the analysis step.
     If separation fails or is disabled, returns original audio unchanged.
 
     NOTE: The decision to use source separation is made at the analysis step level

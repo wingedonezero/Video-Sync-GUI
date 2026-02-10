@@ -8,7 +8,7 @@ audio track delays non-negative (required for mkvmerge compatibility).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .types import GlobalShiftCalculation
 
@@ -16,12 +16,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vsg_core.analysis.container_delays import ContainerDelayInfo
+    from vsg_core.models.context_types import ManualLayoutItem
 
 
 def calculate_global_shift(
     source_delays: dict[str, int],
     raw_source_delays: dict[str, float],
-    manual_layout: list[dict[str, Any]],
+    manual_layout: list[ManualLayoutItem],
     container_info: ContainerDelayInfo | None,
     global_shift_required: bool,
     log: Callable[[str], None],

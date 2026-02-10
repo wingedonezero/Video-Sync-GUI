@@ -1,9 +1,17 @@
 # vsg_core/analysis/__init__.py
-from .audio_corr import run_audio_correlation
 from .container_delays import (
     calculate_delay_chain,
     find_actual_correlation_track_delay,
     get_container_delay_info,
+)
+from .correlation import (
+    CorrelationMethod,
+    decode_audio,
+    extract_chunks,
+    get_audio_stream_info,
+    get_method,
+    list_methods,
+    run_audio_correlation,
 )
 from .delay_selection import calculate_delay, find_first_stable_segment_delay
 from .drift_detection import diagnose_audio_issue
@@ -15,6 +23,7 @@ from .source_separation import (
 )
 from .track_selection import format_track_details, select_audio_track
 from .types import (
+    ChunkResult,
     ContainerDelayInfo,
     DelayCalculation,
     GlobalShiftCalculation,
@@ -24,7 +33,9 @@ from .videodiff import VideoDiffResult, run_native_videodiff, run_videodiff
 
 __all__ = [
     "SEPARATION_MODES",
+    "ChunkResult",
     "ContainerDelayInfo",
+    "CorrelationMethod",
     "DelayCalculation",
     "GlobalShiftCalculation",
     "TrackSelection",
@@ -33,13 +44,18 @@ __all__ = [
     "calculate_delay",
     "calculate_delay_chain",
     "calculate_global_shift",
+    "decode_audio",
     "diagnose_audio_issue",
+    "extract_chunks",
     "find_actual_correlation_track_delay",
     "find_first_stable_segment_delay",
     "format_track_details",
+    "get_audio_stream_info",
     "get_container_delay_info",
+    "get_method",
     "is_audio_separator_available",
     "list_available_models",
+    "list_methods",
     "run_audio_correlation",
     "run_native_videodiff",
     "run_videodiff",
