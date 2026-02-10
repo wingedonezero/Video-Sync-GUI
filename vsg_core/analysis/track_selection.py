@@ -31,7 +31,6 @@ def format_track_details(track: dict[str, Any], index: int) -> str:
 
     # Language
     lang = props.get("language", "und")
-    props.get("language_ietf", "") or props.get("track_name", "")
 
     # Codec - extract readable name from codec_id
     codec_id = props.get("codec_id", "unknown")
@@ -106,8 +105,8 @@ def select_audio_track(
         return None
 
     selected_track = None
-    selected_index = None
-    selection_reason = None
+    selected_index: int = 0
+    selection_reason: str = "first"
 
     # Priority 1: Explicit track index
     if explicit_index is not None:

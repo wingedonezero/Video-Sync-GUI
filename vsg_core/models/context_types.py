@@ -10,7 +10,10 @@ complex nested dict structures.
 
 from __future__ import annotations
 
-from typing import Required, TypedDict
+from typing import TYPE_CHECKING, Required, TypedDict
+
+if TYPE_CHECKING:
+    from vsg_core.analysis.types import ClusterDiagnostic, ClusterValidation
 
 # =============================================================================
 # Manual Layout Types (Context.manual_layout)
@@ -106,10 +109,10 @@ class SegmentFlagsEntry(TypedDict, total=False):
     """
 
     base_delay: Required[int]  # Base delay from correlation analysis (always present)
-    cluster_details: list[dict[str, object]]  # From _build_cluster_diagnostics
+    cluster_details: list[ClusterDiagnostic]  # From _build_cluster_diagnostics
     valid_clusters: dict[int, list[int]]  # Cluster label -> member chunk indices
     invalid_clusters: dict[int, list[int]]  # Cluster label -> member chunk indices
-    validation_results: dict[int, dict[str, object]]  # Cluster label -> validation dict
+    validation_results: dict[int, ClusterValidation]  # Cluster label -> validation
     correction_mode: str  # "full", "strict", "filtered"
     fallback_mode: str | None  # "nearest", "reject", etc. (filtered mode only)
     subs_only: bool  # True if only subtitle adjustment, no audio correction

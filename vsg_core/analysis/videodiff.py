@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vsg_core.io.runner import CommandRunner
     from vsg_core.models.settings import AppSettings
 
@@ -84,8 +86,8 @@ def _probe_fps(video_path: str) -> float:
 def _extract_frame_hashes(
     video_path: str,
     sample_fps: float,
-    log: callable,
-) -> tuple[list[np.ndarray], list[float]]:
+    log: Callable[[str], None],
+) -> tuple[list[np.uint64], list[float]]:
     """
     Extract frames from video at sample_fps and compute dhash for each.
 
@@ -141,7 +143,7 @@ def _extract_frame_hashes(
     ]
 
     frame_size = _FRAME_W * _FRAME_H  # 1 byte per pixel (grayscale)
-    hashes: list[np.ndarray] = []
+    hashes: list[np.uint64] = []
     timestamps: list[float] = []
     ms_per_frame = 1000.0 / effective_fps
 
@@ -152,6 +154,8 @@ def _extract_frame_hashes(
             stderr=subprocess.PIPE,
             bufsize=frame_size * 64,  # Buffer multiple frames
         )
+        assert proc.stdout is not None
+        assert proc.stderr is not None
 
         frame_idx = 0
         buf = b""
@@ -258,7 +262,7 @@ def _match_frames(
     target_hashes: list[np.uint64],
     target_timestamps: list[float],
     max_hamming: int,
-    log: callable,
+    log: Callable[[str], None],
 ) -> list[tuple[float, float]]:
     """
     Match target frames against reference frames by hash similarity.
@@ -350,7 +354,7 @@ def _ransac_offset(
     matches: list[tuple[float, float]],
     n_iterations: int = 1000,
     inlier_threshold_ms: float = 100.0,
-    log: callable = lambda m: None,
+    log: Callable[[str], None] = lambda m: None,
 ) -> tuple[float, list[bool], float]:
     """
     RANSAC estimation of global offset from matched frame pairs.

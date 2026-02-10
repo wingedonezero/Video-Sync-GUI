@@ -86,7 +86,7 @@ def generate_edl_from_correlation(
                 invalid_time_ranges = []
                 for label in invalid_clusters:
                     if label in validation_results:
-                        time_range = validation_results[label]["time_range"]
+                        time_range = validation_results[label].time_range
                         invalid_time_ranges.append(time_range)
 
                 # Filter out chunks that fall within invalid clusters
@@ -1915,7 +1915,7 @@ class SteppingCorrector:
         invalid_time_ranges = []
         for label, members in invalid_clusters.items():
             if label in validation_results:
-                time_range = validation_results[label]["time_range"]
+                time_range = validation_results[label].time_range
                 invalid_time_ranges.append(time_range)
                 self.log(
                     f"    - Invalid cluster {label + 1}: {time_range[0]:.1f}s - {time_range[1]:.1f}s will be filtered"
