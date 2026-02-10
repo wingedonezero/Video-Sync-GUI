@@ -8,15 +8,15 @@ sync issues, even when the final rounded delay appears correct.
 
 from __future__ import annotations
 
-from statistics import mean, stdev, variance
-from typing import TYPE_CHECKING, Any
+from statistics import mean, stdev
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..models.context_types import SyncStabilityIssue
     from ..models.settings import AppSettings
-    from .types import ChunkResult
+    from .types import ChunkResult, ClusterDiagnostic
 
 
 def _to_float(value) -> float:
@@ -29,7 +29,7 @@ def analyze_sync_stability(
     source_key: str,
     settings: AppSettings,
     log: Callable[[str], None] | None = None,
-    stepping_clusters: list[dict[str, Any]] | None = None,
+    stepping_clusters: list[ClusterDiagnostic] | None = None,
 ) -> SyncStabilityIssue | None:
     """
     Analyze correlation chunk results for variance/stability issues.
@@ -119,7 +119,6 @@ def _analyze_uniform(
         }
 
     std_delay = stdev(raw_delays)
-    variance(raw_delays)
 
     # Find min/max
     min_delay = min(raw_delays)
@@ -209,7 +208,7 @@ def _analyze_with_clusters(
     raw_delays: list[float],
     source_key: str,
     log: Callable[[str], None] | None,
-    stepping_clusters: list[dict[str, Any]],
+    stepping_clusters: list[ClusterDiagnostic],
     variance_threshold: float,
     outlier_mode: str,
     outlier_threshold: float,
@@ -226,14 +225,16 @@ def _analyze_with_clusters(
     max_cluster_variance = 0.0
 
     for cluster in stepping_clusters:
-        cluster_delays = cluster.get("raw_delays", [])
-        cluster_chunks = cluster.get("chunks", [])
+        # NOTE: ClusterDiagnostic does not yet carry raw_delays or chunk indices.
+        # These fields would need to be added for per-cluster variance analysis.
+        # For now this is a no-op (always gets empty lists and continues).
+        cluster_delays: list[float] = getattr(cluster, "raw_delays", [])
+        cluster_chunks: list[int] = getattr(cluster, "chunk_numbers", [])
 
         if len(cluster_delays) < 2:
             continue
 
         cluster_mean = mean(cluster_delays)
-        stdev(cluster_delays)
         cluster_min = min(cluster_delays)
         cluster_max = max(cluster_delays)
         cluster_variance = cluster_max - cluster_min
@@ -249,7 +250,7 @@ def _analyze_with_clusters(
                 if abs(raw - reference) > 0.0001:
                     cluster_outliers.append(
                         {
-                            "cluster_id": cluster.get("cluster_id", 0),
+                            "cluster_id": cluster.cluster_id,
                             "chunk_index": cluster_chunks[i]
                             if i < len(cluster_chunks)
                             else i + 1,
@@ -262,7 +263,7 @@ def _analyze_with_clusters(
                 if deviation > outlier_threshold:
                     cluster_outliers.append(
                         {
-                            "cluster_id": cluster.get("cluster_id", 0),
+                            "cluster_id": cluster.cluster_id,
                             "chunk_index": cluster_chunks[i]
                             if i < len(cluster_chunks)
                             else i + 1,
@@ -274,7 +275,7 @@ def _analyze_with_clusters(
         if cluster_outliers:
             cluster_issues.append(
                 {
-                    "cluster_id": cluster.get("cluster_id", 0),
+                    "cluster_id": cluster.cluster_id,
                     "mean_delay": _to_float(cluster_mean),
                     "variance": _to_float(cluster_variance),
                     "outlier_count": len(cluster_outliers),

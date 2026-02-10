@@ -86,16 +86,72 @@ class DriftDiagnosis:
     rate: float  # Drift rate in ms/s from regression slope
 
 
+# =========================================================================
+# Stepping sub-types (used by drift_detection internals and SteppingDiagnosis)
+# =========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class QualityThresholds:
+    """Quality validation thresholds for stepping cluster acceptance."""
+
+    min_chunks_per_cluster: int
+    min_cluster_percentage: float
+    min_cluster_duration_s: float
+    min_match_quality_pct: float
+    min_total_clusters: int
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationCheck:
+    """A single validation check result (e.g. chunks, percentage, duration)."""
+
+    passed: bool
+    value: float
+    threshold: float
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterValidation:
+    """Validation result for a single stepping cluster."""
+
+    valid: bool
+    checks: dict[str, ValidationCheck]
+    passed_count: int
+    total_checks: int
+    cluster_size: int
+    cluster_percentage: float
+    cluster_duration_s: float
+    avg_match_quality: float
+    min_match_quality: float
+    time_range: tuple[float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterDiagnostic:
+    """Detailed cluster composition from stepping detection diagnostics."""
+
+    cluster_id: int
+    mean_delay_ms: float
+    std_delay_ms: float
+    chunk_count: int
+    chunk_numbers: list[int]
+    time_range: tuple[float, float]
+    mean_match_pct: float
+    min_match_pct: float
+
+
 @dataclass(frozen=True, slots=True)
 class SteppingDiagnosis:
     """Stepped delay clusters detected — delay jumps at discrete points."""
 
     diagnosis: str = "STEPPING"
     cluster_count: int = 0
-    cluster_details: list[dict[str, object]] = dataclass_field(default_factory=list)
+    cluster_details: list[ClusterDiagnostic] = dataclass_field(default_factory=list)
     valid_clusters: dict[int, list[int]] = dataclass_field(default_factory=dict)
     invalid_clusters: dict[int, list[int]] = dataclass_field(default_factory=dict)
-    validation_results: dict[int, dict[str, object]] = dataclass_field(
+    validation_results: dict[int, ClusterValidation] = dataclass_field(
         default_factory=dict
     )
     correction_mode: str = "full"

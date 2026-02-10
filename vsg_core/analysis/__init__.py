@@ -24,21 +24,29 @@ from .source_separation import (
 from .track_selection import format_track_details, select_audio_track
 from .types import (
     ChunkResult,
+    ClusterDiagnostic,
+    ClusterValidation,
     ContainerDelayInfo,
     DelayCalculation,
     GlobalShiftCalculation,
+    QualityThresholds,
     TrackSelection,
+    ValidationCheck,
 )
 from .videodiff import VideoDiffResult, run_native_videodiff, run_videodiff
 
 __all__ = [
     "SEPARATION_MODES",
     "ChunkResult",
+    "ClusterDiagnostic",
+    "ClusterValidation",
     "ContainerDelayInfo",
     "CorrelationMethod",
     "DelayCalculation",
     "GlobalShiftCalculation",
+    "QualityThresholds",
     "TrackSelection",
+    "ValidationCheck",
     "VideoDiffResult",
     "apply_global_shift_to_delays",
     "calculate_delay",

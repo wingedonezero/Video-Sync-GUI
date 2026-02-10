@@ -2,14 +2,24 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 from sklearn.cluster import DBSCAN
 
-from .types import DriftDiagnosis, SteppingDiagnosis, UniformDiagnosis
+from .types import (
+    ClusterDiagnostic,
+    ClusterValidation,
+    DriftDiagnosis,
+    QualityThresholds,
+    SteppingDiagnosis,
+    UniformDiagnosis,
+    ValidationCheck,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..io.runner import CommandRunner
     from ..models.settings import AppSettings
     from .types import ChunkResult, DiagnosisResult
@@ -20,25 +30,25 @@ def _build_cluster_diagnostics(
     labels: np.ndarray,
     cluster_members: dict[int, list[int]],
     delays: np.ndarray,
-    runner: CommandRunner,
+    log: Callable[[str], None],
     settings: AppSettings,
-) -> list[dict[str, Any]]:
+) -> list[ClusterDiagnostic]:
     """
     Builds detailed cluster composition and transition analysis.
-    Returns a list of cluster info dictionaries.
+    Returns a list of ClusterDiagnostic objects.
     """
     verbose = settings.stepping_diagnostics_verbose
 
     # Sort clusters by their mean delay
-    cluster_info = []
+    cluster_info: list[ClusterDiagnostic] = []
     for label in sorted(cluster_members.keys()):
         member_indices = cluster_members[label]
         member_delays = [delays[i] for i in member_indices]
         member_chunks = [accepted_chunks[i] for i in member_indices]
 
         # Calculate cluster statistics
-        mean_delay = np.mean(member_delays)
-        std_delay = np.std(member_delays)
+        mean_delay = float(np.mean(member_delays))
+        std_delay = float(np.std(member_delays))
         chunk_count = len(member_indices)
 
         # Get time range for this cluster
@@ -47,53 +57,52 @@ def _build_cluster_diagnostics(
         max_time = max(start_times)
 
         # Get chunk numbers (1-indexed for display)
-        chunk_numbers = [i + 1 for i in member_indices]
-        chunk_numbers.sort()
+        chunk_numbers = sorted(i + 1 for i in member_indices)
 
         # Get match scores for quality analysis
         match_scores = [chunk.match_pct for chunk in member_chunks]
-        mean_match = np.mean(match_scores)
-        min_match = min(match_scores)
+        mean_match = float(np.mean(match_scores))
+        min_match = float(min(match_scores))
 
         cluster_info.append(
-            {
-                "cluster_id": label,
-                "mean_delay_ms": mean_delay,
-                "std_delay_ms": std_delay,
-                "chunk_count": chunk_count,
-                "chunk_numbers": chunk_numbers,
-                "time_range": (min_time, max_time),
-                "mean_match_pct": mean_match,
-                "min_match_pct": min_match,
-            }
+            ClusterDiagnostic(
+                cluster_id=label,
+                mean_delay_ms=mean_delay,
+                std_delay_ms=std_delay,
+                chunk_count=chunk_count,
+                chunk_numbers=chunk_numbers,
+                time_range=(min_time, max_time),
+                mean_match_pct=mean_match,
+                min_match_pct=min_match,
+            )
         )
 
     # Sort by mean delay to show progression
-    cluster_info.sort(key=lambda x: x["mean_delay_ms"])
+    cluster_info.sort(key=lambda x: x.mean_delay_ms)
 
     if verbose and cluster_info:
-        runner._log_message("[Cluster Diagnostics] Detailed composition:")
+        log("[Cluster Diagnostics] Detailed composition:")
 
         for i, cluster in enumerate(cluster_info):
-            chunk_range = _format_chunk_range(cluster["chunk_numbers"])
+            chunk_range = _format_chunk_range(cluster.chunk_numbers)
             delay_jump = ""
 
             if i > 0:
-                prev_delay = cluster_info[i - 1]["mean_delay_ms"]
-                curr_delay = cluster["mean_delay_ms"]
+                prev_delay = cluster_info[i - 1].mean_delay_ms
+                curr_delay = cluster.mean_delay_ms
                 jump = curr_delay - prev_delay
                 direction = "↑" if jump > 0 else "↓"
                 delay_jump = f" [{direction}{abs(jump):+.0f}ms jump]"
 
-            runner._log_message(
-                f"  Cluster {i + 1}: delay={cluster['mean_delay_ms']:+.0f}±{cluster['std_delay_ms']:.1f}ms, "
-                f"chunks {chunk_range} (@{cluster['time_range'][0]:.1f}s - @{cluster['time_range'][1]:.1f}s), "
-                f"match={cluster['mean_match_pct']:.1f}% (min={cluster['min_match_pct']:.1f}%)"
+            log(
+                f"  Cluster {i + 1}: delay={cluster.mean_delay_ms:+.0f}±{cluster.std_delay_ms:.1f}ms, "
+                f"chunks {chunk_range} (@{cluster.time_range[0]:.1f}s - @{cluster.time_range[1]:.1f}s), "
+                f"match={cluster.mean_match_pct:.1f}% (min={cluster.min_match_pct:.1f}%)"
                 f"{delay_jump}"
             )
 
         # Analyze transition patterns
-        _analyze_transition_patterns(cluster_info, runner)
+        _analyze_transition_patterns(cluster_info, log)
 
     return cluster_info
 
@@ -120,8 +129,8 @@ def _format_chunk_range(chunk_numbers: list[int]) -> str:
 
 
 def _analyze_transition_patterns(
-    cluster_info: list[dict[str, Any]], runner: CommandRunner
-):
+    cluster_info: list[ClusterDiagnostic], log: Callable[[str], None]
+) -> None:
     """Analyzes and reports patterns in delay transitions"""
     if len(cluster_info) < 2:
         return
@@ -129,8 +138,8 @@ def _analyze_transition_patterns(
     # Calculate all jumps
     jumps = []
     for i in range(1, len(cluster_info)):
-        prev_delay = cluster_info[i - 1]["mean_delay_ms"]
-        curr_delay = cluster_info[i]["mean_delay_ms"]
+        prev_delay = cluster_info[i - 1].mean_delay_ms
+        curr_delay = cluster_info[i].mean_delay_ms
         jump = curr_delay - prev_delay
         jumps.append(jump)
 
@@ -145,45 +154,29 @@ def _analyze_transition_patterns(
     mean_jump = np.mean(jump_sizes)
     consistent_jumps = all(abs(j - mean_jump) < 50 for j in jump_sizes)
 
-    runner._log_message("[Transition Analysis]:")
+    log("[Transition Analysis]:")
 
     if all_positive:
-        runner._log_message(
-            "  → All delays INCREASE (accumulating lag = missing content)"
-        )
+        log("  → All delays INCREASE (accumulating lag = missing content)")
     elif all_negative:
-        runner._log_message(
-            "  → All delays DECREASE (accumulating lead = extra content)"
-        )
+        log("  → All delays DECREASE (accumulating lead = extra content)")
     else:
-        runner._log_message("  → Mixed pattern (some increases, some decreases)")
+        log("  → Mixed pattern (some increases, some decreases)")
 
     if consistent_jumps and len(jumps) > 1:
-        runner._log_message(
-            f"  → Consistent jump size: ~{mean_jump:.0f}ms per transition"
-        )
-        runner._log_message(
-            "  → Likely cause: Regular reel changes or commercial breaks"
-        )
+        log(f"  → Consistent jump size: ~{mean_jump:.0f}ms per transition")
+        log("  → Likely cause: Regular reel changes or commercial breaks")
     else:
-        runner._log_message(
-            f"  → Variable jump sizes: {', '.join(f'{j:+.0f}ms' for j in jumps)}"
-        )
-        runner._log_message(
-            "  → Likely cause: Scene-specific edits or variable content changes"
-        )
+        log(f"  → Variable jump sizes: {', '.join(f'{j:+.0f}ms' for j in jumps)}")
+        log("  → Likely cause: Scene-specific edits or variable content changes")
 
     # Check for low match scores that might indicate content mismatches
     # 70% threshold: Match scores below this suggest silence or mismatched content
     # This is diagnostic only - doesn't affect processing
-    low_match_clusters = [c for c in cluster_info if c["min_match_pct"] < 70]
+    low_match_clusters = [c for c in cluster_info if c.min_match_pct < 70]
     if low_match_clusters:
-        runner._log_message(
-            f"  ⚠ {len(low_match_clusters)} clusters have chunks with match < 70%"
-        )
-        runner._log_message(
-            "  → Possible silence sections or content mismatches at transitions"
-        )
+        log(f"  ⚠ {len(low_match_clusters)} clusters have chunks with match < 70%")
+        log("  → Possible silence sections or content mismatches at transitions")
 
 
 def _get_video_framerate(
@@ -212,7 +205,7 @@ def _get_video_framerate(
         return 0.0
 
 
-def _get_quality_thresholds(settings: AppSettings) -> dict[str, Any]:
+def _get_quality_thresholds(settings: AppSettings) -> QualityThresholds:
     """
     Returns quality validation thresholds based on the selected quality mode.
     Modes: 'strict', 'normal', 'lenient', 'custom'
@@ -220,39 +213,39 @@ def _get_quality_thresholds(settings: AppSettings) -> dict[str, Any]:
     quality_mode = settings.stepping_quality_mode
 
     # Preset modes
-    presets = {
-        "strict": {
-            "min_chunks_per_cluster": 3,
-            "min_cluster_percentage": 10.0,
-            "min_cluster_duration_s": 30.0,
-            "min_match_quality_pct": 90.0,
-            "min_total_clusters": 3,
-        },
-        "normal": {
-            "min_chunks_per_cluster": 3,
-            "min_cluster_percentage": 5.0,
-            "min_cluster_duration_s": 20.0,
-            "min_match_quality_pct": 85.0,
-            "min_total_clusters": 2,
-        },
-        "lenient": {
-            "min_chunks_per_cluster": 2,
-            "min_cluster_percentage": 3.0,
-            "min_cluster_duration_s": 10.0,
-            "min_match_quality_pct": 75.0,
-            "min_total_clusters": 2,
-        },
+    presets: dict[str, QualityThresholds] = {
+        "strict": QualityThresholds(
+            min_chunks_per_cluster=3,
+            min_cluster_percentage=10.0,
+            min_cluster_duration_s=30.0,
+            min_match_quality_pct=90.0,
+            min_total_clusters=3,
+        ),
+        "normal": QualityThresholds(
+            min_chunks_per_cluster=3,
+            min_cluster_percentage=5.0,
+            min_cluster_duration_s=20.0,
+            min_match_quality_pct=85.0,
+            min_total_clusters=2,
+        ),
+        "lenient": QualityThresholds(
+            min_chunks_per_cluster=2,
+            min_cluster_percentage=3.0,
+            min_cluster_duration_s=10.0,
+            min_match_quality_pct=75.0,
+            min_total_clusters=2,
+        ),
     }
 
     # If custom mode, use user-configured values
     if quality_mode == "custom":
-        return {
-            "min_chunks_per_cluster": settings.stepping_min_chunks_per_cluster,
-            "min_cluster_percentage": settings.stepping_min_cluster_percentage,
-            "min_cluster_duration_s": settings.stepping_min_cluster_duration_s,
-            "min_match_quality_pct": settings.stepping_min_match_quality_pct,
-            "min_total_clusters": settings.stepping_min_total_clusters,
-        }
+        return QualityThresholds(
+            min_chunks_per_cluster=settings.stepping_min_chunks_per_cluster,
+            min_cluster_percentage=settings.stepping_min_cluster_percentage,
+            min_cluster_duration_s=settings.stepping_min_cluster_duration_s,
+            min_match_quality_pct=settings.stepping_min_match_quality_pct,
+            min_total_clusters=settings.stepping_min_total_clusters,
+        )
 
     # Return preset or default to normal
     return presets.get(quality_mode, presets["normal"])
@@ -263,12 +256,11 @@ def _validate_cluster(
     cluster_members: list[int],
     accepted_chunks: list[ChunkResult],
     total_chunks: int,
-    thresholds: dict[str, Any],
+    thresholds: QualityThresholds,
     chunk_duration: float = 15.0,
-) -> dict[str, Any]:
+) -> ClusterValidation:
     """
     Validates a single cluster against quality thresholds.
-    Returns a dict with validation results and reasons.
 
     Args:
         chunk_duration: Duration of each chunk in seconds (from config 'scan_chunk_duration')
@@ -288,72 +280,71 @@ def _validate_cluster(
 
     # Calculate match quality
     match_qualities = [accepted_chunks[i].match_pct for i in cluster_members]
-    avg_match_quality = np.mean(match_qualities) if match_qualities else 0.0
-    min_match_quality = min(match_qualities) if match_qualities else 0.0
+    avg_match_quality = float(np.mean(match_qualities)) if match_qualities else 0.0
+    min_match_quality = float(min(match_qualities)) if match_qualities else 0.0
 
     # Perform validation checks
     checks = {
-        "chunks": {
-            "passed": cluster_size >= thresholds["min_chunks_per_cluster"],
-            "value": cluster_size,
-            "threshold": thresholds["min_chunks_per_cluster"],
-            "label": "Chunks",
-        },
-        "percentage": {
-            "passed": cluster_percentage >= thresholds["min_cluster_percentage"],
-            "value": cluster_percentage,
-            "threshold": thresholds["min_cluster_percentage"],
-            "label": "Percentage",
-        },
-        "duration": {
-            "passed": cluster_duration_s >= thresholds["min_cluster_duration_s"],
-            "value": cluster_duration_s,
-            "threshold": thresholds["min_cluster_duration_s"],
-            "label": "Duration",
-        },
-        "match_quality": {
-            "passed": avg_match_quality >= thresholds["min_match_quality_pct"],
-            "value": avg_match_quality,
-            "threshold": thresholds["min_match_quality_pct"],
-            "label": "Match quality",
-        },
+        "chunks": ValidationCheck(
+            passed=cluster_size >= thresholds.min_chunks_per_cluster,
+            value=float(cluster_size),
+            threshold=float(thresholds.min_chunks_per_cluster),
+            label="Chunks",
+        ),
+        "percentage": ValidationCheck(
+            passed=cluster_percentage >= thresholds.min_cluster_percentage,
+            value=cluster_percentage,
+            threshold=thresholds.min_cluster_percentage,
+            label="Percentage",
+        ),
+        "duration": ValidationCheck(
+            passed=cluster_duration_s >= thresholds.min_cluster_duration_s,
+            value=cluster_duration_s,
+            threshold=thresholds.min_cluster_duration_s,
+            label="Duration",
+        ),
+        "match_quality": ValidationCheck(
+            passed=avg_match_quality >= thresholds.min_match_quality_pct,
+            value=avg_match_quality,
+            threshold=thresholds.min_match_quality_pct,
+            label="Match quality",
+        ),
     }
 
     # Overall validation
-    all_passed = all(check["passed"] for check in checks.values())
-    passed_count = sum(1 for check in checks.values() if check["passed"])
+    all_passed = all(check.passed for check in checks.values())
+    passed_count = sum(1 for check in checks.values() if check.passed)
     total_checks = len(checks)
 
-    return {
-        "valid": all_passed,
-        "checks": checks,
-        "passed_count": passed_count,
-        "total_checks": total_checks,
-        "cluster_size": cluster_size,
-        "cluster_percentage": cluster_percentage,
-        "cluster_duration_s": cluster_duration_s,
-        "avg_match_quality": avg_match_quality,
-        "min_match_quality": min_match_quality,
-        "time_range": (min_time, max_time + chunk_duration),
-    }
+    return ClusterValidation(
+        valid=all_passed,
+        checks=checks,
+        passed_count=passed_count,
+        total_checks=total_checks,
+        cluster_size=cluster_size,
+        cluster_percentage=cluster_percentage,
+        cluster_duration_s=cluster_duration_s,
+        avg_match_quality=avg_match_quality,
+        min_match_quality=min_match_quality,
+        time_range=(min_time, max_time + chunk_duration),
+    )
 
 
 def _filter_clusters(
     cluster_members: dict[int, list[int]],
     accepted_chunks: list[ChunkResult],
     delays: np.ndarray,
-    thresholds: dict[str, Any],
-    runner: CommandRunner,
+    thresholds: QualityThresholds,
     settings: AppSettings,
-) -> tuple:
+) -> tuple[dict[int, list[int]], dict[int, list[int]], dict[int, ClusterValidation]]:
     """
     Filters clusters based on quality validation.
     Returns (valid_clusters, invalid_clusters, validation_results)
     """
     total_chunks = len(accepted_chunks)
-    valid_clusters = {}
-    invalid_clusters = {}
-    validation_results = {}
+    valid_clusters: dict[int, list[int]] = {}
+    invalid_clusters: dict[int, list[int]] = {}
+    validation_results: dict[int, ClusterValidation] = {}
 
     # Get chunk duration from settings (used for cluster duration calculation)
     chunk_duration = float(settings.scan_chunk_duration)
@@ -364,7 +355,7 @@ def _filter_clusters(
         )
         validation_results[label] = validation
 
-        if validation["valid"]:
+        if validation.valid:
             valid_clusters[label] = members
         else:
             invalid_clusters[label] = members
@@ -386,6 +377,8 @@ def diagnose_audio_issue(
     Returns:
         A DiagnosisResult (UniformDiagnosis, DriftDiagnosis, or SteppingDiagnosis).
     """
+    log = runner._log_message
+
     accepted_chunks = [c for c in chunks if c.accepted]
     if len(accepted_chunks) < 6:
         return UniformDiagnosis()
@@ -402,7 +395,7 @@ def diagnose_audio_issue(
         # Formula: (25/23.976 - 1) * 1000 ≈ 40.9 ms/s
         # ±5ms tolerance accounts for encoding variations
         if abs(slope - 40.9) < 5.0:
-            runner._log_message(
+            log(
                 f"[PAL Drift Detected] Framerate is ~25fps and audio drift rate is {slope:.2f} ms/s."
             )
             return DriftDiagnosis(diagnosis="PAL_DRIFT", rate=float(slope))
@@ -419,8 +412,8 @@ def diagnose_audio_issue(
 
     if len(unique_clusters) > 1:
         # Build cluster membership data
-        cluster_sizes = {}
-        cluster_members = {}  # Track which chunks belong to each cluster
+        cluster_sizes: dict[int, int] = {}
+        cluster_members: dict[int, list[int]] = {}
         for i, label in enumerate(db.labels_):
             if label != -1:  # Ignore noise points
                 cluster_sizes[label] = cluster_sizes.get(label, 0) + 1
@@ -434,7 +427,7 @@ def diagnose_audio_issue(
 
         # Check if stepping correction is disabled
         if correction_mode == "disabled":
-            runner._log_message(
+            log(
                 f"[Stepping] Found {len(unique_clusters)} timing clusters, but stepping correction is disabled."
             )
             return UniformDiagnosis()
@@ -443,20 +436,18 @@ def diagnose_audio_issue(
         thresholds = _get_quality_thresholds(settings)
 
         # Log detection
-        runner._log_message(
-            f"[Stepping Detection] Found {len(unique_clusters)} timing clusters"
-        )
-        runner._log_message(
+        log(f"[Stepping Detection] Found {len(unique_clusters)} timing clusters")
+        log(
             f"[Stepping] Correction mode: {correction_mode}, Quality mode: {quality_mode}"
         )
 
         # Perform cluster filtering/validation
         valid_clusters, invalid_clusters, validation_results = _filter_clusters(
-            cluster_members, accepted_chunks, delays, thresholds, runner, settings
+            cluster_members, accepted_chunks, delays, thresholds, settings
         )
 
         # Log validation results with enhanced diagnostics
-        runner._log_message(f"[Quality Validation - Mode: {quality_mode}]")
+        log(f"[Quality Validation - Mode: {quality_mode}]")
         for label in sorted(cluster_members.keys()):
             validation = validation_results[label]
             members = cluster_members[label]
@@ -466,70 +457,69 @@ def diagnose_audio_issue(
             mean_delay = np.mean(cluster_delays)
 
             # Get time range
-            time_start, time_end = validation["time_range"]
+            time_start, time_end = validation.time_range
 
             # Log cluster info
-            status = "ACCEPTED" if validation["valid"] else "FILTERED OUT"
-            "✓" if validation["valid"] else "✗"
+            status = "ACCEPTED" if validation.valid else "FILTERED OUT"
 
-            runner._log_message(
+            log(
                 f"  Cluster {label + 1} (@{time_start:.1f}s - {time_end:.1f}s): {mean_delay:+.0f}ms"
             )
 
             # Log each validation check
-            for check_name, check_data in validation["checks"].items():
-                check_symbol = "✓" if check_data["passed"] else "✗"
-                value = check_data["value"]
-                threshold = check_data["threshold"]
-                label_text = check_data["label"]
+            for check_name, check_data in validation.checks.items():
+                check_symbol = "✓" if check_data.passed else "✗"
+                value = check_data.value
+                threshold = check_data.threshold
+                label_text = check_data.label
 
                 if check_name == "percentage":
-                    runner._log_message(
+                    log(
                         f"    {check_symbol} {label_text}: {value:.1f}% (need {threshold:.1f}%+)"
                     )
                 elif check_name == "duration":
-                    runner._log_message(
+                    log(
                         f"    {check_symbol} {label_text}: {value:.1f}s (need {threshold:.1f}s+)"
                     )
                 elif check_name == "match_quality":
-                    runner._log_message(
+                    log(
                         f"    {check_symbol} {label_text}: {value:.1f}% (need {threshold:.1f}%+)"
                     )
                 else:  # chunks
-                    runner._log_message(
+                    log(
                         f"    {check_symbol} {label_text}: {int(value)} (need {int(threshold)}+)"
                     )
 
-            runner._log_message(
-                f"    → STATUS: {status} ({validation['passed_count']}/{validation['total_checks']} checks passed)"
+            log(
+                f"    → STATUS: {status} ({validation.passed_count}/{validation.total_checks} checks passed)"
             )
 
         # Build detailed cluster composition for diagnostics (for all clusters)
         cluster_details = _build_cluster_diagnostics(
-            accepted_chunks, db.labels_, cluster_members, delays, runner, settings
+            accepted_chunks, db.labels_, cluster_members, delays, log, settings
         )
 
         # Decide whether to accept stepping based on correction mode
         if correction_mode in {"full", "strict"}:
             # Full/Strict mode: Reject if ANY cluster is invalid
             if len(invalid_clusters) > 0:
-                runner._log_message(
+                log(
                     f"[Stepping Rejected] {len(invalid_clusters)}/{len(cluster_members)} clusters failed validation in '{correction_mode}' mode."
                 )
-                runner._log_message(
+                log(
                     "  → Treating as uniform delay. Switch to 'filtered' mode to use valid clusters only."
                 )
                 return UniformDiagnosis()
 
             # Also check minimum total clusters requirement
-            if len(valid_clusters) < thresholds["min_total_clusters"]:
-                runner._log_message(
-                    f"[Stepping Rejected] Only {len(valid_clusters)} clusters (need {thresholds['min_total_clusters']}+)."
+            if len(valid_clusters) < thresholds.min_total_clusters:
+                log(
+                    f"[Stepping Rejected] Only {len(valid_clusters)} clusters (need {thresholds.min_total_clusters}+)."
                 )
                 return UniformDiagnosis()
 
             # All clusters passed - accept stepping
-            runner._log_message(
+            log(
                 f"[Stepping Accepted] All {len(valid_clusters)} clusters passed validation."
             )
             return SteppingDiagnosis(
@@ -543,28 +533,26 @@ def diagnose_audio_issue(
 
         elif correction_mode == "filtered":
             # Filtered mode: Use only valid clusters, filter out invalid ones
-            if len(valid_clusters) < thresholds["min_total_clusters"]:
-                runner._log_message(
-                    f"[Filtered Stepping Rejected] Only {len(valid_clusters)} valid clusters (need {thresholds['min_total_clusters']}+)."
+            if len(valid_clusters) < thresholds.min_total_clusters:
+                log(
+                    f"[Filtered Stepping Rejected] Only {len(valid_clusters)} valid clusters (need {thresholds.min_total_clusters}+)."
                 )
                 return UniformDiagnosis()
 
             # Check fallback mode
             fallback_mode = settings.stepping_filtered_fallback
             if fallback_mode == "reject" and len(invalid_clusters) > 0:
-                runner._log_message(
+                log(
                     f"[Filtered Stepping Rejected] Fallback mode is 'reject' and {len(invalid_clusters)} clusters were filtered."
                 )
                 return UniformDiagnosis()
 
             # Accept filtered stepping
-            runner._log_message(
+            log(
                 f"[Filtered Stepping Accepted] Using {len(valid_clusters)}/{len(cluster_members)} valid clusters (filtered {len(invalid_clusters)})."
             )
             if len(invalid_clusters) > 0:
-                runner._log_message(
-                    f"  → Filtered regions will use fallback mode: '{fallback_mode}'"
-                )
+                log(f"  → Filtered regions will use fallback mode: '{fallback_mode}'")
 
             return SteppingDiagnosis(
                 cluster_count=len(valid_clusters),
@@ -611,7 +599,7 @@ def diagnose_audio_issue(
         else settings.drift_detection_r2_threshold
     )
 
-    runner._log_message(
+    log(
         f"[DriftDiagnosis] Codec: {codec_name_lower} (lossless={is_lossless}). Using R²>{r2_threshold:.2f}, slope>{slope_threshold:.1f} ms/s."
     )
 
@@ -623,7 +611,7 @@ def diagnose_audio_issue(
         r_squared = correlation_matrix[0, 1] ** 2
 
         if r_squared > r2_threshold:
-            runner._log_message(
+            log(
                 f"[Linear Drift Detected] Delays fit a straight line with R-squared={r_squared:.3f} and slope={slope:.2f} ms/s."
             )
             return DriftDiagnosis(diagnosis="LINEAR_DRIFT", rate=float(slope))
