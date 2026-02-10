@@ -6,12 +6,17 @@ Analyzes per-chunk delay values to detect inconsistencies that may indicate
 sync issues, even when the final rounded delay appears correct.
 """
 
-from collections.abc import Callable
+from __future__ import annotations
+
 from statistics import mean, stdev, variance
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ..models.context_types import SyncStabilityIssue
     from ..models.settings import AppSettings
+    from .types import ChunkResult
 
 
 def _to_float(value) -> float:
@@ -20,27 +25,27 @@ def _to_float(value) -> float:
 
 
 def analyze_sync_stability(
-    chunk_results: list[dict[str, Any]],
+    chunk_results: list[ChunkResult],
     source_key: str,
-    settings: "AppSettings",
+    settings: AppSettings,
     log: Callable[[str], None] | None = None,
-    stepping_clusters: list[dict] | None = None,
-) -> dict[str, Any] | None:
+    stepping_clusters: list[dict[str, Any]] | None = None,
+) -> SyncStabilityIssue | None:
     """
     Analyze correlation chunk results for variance/stability issues.
 
-    This checks for variance in raw delay values that might indicate sync
+    Checks for variance in raw delay values that might indicate sync
     problems, even when results round to the same final delay.
 
     Args:
-        chunk_results: List of chunk dicts with 'raw_delay', 'delay', 'match', 'accepted'
-        source_key: Source identifier (e.g., 'Source 2')
-        settings: AppSettings instance with sync_stability_* settings
-        log: Optional logging callback
-        stepping_clusters: Optional list of stepping clusters to exclude from variance check
+        chunk_results: List of ChunkResult from correlation.
+        source_key: Source identifier (e.g., 'Source 2').
+        settings: AppSettings instance with sync_stability_* settings.
+        log: Optional logging callback.
+        stepping_clusters: Optional list of stepping cluster dicts.
 
     Returns:
-        Dict with stability analysis results, or None if check disabled/skipped
+        Dict with stability analysis results, or None if check disabled/skipped.
     """
     # Check if enabled
     if not settings.sync_stability_enabled:
@@ -53,17 +58,18 @@ def analyze_sync_stability(
     outlier_threshold = settings.sync_stability_outlier_threshold
 
     # Get accepted chunks with raw delays
-    accepted = [r for r in chunk_results if r.get("accepted", False)]
+    accepted = [r for r in chunk_results if r.accepted]
 
     if len(accepted) < min_chunks:
         if log:
             log(
-                f"[Sync Stability] {source_key}: Skipped - only {len(accepted)} chunks (need {min_chunks})"
+                f"[Sync Stability] {source_key}: Skipped - only "
+                f"{len(accepted)} chunks (need {min_chunks})"
             )
         return None
 
     # Extract raw delay values
-    raw_delays = [r.get("raw_delay", float(r.get("delay", 0))) for r in accepted]
+    raw_delays = [r.raw_delay_ms for r in accepted]
 
     # If stepping clusters provided, analyze each cluster separately
     # Otherwise analyze all chunks as one group
@@ -91,14 +97,14 @@ def analyze_sync_stability(
 
 
 def _analyze_uniform(
-    accepted: list[dict],
+    accepted: list[ChunkResult],
     raw_delays: list[float],
     source_key: str,
-    log: Callable | None,
+    log: Callable[[str], None] | None,
     variance_threshold: float,
     outlier_mode: str,
     outlier_threshold: float,
-) -> dict[str, Any]:
+) -> SyncStabilityIssue:
     """Analyze chunks as a single uniform group (no stepping)."""
 
     # Calculate statistics
@@ -130,7 +136,7 @@ def _analyze_uniform(
                 outliers.append(
                     {
                         "chunk_index": i + 1,
-                        "time_s": _to_float(chunk.get("start", 0)),
+                        "time_s": _to_float(chunk.start_s),
                         "delay_ms": _to_float(raw),
                         "deviation_ms": _to_float(raw - reference),
                     }
@@ -143,7 +149,7 @@ def _analyze_uniform(
                 outliers.append(
                     {
                         "chunk_index": i + 1,
-                        "time_s": _to_float(chunk.get("start", 0)),
+                        "time_s": _to_float(chunk.start_s),
                         "delay_ms": _to_float(raw),
                         "deviation_ms": _to_float(raw - mean_delay),
                     }
@@ -160,7 +166,7 @@ def _analyze_uniform(
         variance_detected = max_variance > variance_threshold
 
     # Build result - ensure all floats are native Python types for JSON serialization
-    result = {
+    result: SyncStabilityIssue = {
         "source": source_key,
         "variance_detected": variance_detected,
         "max_variance_ms": round(_to_float(max_variance), 4),
@@ -199,15 +205,15 @@ def _analyze_uniform(
 
 
 def _analyze_with_clusters(
-    accepted: list[dict],
+    accepted: list[ChunkResult],
     raw_delays: list[float],
     source_key: str,
-    log: Callable | None,
-    stepping_clusters: list[dict],
+    log: Callable[[str], None] | None,
+    stepping_clusters: list[dict[str, Any]],
     variance_threshold: float,
     outlier_mode: str,
     outlier_threshold: float,
-) -> dict[str, Any]:
+) -> SyncStabilityIssue:
     """
     Analyze chunks with stepping clusters.
 
@@ -283,7 +289,7 @@ def _analyze_with_clusters(
     else:
         variance_detected = max_cluster_variance > variance_threshold
 
-    result = {
+    result: SyncStabilityIssue = {
         "source": source_key,
         "variance_detected": variance_detected,
         "max_variance_ms": round(_to_float(max_cluster_variance), 4),

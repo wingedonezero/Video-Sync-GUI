@@ -7,13 +7,16 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from sklearn.cluster import DBSCAN
 
+from .types import DriftDiagnosis, SteppingDiagnosis, UniformDiagnosis
+
 if TYPE_CHECKING:
     from ..io.runner import CommandRunner
     from ..models.settings import AppSettings
+    from .types import ChunkResult, DiagnosisResult
 
 
 def _build_cluster_diagnostics(
-    accepted_chunks: list[dict[str, Any]],
+    accepted_chunks: list[ChunkResult],
     labels: np.ndarray,
     cluster_members: dict[int, list[int]],
     delays: np.ndarray,
@@ -39,7 +42,7 @@ def _build_cluster_diagnostics(
         chunk_count = len(member_indices)
 
         # Get time range for this cluster
-        start_times = [chunk["start"] for chunk in member_chunks]
+        start_times = [chunk.start_s for chunk in member_chunks]
         min_time = min(start_times)
         max_time = max(start_times)
 
@@ -48,8 +51,7 @@ def _build_cluster_diagnostics(
         chunk_numbers.sort()
 
         # Get match scores for quality analysis
-        # Note: chunks use 'match' key (0-100 percentage scale)
-        match_scores = [chunk.get("match", 0) for chunk in member_chunks]
+        match_scores = [chunk.match_pct for chunk in member_chunks]
         mean_match = np.mean(match_scores)
         min_match = min(match_scores)
 
@@ -200,11 +202,11 @@ def _get_video_framerate(
         "default=noprint_wrappers=1:nokey=1",
         str(video_path),
     ]
-    out = runner.run(cmd, tool_paths)
-    if not out or "/" not in out:
+    raw_out = runner.run(cmd, tool_paths)
+    if not raw_out or not isinstance(raw_out, str) or "/" not in raw_out:
         return 0.0
     try:
-        num, den = map(float, out.strip().split("/"))
+        num, den = map(float, raw_out.strip().split("/"))
         return num / den if den != 0 else 0.0
     except (ValueError, ZeroDivisionError):
         return 0.0
@@ -259,7 +261,7 @@ def _get_quality_thresholds(settings: AppSettings) -> dict[str, Any]:
 def _validate_cluster(
     cluster_label: int,
     cluster_members: list[int],
-    accepted_chunks: list[dict[str, Any]],
+    accepted_chunks: list[ChunkResult],
     total_chunks: int,
     thresholds: dict[str, Any],
     chunk_duration: float = 15.0,
@@ -278,14 +280,14 @@ def _validate_cluster(
     )
 
     # Calculate duration
-    chunk_times = [accepted_chunks[i]["start"] for i in cluster_members]
+    chunk_times = [accepted_chunks[i].start_s for i in cluster_members]
     min_time = min(chunk_times)
     max_time = max(chunk_times)
     # chunk_duration comes from config, not from chunk data
     cluster_duration_s = (max_time - min_time) + chunk_duration
 
     # Calculate match quality
-    match_qualities = [accepted_chunks[i].get("match", 0.0) for i in cluster_members]
+    match_qualities = [accepted_chunks[i].match_pct for i in cluster_members]
     avg_match_quality = np.mean(match_qualities) if match_qualities else 0.0
     min_match_quality = min(match_qualities) if match_qualities else 0.0
 
@@ -338,7 +340,7 @@ def _validate_cluster(
 
 def _filter_clusters(
     cluster_members: dict[int, list[int]],
-    accepted_chunks: list[dict[str, Any]],
+    accepted_chunks: list[ChunkResult],
     delays: np.ndarray,
     thresholds: dict[str, Any],
     runner: CommandRunner,
@@ -372,23 +374,24 @@ def _filter_clusters(
 
 def diagnose_audio_issue(
     video_path: str,
-    chunks: list[dict[str, Any]],
+    chunks: list[ChunkResult],
     settings: AppSettings,
     runner: CommandRunner,
-    tool_paths: dict,
+    tool_paths: dict[str, str | None],
     codec_id: str,
-) -> tuple[str, dict]:
+) -> DiagnosisResult:
     """
-    Analyzes correlation chunks to diagnose the type of sync issue.
-    Returns:
-        A tuple of (diagnosis_string, details_dict).
-    """
-    accepted_chunks = [c for c in chunks if c.get("accepted", False)]
-    if len(accepted_chunks) < 6:
-        return "UNIFORM", {}
+    Analyze correlation chunks to diagnose the type of sync issue.
 
-    times = np.array([c["start"] for c in accepted_chunks])
-    delays = np.array([c["delay"] for c in accepted_chunks])
+    Returns:
+        A DiagnosisResult (UniformDiagnosis, DriftDiagnosis, or SteppingDiagnosis).
+    """
+    accepted_chunks = [c for c in chunks if c.accepted]
+    if len(accepted_chunks) < 6:
+        return UniformDiagnosis()
+
+    times = np.array([c.start_s for c in accepted_chunks])
+    delays = np.array([c.delay_ms for c in accepted_chunks])
 
     # --- Test 1: Check for PAL Drift (Specific Linear Drift) ---
     framerate = _get_video_framerate(video_path, runner, tool_paths)
@@ -402,7 +405,7 @@ def diagnose_audio_issue(
             runner._log_message(
                 f"[PAL Drift Detected] Framerate is ~25fps and audio drift rate is {slope:.2f} ms/s."
             )
-            return "PAL_DRIFT", {"rate": slope}
+            return DriftDiagnosis(diagnosis="PAL_DRIFT", rate=float(slope))
 
     # --- Test 2: Check for Stepping (Clustered) ---
     # Use DBSCAN (Density-Based Spatial Clustering) to detect delay clustering
@@ -434,7 +437,7 @@ def diagnose_audio_issue(
             runner._log_message(
                 f"[Stepping] Found {len(unique_clusters)} timing clusters, but stepping correction is disabled."
             )
-            return "UNIFORM", {}
+            return UniformDiagnosis()
 
         # Get quality thresholds based on mode
         thresholds = _get_quality_thresholds(settings)
@@ -516,27 +519,27 @@ def diagnose_audio_issue(
                 runner._log_message(
                     "  → Treating as uniform delay. Switch to 'filtered' mode to use valid clusters only."
                 )
-                return "UNIFORM", {}
+                return UniformDiagnosis()
 
             # Also check minimum total clusters requirement
             if len(valid_clusters) < thresholds["min_total_clusters"]:
                 runner._log_message(
                     f"[Stepping Rejected] Only {len(valid_clusters)} clusters (need {thresholds['min_total_clusters']}+)."
                 )
-                return "UNIFORM", {}
+                return UniformDiagnosis()
 
             # All clusters passed - accept stepping
             runner._log_message(
                 f"[Stepping Accepted] All {len(valid_clusters)} clusters passed validation."
             )
-            return "STEPPING", {
-                "clusters": len(valid_clusters),
-                "cluster_details": cluster_details,
-                "valid_clusters": valid_clusters,
-                "invalid_clusters": invalid_clusters,
-                "validation_results": validation_results,
-                "correction_mode": correction_mode,
-            }
+            return SteppingDiagnosis(
+                cluster_count=len(valid_clusters),
+                cluster_details=cluster_details,
+                valid_clusters=valid_clusters,
+                invalid_clusters=invalid_clusters,
+                validation_results=validation_results,
+                correction_mode=correction_mode,
+            )
 
         elif correction_mode == "filtered":
             # Filtered mode: Use only valid clusters, filter out invalid ones
@@ -544,7 +547,7 @@ def diagnose_audio_issue(
                 runner._log_message(
                     f"[Filtered Stepping Rejected] Only {len(valid_clusters)} valid clusters (need {thresholds['min_total_clusters']}+)."
                 )
-                return "UNIFORM", {}
+                return UniformDiagnosis()
 
             # Check fallback mode
             fallback_mode = settings.stepping_filtered_fallback
@@ -552,7 +555,7 @@ def diagnose_audio_issue(
                 runner._log_message(
                     f"[Filtered Stepping Rejected] Fallback mode is 'reject' and {len(invalid_clusters)} clusters were filtered."
                 )
-                return "UNIFORM", {}
+                return UniformDiagnosis()
 
             # Accept filtered stepping
             runner._log_message(
@@ -563,15 +566,15 @@ def diagnose_audio_issue(
                     f"  → Filtered regions will use fallback mode: '{fallback_mode}'"
                 )
 
-            return "STEPPING", {
-                "clusters": len(valid_clusters),
-                "cluster_details": cluster_details,
-                "valid_clusters": valid_clusters,
-                "invalid_clusters": invalid_clusters,
-                "validation_results": validation_results,
-                "correction_mode": correction_mode,
-                "fallback_mode": fallback_mode,
-            }
+            return SteppingDiagnosis(
+                cluster_count=len(valid_clusters),
+                cluster_details=cluster_details,
+                valid_clusters=valid_clusters,
+                invalid_clusters=invalid_clusters,
+                validation_results=validation_results,
+                correction_mode=correction_mode,
+                fallback_mode=fallback_mode,
+            )
 
         else:
             # Unknown mode - fall back to legacy behavior
@@ -579,12 +582,12 @@ def diagnose_audio_issue(
             MIN_CHUNKS_PER_SEGMENT = settings.stepping_min_chunks_per_cluster
 
             if min_cluster_size >= MIN_CHUNKS_PER_SEGMENT:
-                return "STEPPING", {
-                    "clusters": len(unique_clusters),
-                    "cluster_details": cluster_details,
-                }
+                return SteppingDiagnosis(
+                    cluster_count=len(unique_clusters),
+                    cluster_details=cluster_details,
+                )
             else:
-                return "UNIFORM", {}
+                return UniformDiagnosis()
 
     # --- Test 3: Check for General Linear Drift (Now Codec-Aware) ---
     slope, intercept = np.polyfit(times, delays, 1)
@@ -623,7 +626,7 @@ def diagnose_audio_issue(
             runner._log_message(
                 f"[Linear Drift Detected] Delays fit a straight line with R-squared={r_squared:.3f} and slope={slope:.2f} ms/s."
             )
-            return "LINEAR_DRIFT", {"rate": slope}
+            return DriftDiagnosis(diagnosis="LINEAR_DRIFT", rate=float(slope))
 
     # --- Default Case: Uniform Delay ---
-    return "UNIFORM", {}
+    return UniformDiagnosis()

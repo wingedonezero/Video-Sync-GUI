@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy.signal import correlate
 
-from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
+from ..analysis.correlation import get_audio_stream_info, run_audio_correlation
 from ..extraction.tracks import extract_tracks
 from ..models.media import StreamProps, Track
 
@@ -2018,7 +2018,7 @@ class SteppingCorrector:
                 target_lang=None,
                 role_tag="QA",
             )
-            accepted = [r for r in results if r.get("accepted", False)]
+            accepted = [r for r in results if r.accepted]
 
             min_accepted = qa_min_chunks
             if len(accepted) < min_accepted:
@@ -2027,7 +2027,7 @@ class SteppingCorrector:
                 )
                 return False
 
-            delays = [r["delay"] for r in accepted]
+            delays = [r.delay_ms for r in accepted]
             median_delay = np.median(delays)
 
             # For skip mode, use a more lenient median check since we expect different delays

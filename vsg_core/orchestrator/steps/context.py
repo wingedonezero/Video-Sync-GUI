@@ -65,7 +65,7 @@ class Context:
 
     # NEW FIELDS: Container delay tracking
     # Store Source 1's reference audio container delay for chain calculation
-    source1_audio_container_delay_ms: int = 0
+    source1_audio_container_delay_ms: float = 0.0
 
     # Store all container delays by source and track ID for logging/reference
     # Format: {source_key: {track_id: delay_ms}}
