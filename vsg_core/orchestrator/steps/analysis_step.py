@@ -288,6 +288,7 @@ class AnalysisStep:
             runner,
             ctx.tool_paths,
             log=log,
+            source_label="Source 1",
         )
 
         source1_audio_container_delay = 0.0
@@ -646,6 +647,10 @@ class AnalysisStep:
                 f"for analysis. Skipping."
             )
             return
+
+        # Update to the validated index so _decode_and_correlate receives
+        # the correct stream index (handles fallback on invalid explicit index)
+        correlation_source_track = target_track_selection.track_index
 
         target_track_id = target_track_selection.track_id
         target_codec_id = (

@@ -25,6 +25,7 @@ def get_container_delay_info(
     runner: CommandRunner,
     tool_paths: dict[str, str | None],
     log: Callable[[str], None],
+    source_label: str = "",
 ) -> ContainerDelayInfo | None:
     """
     Extract container delay information from a media file.
@@ -37,6 +38,7 @@ def get_container_delay_info(
         runner: CommandRunner for executing mkvmerge
         tool_paths: Dict of tool paths
         log: Logging function for messages
+        source_label: Label for this source (e.g. "Source 1") used in log messages
 
     Returns:
         ContainerDelayInfo with video and audio delays, or None if extraction fails
@@ -57,8 +59,9 @@ def get_container_delay_info(
 
         track_type = track.get("type")
         if delay_ms != 0 and track_type in ["video", "audio"]:
+            label = f"{source_label} " if source_label else ""
             log(
-                f"[Container Delay] {track_type.capitalize()} track {tid} has container delay: {delay_ms:+.1f}ms"
+                f"[Container Delay] {label}{track_type.capitalize()} track {tid} has container delay: {delay_ms:+.1f}ms"
             )
 
     # Find video track delay (video defines the timeline)
