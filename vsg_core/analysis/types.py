@@ -137,6 +137,7 @@ class ClusterDiagnostic:
     std_delay_ms: float
     chunk_count: int
     chunk_numbers: list[int]
+    raw_delays: tuple[float, ...]
     time_range: tuple[float, float]
     mean_match_pct: float
     min_match_pct: float

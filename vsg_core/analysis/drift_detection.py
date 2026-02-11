@@ -43,12 +43,12 @@ def _build_cluster_diagnostics(
     cluster_info: list[ClusterDiagnostic] = []
     for label in sorted(cluster_members.keys()):
         member_indices = cluster_members[label]
-        member_delays = [delays[i] for i in member_indices]
         member_chunks = [accepted_chunks[i] for i in member_indices]
+        raw_delays = tuple(c.raw_delay_ms for c in member_chunks)
 
         # Calculate cluster statistics
-        mean_delay = float(np.mean(member_delays))
-        std_delay = float(np.std(member_delays))
+        mean_delay = float(np.mean(raw_delays))
+        std_delay = float(np.std(raw_delays))
         chunk_count = len(member_indices)
 
         # Get time range for this cluster
@@ -71,6 +71,7 @@ def _build_cluster_diagnostics(
                 std_delay_ms=std_delay,
                 chunk_count=chunk_count,
                 chunk_numbers=chunk_numbers,
+                raw_delays=raw_delays,
                 time_range=(min_time, max_time),
                 mean_match_pct=mean_match,
                 min_match_pct=min_match,

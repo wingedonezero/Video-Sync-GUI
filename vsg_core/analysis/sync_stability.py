@@ -225,11 +225,8 @@ def _analyze_with_clusters(
     max_cluster_variance = 0.0
 
     for cluster in stepping_clusters:
-        # NOTE: ClusterDiagnostic does not yet carry raw_delays or chunk indices.
-        # These fields would need to be added for per-cluster variance analysis.
-        # For now this is a no-op (always gets empty lists and continues).
-        cluster_delays: list[float] = getattr(cluster, "raw_delays", [])
-        cluster_chunks: list[int] = getattr(cluster, "chunk_numbers", [])
+        cluster_chunks: list[int] = cluster.chunk_numbers
+        cluster_delays: list[float] = list(cluster.raw_delays)
 
         if len(cluster_delays) < 2:
             continue
