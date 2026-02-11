@@ -65,7 +65,7 @@ class Context:
 
     # NEW FIELDS: Container delay tracking
     # Store Source 1's reference audio container delay for chain calculation
-    source1_audio_container_delay_ms: int = 0
+    source1_audio_container_delay_ms: float = 0.0
 
     # Store all container delays by source and track ID for logging/reference
     # Format: {source_key: {track_id: delay_ms}}
@@ -99,6 +99,12 @@ class Context:
     # Cache video-verified subtitle sync results per source
     # Format: {"Source 2": {"original_delay_ms": 100.0, "corrected_delay_ms": 102.5, ...}}
     video_verified_sources: dict[str, VideoVerifiedResult] = field(default_factory=dict)
+
+    # Subtitle-specific delays (from sync modes like video-verified)
+    # These are SEPARATE from audio delays in ctx.delays.source_delays_ms
+    # Format: {"Source 2": delay_ms, "Source 3": delay_ms}
+    # Used ONLY for subtitle tracks, never affects audio or global shift calculation
+    subtitle_delays_ms: dict[str, float] = field(default_factory=dict)
 
     # Results/summaries
     out_file: str | None = None

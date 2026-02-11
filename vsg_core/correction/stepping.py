@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy.signal import correlate
 
-from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
+from ..analysis.correlation import get_audio_stream_info, run_audio_correlation
 from ..extraction.tracks import extract_tracks
 from ..models.media import StreamProps, Track
 
@@ -86,7 +86,7 @@ def generate_edl_from_correlation(
                 invalid_time_ranges = []
                 for label in invalid_clusters:
                     if label in validation_results:
-                        time_range = validation_results[label]["time_range"]
+                        time_range = validation_results[label].time_range
                         invalid_time_ranges.append(time_range)
 
                 # Filter out chunks that fall within invalid clusters
@@ -1915,7 +1915,7 @@ class SteppingCorrector:
         invalid_time_ranges = []
         for label, members in invalid_clusters.items():
             if label in validation_results:
-                time_range = validation_results[label]["time_range"]
+                time_range = validation_results[label].time_range
                 invalid_time_ranges.append(time_range)
                 self.log(
                     f"    - Invalid cluster {label + 1}: {time_range[0]:.1f}s - {time_range[1]:.1f}s will be filtered"
@@ -2018,7 +2018,7 @@ class SteppingCorrector:
                 target_lang=None,
                 role_tag="QA",
             )
-            accepted = [r for r in results if r.get("accepted", False)]
+            accepted = [r for r in results if r.accepted]
 
             min_accepted = qa_min_chunks
             if len(accepted) < min_accepted:
@@ -2027,7 +2027,7 @@ class SteppingCorrector:
                 )
                 return False
 
-            delays = [r["delay"] for r in accepted]
+            delays = [r.delay_ms for r in accepted]
             median_delay = np.median(delays)
 
             # For skip mode, use a more lenient median check since we expect different delays

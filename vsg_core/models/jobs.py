@@ -103,6 +103,9 @@ class MergePlan:
     delays: Delays
     chapters_xml: Path | None = None
     attachments: list[Path] = field(default_factory=list)
+    subtitle_delays_ms: dict[str, float] = field(
+        default_factory=dict
+    )  # Subtitle-specific delays (e.g., from video-verified mode)
 
 
 @dataclass(frozen=True, slots=True)

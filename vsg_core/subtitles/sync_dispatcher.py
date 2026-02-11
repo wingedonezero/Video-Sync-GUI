@@ -56,10 +56,16 @@ def apply_sync_mode(
     target_video = source1_file
 
     # Get delays
+    # PRIORITY: Check if this source has a subtitle-specific delay (e.g., from video-verified)
+    # Otherwise, use the correlation delay from analysis
     total_delay_ms = 0.0
     global_shift_ms = 0.0
     if ctx.delays:
-        if source_key in ctx.delays.raw_source_delays_ms:
+        if source_key in ctx.subtitle_delays_ms:
+            # Subtitle-specific delay (e.g., video-verified frame-corrected delay)
+            total_delay_ms = ctx.subtitle_delays_ms[source_key]
+        elif source_key in ctx.delays.raw_source_delays_ms:
+            # Default: correlation delay from analysis
             total_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
         global_shift_ms = ctx.delays.raw_global_shift_ms
 

@@ -92,13 +92,18 @@ class MkvmergeOptionsBuilder:
                 reason = "stepping_adjusted=True (delay embedded in subtitle file)"
             elif tr.type == "subtitles" and frame_adj:
                 reason = "frame_adjusted=True (delay embedded in subtitle file)"
+            elif tr.type == "subtitles" and sync_key in plan.subtitle_delays_ms:
+                reason = f"subtitle_delays_ms[{sync_key}] (sync mode override)"
             else:
                 reason = f"source_delays_ms[{sync_key}]"
 
             # === AUDIT: Record mux track delay ===
             if audit:
                 raw_delay_available = None
-                if plan.delays and sync_key in plan.delays.raw_source_delays_ms:
+                # For subtitles, check subtitle_delays_ms first, then fall back to source_delays_ms
+                if tr.type == "subtitles" and sync_key in plan.subtitle_delays_ms:
+                    raw_delay_available = plan.subtitle_delays_ms.get(sync_key)
+                elif plan.delays and sync_key in plan.delays.raw_source_delays_ms:
                     raw_delay_available = plan.delays.raw_source_delays_ms.get(sync_key)
 
                 audit.record_mux_track_delay(
@@ -239,6 +244,14 @@ class MkvmergeOptionsBuilder:
             return 0
 
         sync_key = item.sync_to if tr.source == "External" else tr.source
+
+        # SUBTITLE-SPECIFIC DELAYS: Check if this subtitle has a sync-mode-specific delay
+        # (e.g., from video-verified mode). These are separate from audio delays.
+        if tr.type == "subtitles" and sync_key in plan.subtitle_delays_ms:
+            delay = plan.subtitle_delays_ms[sync_key]
+            return round(delay)
+
+        # DEFAULT: Use correlation delay from analysis (for audio and subtitles)
         delay = plan.delays.source_delays_ms.get(sync_key, 0)
         # Use round() for proper rounding of negative values (safety for future refactoring)
         return round(delay)

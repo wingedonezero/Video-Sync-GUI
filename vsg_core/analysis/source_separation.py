@@ -21,7 +21,7 @@ import time
 from importlib import resources
 from math import gcd
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.io import wavfile
@@ -411,7 +411,9 @@ def _load_model_data() -> object:
     candidates = []
     try:
         candidates.append(root / "models.json")
-        candidates.extend(root.rglob("models.json"))
+        # rglob is only available on Path, not the abstract Traversable
+        if isinstance(root, Path):
+            candidates.extend(root.rglob("models.json"))
     except Exception:
         candidates = candidates or []
 
@@ -537,7 +539,7 @@ def get_installed_models_json_path(model_dir: str | None = None) -> Path:
     return default_dir / "installed_models.json"
 
 
-def get_installed_models(model_dir: str | None = None) -> list[dict[str, any]]:
+def get_installed_models(model_dir: str | None = None) -> list[dict[str, Any]]:
     """
     Read installed models from local JSON cache.
 
@@ -588,7 +590,7 @@ def update_installed_models_json(
             json.dump(data, f, indent=2, ensure_ascii=False)
 
         return True
-    except (OSError, json.JSONEncodeError):
+    except (OSError, TypeError, ValueError):
         return False
 
 
@@ -682,7 +684,7 @@ def get_all_available_models_from_registry() -> list[dict]:
     return []
 
 
-def _extract_models_from_registry(data: any, models: list[dict]) -> None:
+def _extract_models_from_registry(data: Any, models: list[dict]) -> None:
     """Recursively extract model info from audio-separator's nested JSON structure."""
     if isinstance(data, dict):
         # Check if this looks like a model entry
@@ -710,7 +712,9 @@ def _extract_models_from_registry(data: any, models: list[dict]) -> None:
             # Determine model type from filename
             model_type = "Unknown"
             stems = "Unknown"
-            if "demucs" in filename.lower() and "htdemucs" in filename.lower():
+            if not filename:
+                pass
+            elif "demucs" in filename.lower() and "htdemucs" in filename.lower():
                 model_type = "Demucs v4"
                 stems = "4-stem (Drums/Bass/Other/Vocals)"
             elif "bs_roformer" in filename.lower() or "bs-roformer" in filename.lower():
@@ -827,6 +831,7 @@ sys.exit(0)
 
         # Monitor output for progress
         output_lines = []
+        assert process.stdout is not None
 
         # Read all output line by line (non-blocking since stderr is merged)
         for line in process.stdout:
@@ -1201,8 +1206,6 @@ def separate_audio(
 
     # Flush outputs to ensure we see the log before any potential crash
     try:
-        import sys
-
         sys.stdout.flush()
         sys.stderr.flush()
     except Exception:
@@ -1304,15 +1307,15 @@ def separate_audio(
             env["ROCR_VISIBLE_DEVICES"] = ""
             env["HIP_VISIBLE_DEVICES"] = ""
 
-        try:
-            # Enforce reasonable timeout bounds to prevent infinite hangs
-            # 0 or negative means "use max timeout" (2 hours), not "no timeout"
-            if timeout_seconds <= 0:
-                timeout = 7200  # 2 hours max
-                log("[SOURCE SEPARATION] Using maximum timeout of 2 hours")
-            else:
-                timeout = min(timeout_seconds, 7200)  # Cap at 2 hours
+        # Enforce reasonable timeout bounds to prevent infinite hangs
+        # 0 or negative means "use max timeout" (2 hours), not "no timeout"
+        if timeout_seconds <= 0:
+            timeout = 7200  # 2 hours max
+            log("[SOURCE SEPARATION] Using maximum timeout of 2 hours")
+        else:
+            timeout = min(timeout_seconds, 7200)  # Cap at 2 hours
 
+        try:
             result = subprocess.run(
                 [python_exe, str(script_path), json.dumps(args)],
                 capture_output=True,
@@ -1418,7 +1421,7 @@ def apply_source_separation(
     """
     Apply source separation to both reference and target audio, or neither.
 
-    This is the main entry point called from audio_corr.py.
+    This is the main entry point called from the analysis step.
     If separation fails or is disabled, returns original audio unchanged.
 
     NOTE: The decision to use source separation is made at the analysis step level

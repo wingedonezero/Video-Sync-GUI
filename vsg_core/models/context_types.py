@@ -10,7 +10,10 @@ complex nested dict structures.
 
 from __future__ import annotations
 
-from typing import Required, TypedDict
+from typing import TYPE_CHECKING, Required, TypedDict
+
+if TYPE_CHECKING:
+    from vsg_core.analysis.types import ClusterDiagnostic, ClusterValidation
 
 # =============================================================================
 # Manual Layout Types (Context.manual_layout)
@@ -96,40 +99,24 @@ class SourceNSettings(TypedDict, total=False):
 # =============================================================================
 
 
-class ClusterDetail(TypedDict):
-    """Details about a single delay cluster found during stepping detection."""
-
-    delay_ms: int
-    count: int
-    percentage: float
-    segments: list[int]  # Segment indices belonging to this cluster
-
-
-class ValidationResult(TypedDict, total=False):
-    """Results from validating a stepping correction cluster."""
-
-    cluster_delay: int
-    validated: bool
-    confidence: float
-    method: str  # "silence", "correlation", etc.
-    details: str
-
-
 class SegmentFlagsEntry(TypedDict, total=False):
     """Stepping correction metadata for a single track.
 
     Key format in segment_flags: "{source}_{track_id}" e.g. "Source 2_1"
+
+    Populated by analysis_step._record_drift_flags() from SteppingDiagnosis data.
+    Consumed by correction/stepping.py for segmented audio correction.
     """
 
     base_delay: Required[int]  # Base delay from correlation analysis (always present)
-    cluster_details: list[ClusterDetail]
-    valid_clusters: dict[str, ValidationResult]  # delay_ms string -> result
-    invalid_clusters: dict[str, ValidationResult]
-    validation_results: dict[str, ValidationResult]
-    correction_mode: str  # "uniform", "stepped", "failed"
-    fallback_mode: str | None
+    cluster_details: list[ClusterDiagnostic]  # From _build_cluster_diagnostics
+    valid_clusters: dict[int, list[int]]  # Cluster label -> member chunk indices
+    invalid_clusters: dict[int, list[int]]  # Cluster label -> member chunk indices
+    validation_results: dict[int, ClusterValidation]  # Cluster label -> validation
+    correction_mode: str  # "full", "strict", "filtered"
+    fallback_mode: str | None  # "nearest", "reject", etc. (filtered mode only)
     subs_only: bool  # True if only subtitle adjustment, no audio correction
-    audit_metadata: list[dict[str, object]] | None
+    audit_metadata: list[dict[str, object]] | None  # Added by stepping corrector
 
 
 # =============================================================================
@@ -141,14 +128,10 @@ class DriftFlagsEntry(TypedDict, total=False):
     """Drift correction metadata for a single track.
 
     Used for both PAL drift (25->23.976) and linear drift detection.
+    Populated by diagnose_audio_issue() in drift_detection.py.
     """
 
-    detected: bool
-    drift_rate: float  # ms per second of drift
-    total_drift_ms: float
-    correction_applied: bool
-    method: str  # Detection method used
-    confidence: float
+    rate: float  # Drift rate (ms per second) from regression slope
 
 
 # =============================================================================
@@ -180,12 +163,23 @@ class SteppingQualityIssue(TypedDict):
 # =============================================================================
 
 
-class OutlierChunk(TypedDict):
+class OutlierChunk(TypedDict, total=False):
     """A correlation chunk that was identified as an outlier."""
 
     chunk_index: int
+    time_s: float  # Chunk start position (uniform mode)
     delay_ms: float
     deviation_ms: float
+    cluster_id: int  # Present in cluster (stepping) mode
+
+
+class ClusterIssue(TypedDict, total=False):
+    """A cluster with internal variance issues (stepping mode)."""
+
+    cluster_id: int
+    mean_delay: float
+    variance: float
+    outlier_count: int
 
 
 class SyncStabilityIssue(TypedDict, total=False):
@@ -194,13 +188,17 @@ class SyncStabilityIssue(TypedDict, total=False):
     source: str
     variance_detected: bool
     max_variance_ms: float
-    std_dev_ms: float
-    mean_delay_ms: float
+    std_dev_ms: float  # Uniform mode only
+    mean_delay_ms: float  # Uniform mode only
+    min_delay_ms: float  # Uniform mode only
+    max_delay_ms: float  # Uniform mode only
     chunk_count: int
     outlier_count: int
     outliers: list[OutlierChunk]
     cluster_count: int
-    is_stepping: bool  # True if variance suggests stepping correction needed
+    is_stepping: bool
+    cluster_issues: list[ClusterIssue]  # Stepping mode only
+    reason: str  # Present when skipped (e.g. "insufficient_chunks")
 
 
 # =============================================================================
