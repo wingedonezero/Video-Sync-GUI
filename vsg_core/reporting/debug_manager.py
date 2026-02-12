@@ -154,9 +154,14 @@ class DebugOutputManager:
         if not feature_dir.exists():
             return
 
-        # Check if directory has any content
-        if not any(feature_dir.iterdir()):
-            log(f"[DebugManager] {feature_name}/ is empty, skipping archive")
+        # Check if directory has any actual files (not just empty subdirectories)
+        # In batch mode, job subdirectories are pre-created even if the feature
+        # never runs (e.g., ocr_debug/ when no OCR tracks exist), so we need
+        # to check for real file content.
+        has_files = any(f.is_file() for f in feature_dir.rglob("*"))
+        if not has_files:
+            log(f"[DebugManager] {feature_name}/ has no files, skipping archive")
+            shutil.rmtree(feature_dir)
             return
 
         zip_path = debug_root / f"{feature_name}.zip"
