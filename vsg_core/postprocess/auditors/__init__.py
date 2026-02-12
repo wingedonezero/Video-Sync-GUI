@@ -9,6 +9,7 @@ from .chapters import ChaptersAuditor
 from .codec_integrity import CodecIntegrityAuditor
 from .dolby_vision import DolbyVisionAuditor
 from .drift_correction import DriftCorrectionAuditor
+from .frame_audit import FrameAuditAuditor
 from .global_shift import GlobalShiftAuditor
 from .language_tags import LanguageTagsAuditor
 from .stepping_correction import SteppingCorrectionAuditor
@@ -29,6 +30,7 @@ __all__ = [
     "CodecIntegrityAuditor",
     "DolbyVisionAuditor",
     "DriftCorrectionAuditor",
+    "FrameAuditAuditor",
     "GlobalShiftAuditor",
     "LanguageTagsAuditor",
     "SteppingCorrectionAuditor",

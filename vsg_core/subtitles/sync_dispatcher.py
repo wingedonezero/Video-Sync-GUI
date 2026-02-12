@@ -132,6 +132,7 @@ def apply_sync_mode(
             sync_exclusion_mode=item.sync_exclusion_mode,
             track_label=_build_track_label(item),
             debug_paths=ctx.debug_paths,
+            ctx=ctx,
         )
 
         if result.success:
@@ -279,14 +280,15 @@ def _run_frame_audit_if_enabled(
     runner: CommandRunner,
 ) -> None:
     """
-    Run frame alignment audit if enabled in settings.
+    Run frame alignment audit for video-verified sync.
+
+    Always runs when video-verified mode is active and FPS is available.
+    The summary is always logged. The detailed per-line report file is only
+    written when the debug setting (video_verified_frame_audit) is enabled.
 
     This is called from shortcut paths (cached video-verified, Source 1 reference)
     that bypass the plugin's apply() method where the audit would normally run.
     """
-    # Check if audit is enabled and we have FPS info
-    if not ctx.settings.video_verified_frame_audit:
-        return
     if not target_fps:
         runner._log_message("[FrameAudit] Skipped: target FPS not available")
         return
@@ -312,17 +314,22 @@ def _run_frame_audit_if_enabled(
             log=runner._log_message,
         )
 
-        # Determine output directory
-        # Use debug_paths if available (new organized structure), fallback to old location
-        if ctx.debug_paths and ctx.debug_paths.frame_audit_dir:
-            config_dir = ctx.debug_paths.frame_audit_dir
-        else:
-            config_dir = Path.cwd() / ".config" / "sync_checks"
+        # Store result on context for the final auditor
+        ctx.frame_audit_results[job_name] = result
 
-        # Write the report
-        report_path = write_audit_report(result, config_dir, runner._log_message)
+        # Write detailed report only when debug setting is enabled
+        if ctx.settings.video_verified_frame_audit:
+            # Determine output directory
+            # Use debug_paths if available (new organized structure), fallback to old location
+            if ctx.debug_paths and ctx.debug_paths.frame_audit_dir:
+                config_dir = ctx.debug_paths.frame_audit_dir
+            else:
+                config_dir = Path.cwd() / ".config" / "sync_checks"
 
-        # Log summary
+            report_path = write_audit_report(result, config_dir, runner._log_message)
+            runner._log_message(f"[FrameAudit] Report saved: {report_path}")
+
+        # Log summary (always)
         total = result.total_events
         if total > 0:
             start_pct = 100 * result.start_ok / total
@@ -350,8 +357,6 @@ def _run_frame_audit_if_enabled(
                 )
             else:
                 runner._log_message("[FrameAudit] No frame drift issues detected")
-
-        runner._log_message(f"[FrameAudit] Report saved: {report_path}")
 
     except Exception as e:
         runner._log_message(f"[FrameAudit] WARNING: Audit failed - {e}")
