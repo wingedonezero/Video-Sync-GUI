@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from vsg_core.models.jobs import Delays, PlanItem
     from vsg_core.models.settings import AppSettings
     from vsg_core.reporting import DebugOutputPaths
+    from vsg_core.subtitles.frame_utils.frame_audit import FrameAuditResult
 
 
 @dataclass(slots=True)
@@ -105,6 +106,10 @@ class Context:
     # Format: {"Source 2": delay_ms, "Source 3": delay_ms}
     # Used ONLY for subtitle tracks, never affects audio or global shift calculation
     subtitle_delays_ms: dict[str, float] = field(default_factory=dict)
+
+    # Frame audit results from video-verified sync (for final auditor)
+    # Format: {"Source2_t3": FrameAuditResult, ...}
+    frame_audit_results: dict[str, FrameAuditResult] = field(default_factory=dict)
 
     # Results/summaries
     out_file: str | None = None

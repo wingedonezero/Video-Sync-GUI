@@ -20,6 +20,7 @@ from .auditors import (
     CodecIntegrityAuditor,
     DolbyVisionAuditor,
     DriftCorrectionAuditor,
+    FrameAuditAuditor,
     GlobalShiftAuditor,
     LanguageTagsAuditor,
     SteppingCorrectionAuditor,
@@ -71,7 +72,10 @@ class FinalAuditor:
                     else item.track.source
                 )
                 # Check subtitle-specific delays first, then fall back to correlation delays
-                if item.track.type == "subtitles" and sync_key in self.ctx.subtitle_delays_ms:
+                if (
+                    item.track.type == "subtitles"
+                    and sync_key in self.ctx.subtitle_delays_ms
+                ):
                     actual_delay = round(self.ctx.subtitle_delays_ms.get(sync_key, 0))
                 else:
                     actual_delay = (
@@ -255,6 +259,14 @@ class FinalAuditor:
 
         self.log("\n--- Auditing FrameLocked Subtitle Quality ---")
         total_issues += self._audit_framelocked_stats()
+
+        self.log("\n--- Auditing Frame Alignment (Rounding Drift) ---")
+        auditor = FrameAuditAuditor(self.ctx, self.runner)
+        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
+        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
+        total_issues += auditor.run(
+            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
+        )
 
         self.log("\n--- Auditing Subtitle Timestamp Clamping ---")
         auditor = SubtitleClampingAuditor(self.ctx, self.runner)

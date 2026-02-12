@@ -17,6 +17,7 @@ from .matcher import calculate_video_verified_offset
 
 if TYPE_CHECKING:
     from ....models.settings import AppSettings
+    from ....orchestrator.steps.context import Context
     from ...data import OperationResult, SubtitleData
 
 
@@ -147,6 +148,7 @@ class VideoVerifiedSync(SyncPlugin):
             source_video=source_video,
             target_video=target_video,
             temp_dir=temp_dir,
+            ctx=kwargs.get("ctx"),
         )
 
     def _apply_offset(
@@ -165,6 +167,7 @@ class VideoVerifiedSync(SyncPlugin):
         source_video: str | None = None,
         target_video: str | None = None,
         temp_dir: Path | None = None,
+        ctx: Context | None = None,
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
         from ...data import OperationRecord, OperationResult
@@ -180,11 +183,11 @@ class VideoVerifiedSync(SyncPlugin):
 
         events_synced = apply_delay_to_events(subtitle_data, final_offset_ms)
 
-        # Extract debug_paths from kwargs if available
-        debug_paths = kwargs.get("debug_paths")
+        # Extract debug_paths from ctx if available
+        debug_paths = ctx.debug_paths if ctx else None
 
-        # Run frame alignment audit if enabled
-        if settings and settings.video_verified_frame_audit and target_fps:
+        # Run frame alignment audit (always when FPS available)
+        if settings and target_fps:
             self._run_frame_audit(
                 subtitle_data=subtitle_data,
                 fps=target_fps,
@@ -192,6 +195,7 @@ class VideoVerifiedSync(SyncPlugin):
                 job_name=job_name,
                 settings=settings,
                 debug_paths=debug_paths,
+                ctx=ctx,
                 log=log,
             )
 
@@ -264,12 +268,13 @@ class VideoVerifiedSync(SyncPlugin):
         job_name: str,
         settings: AppSettings,
         debug_paths,
+        ctx: Context | None,
         log,
     ) -> None:
-        """Run frame alignment audit and write report.
+        """Run frame alignment audit and optionally write detailed report.
 
-        This checks whether centisecond rounding will cause any subtitle
-        events to land on wrong frames, and writes a detailed report.
+        Always runs and logs summary. The detailed per-line report file is
+        only written when the debug setting (video_verified_frame_audit) is enabled.
         """
         from ...frame_utils.frame_audit import run_frame_audit, write_audit_report
 
@@ -288,17 +293,23 @@ class VideoVerifiedSync(SyncPlugin):
             log=log,
         )
 
-        # Determine output directory
-        # Use debug_paths if available (new organized structure), fallback to old location
-        if debug_paths and debug_paths.frame_audit_dir:
-            config_dir = debug_paths.frame_audit_dir
-        else:
-            config_dir = Path.cwd() / ".config" / "sync_checks"
+        # Store result on context for the final auditor
+        if ctx is not None:
+            ctx.frame_audit_results[job_name] = result
 
-        # Write the report
-        report_path = write_audit_report(result, config_dir, log)
+        # Write detailed report only when debug setting is enabled
+        if settings.video_verified_frame_audit:
+            # Determine output directory
+            # Use debug_paths if available (new organized structure), fallback to old location
+            if debug_paths and debug_paths.frame_audit_dir:
+                config_dir = debug_paths.frame_audit_dir
+            else:
+                config_dir = Path.cwd() / ".config" / "sync_checks"
 
-        # Log summary
+            report_path = write_audit_report(result, config_dir, log)
+            log(f"[FrameAudit] Report saved: {report_path}")
+
+        # Log summary (always)
         total = result.total_events
         if total > 0:
             start_pct = 100 * result.start_ok / total
@@ -317,8 +328,6 @@ class VideoVerifiedSync(SyncPlugin):
                 )
             else:
                 log("[FrameAudit] No frame drift issues detected")
-
-        log(f"[FrameAudit] Report saved: {report_path}")
 
     def _get_best_rounding_mode(self, result) -> str:
         """Get the rounding mode with fewest issues."""
