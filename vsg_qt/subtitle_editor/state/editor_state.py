@@ -128,6 +128,8 @@ class EditorState(QObject):
             # This makes the editor show the previously modified values
             if self._style_patch:
                 self._apply_existing_style_patch()
+                # Save patched data to preview file so video player shows correct styles
+                self._subtitle_data.save(self._preview_path)
 
             # Set video path
             if video_path:
