@@ -256,6 +256,7 @@ class VideoVerifiedSync(SyncPlugin):
                 "video_offset_ms": video_offset_ms,
                 "final_offset_ms": final_offset_ms,
                 "selection_reason": selection_reason,
+                "target_fps": target_fps,
                 **details,
             },
         )
@@ -326,6 +327,12 @@ class VideoVerifiedSync(SyncPlugin):
                 log(
                     f"[FrameAudit] Suggested rounding mode: {self._get_best_rounding_mode(result)}"
                 )
+                if result.predicted_corrections > 0:
+                    log(
+                        f"[FrameAudit] Surgical rounding will correct: "
+                        f"{result.predicted_corrections} timing points "
+                        f"({result.predicted_correction_events} events)"
+                    )
             else:
                 log("[FrameAudit] No frame drift issues detected")
 

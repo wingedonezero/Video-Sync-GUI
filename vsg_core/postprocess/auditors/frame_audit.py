@@ -45,7 +45,15 @@ class FrameAuditAuditor(BaseAuditor):
 
             has_any = start_issues + end_issues + span_issues + duration_issues > 0
 
-            if has_any:
+            if has_any and result.correction_applied:
+                # Issues were detected but corrected by surgical rounding
+                self.log(
+                    f"  ✓ {track_key}: {start_issues} start, {end_issues} end "
+                    f"issues CORRECTED ({result.corrected_timing_points} timing "
+                    f"points fixed via frame-aware rounding)"
+                )
+                # Don't count as issues since they were corrected
+            elif has_any:
                 self.log(
                     f"[WARNING] {track_key}: "
                     f"{start_issues} start, {end_issues} end, "
