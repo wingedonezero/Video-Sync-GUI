@@ -10,6 +10,7 @@ This package has been modularized for better maintainability:
 - video_filters.py: VapourSynth deinterlace/IVTC/decimate filters
 - frame_hashing.py: Perceptual hash and frame comparison functions
 - frame_audit.py: Frame alignment audit (centisecond rounding drift)
+- surgical_rounding.py: Surgical frame-aware rounding (floor→ceil when needed)
 - visual_verify.py: Visual frame verification (SSIM-based)
 
 All public functions and classes are re-exported here for backwards compatibility.
@@ -39,6 +40,18 @@ from .frame_hashing import (
     compute_mse,
     compute_perceptual_hash,
     compute_ssim,
+)
+
+# ============================================================================
+# Surgical rounding (frame-aware fix)
+# ============================================================================
+from .surgical_rounding import (
+    SurgicalBatchStats,
+    SurgicalEventResult,
+    SurgicalRoundResult,
+    surgical_round_batch,
+    surgical_round_event,
+    surgical_round_single,
 )
 
 # ============================================================================
@@ -103,6 +116,9 @@ __all__ = [
     "RegionStats",
     "RepeatPictResult",
     "SampleResult",
+    "SurgicalBatchStats",
+    "SurgicalEventResult",
+    "SurgicalRoundResult",
     "VideoReader",
     "VisualVerifyResult",
     "analyze_content_type",
@@ -125,6 +141,9 @@ __all__ = [
     "get_video_properties",
     "run_frame_audit",
     "run_visual_verify",
+    "surgical_round_batch",
+    "surgical_round_event",
+    "surgical_round_single",
     "time_to_frame_aegisub",
     "time_to_frame_floor",
     "time_to_frame_middle",

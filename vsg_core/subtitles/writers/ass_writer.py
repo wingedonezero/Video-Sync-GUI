@@ -4,6 +4,9 @@ ASS subtitle file writer with full metadata preservation.
 
 THIS IS THE SINGLE ROUNDING POINT for timing.
 Float milliseconds are converted to centiseconds here and only here.
+
+When fps is provided, surgical frame-aware rounding is used:
+floor by default, ceil only when floor would land on the wrong frame.
 """
 
 from __future__ import annotations
@@ -15,19 +18,48 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..data import SubtitleData
+    from ..frame_utils.surgical_rounding import (
+        SurgicalBatchStats,
+        SurgicalEventResult,
+    )
 
 
-def write_ass_file(data: SubtitleData, path: Path, rounding: str = "floor") -> None:
+def write_ass_file(
+    data: SubtitleData,
+    path: Path,
+    rounding: str = "floor",
+    fps: float | None = None,
+) -> SurgicalBatchStats | None:
     """
     Write SubtitleData to ASS file.
 
     THIS IS WHERE TIMING ROUNDING HAPPENS.
-    Float ms → centiseconds (floor).
+    Float ms → centiseconds (floor by default).
+
+    When fps is provided, surgical frame-aware rounding is applied:
+    floor by default, ceil only when floor would land on the wrong frame.
+    Start and end are coordinated to preserve duration when safe.
 
     Args:
         data: SubtitleData to write
         path: Output path
+        rounding: Rounding mode ("floor", "round", "ceil")
+        fps: Target video FPS for surgical rounding (None = standard rounding only)
+
+    Returns:
+        SurgicalBatchStats if surgical rounding was applied, None otherwise
     """
+    # Pre-compute surgical rounding if FPS is available
+    surgical_results: dict[int, SurgicalEventResult] | None = None
+    surgical_stats: SurgicalBatchStats | None = None
+    if fps is not None:
+        from ..frame_utils.surgical_rounding import surgical_round_batch
+
+        frame_duration_ms = 1000.0 / fps
+        surgical_results, surgical_stats = surgical_round_batch(
+            data.events, frame_duration_ms
+        )
+
     lines = []
 
     # Determine section order
@@ -56,7 +88,7 @@ def write_ass_file(data: SubtitleData, path: Path, rounding: str = "floor") -> N
             written_sections.add("[v4 styles]")
 
         elif section_lower == "[events]":
-            _write_events(data, lines, rounding)
+            _write_events(data, lines, rounding, surgical_results)
             written_sections.add(section_lower)
 
         elif section_lower == "[fonts]":
@@ -95,7 +127,7 @@ def write_ass_file(data: SubtitleData, path: Path, rounding: str = "floor") -> N
         _write_styles(data, lines, "[V4+ Styles]")
 
     if "[events]" not in written_sections and data.events:
-        _write_events(data, lines, rounding)
+        _write_events(data, lines, rounding, surgical_results)
 
     if "[fonts]" not in written_sections and data.fonts:
         _write_fonts(data, lines)
@@ -129,6 +161,8 @@ def write_ass_file(data: SubtitleData, path: Path, rounding: str = "floor") -> N
 
     with open(path, "w", encoding=encoding, newline="\r\n") as f:
         f.write(content)
+
+    return surgical_stats
 
 
 def _default_section_order() -> list:
@@ -195,11 +229,19 @@ def _write_styles(data: SubtitleData, lines: list, section_name: str) -> None:
     lines.append("")
 
 
-def _write_events(data: SubtitleData, lines: list, rounding_mode: str) -> None:
+def _write_events(
+    data: SubtitleData,
+    lines: list,
+    rounding_mode: str,
+    surgical_results: dict[int, SurgicalEventResult] | None = None,
+) -> None:
     """
     Write [Events] section.
 
     THIS IS WHERE TIMING ROUNDING HAPPENS.
+
+    When surgical_results is provided, pre-computed frame-aware rounding
+    is used for start/end times. Otherwise falls back to standard rounding.
     """
     lines.append("[Events]")
 
@@ -208,8 +250,11 @@ def _write_events(data: SubtitleData, lines: list, rounding_mode: str) -> None:
     lines.append(format_line)
 
     # Event lines
-    for event in data.events:
+    for idx, event in enumerate(data.events):
         event_type = "Comment" if event.is_comment else "Dialogue"
+
+        # Check if surgical rounding is available for this event
+        surg = surgical_results.get(idx) if surgical_results else None
 
         # Build values
         values = []
@@ -220,10 +265,20 @@ def _write_events(data: SubtitleData, lines: list, rounding_mode: str) -> None:
                 values.append(str(event.layer))
             elif field_lower == "start":
                 # ROUNDING HAPPENS HERE
-                values.append(_format_ass_time(event.start_ms, rounding_mode))
+                if surg is not None:
+                    values.append(
+                        _format_ass_time_from_cs(surg.start.centisecond_ms)
+                    )
+                else:
+                    values.append(_format_ass_time(event.start_ms, rounding_mode))
             elif field_lower == "end":
                 # ROUNDING HAPPENS HERE
-                values.append(_format_ass_time(event.end_ms, rounding_mode))
+                if surg is not None:
+                    values.append(
+                        _format_ass_time_from_cs(surg.end.centisecond_ms)
+                    )
+                else:
+                    values.append(_format_ass_time(event.end_ms, rounding_mode))
             elif field_lower == "style":
                 values.append(event.style)
             elif field_lower in ("name", "actor"):
@@ -320,6 +375,31 @@ def _format_ass_time(ms: float, rounding: str) -> str:
 
     # Ensure non-negative
     total_cs = max(total_cs, 0)
+
+    cs = total_cs % 100
+    total_seconds = total_cs // 100
+    seconds = total_seconds % 60
+    total_minutes = total_seconds // 60
+    minutes = total_minutes % 60
+    hours = total_minutes // 60
+
+    return f"{hours}:{minutes:02d}:{seconds:02d}.{cs:02d}"
+
+
+def _format_ass_time_from_cs(cs_ms: int) -> str:
+    """
+    Format a pre-rounded centisecond value to ASS timestamp.
+
+    Used by surgical rounding where the value is already rounded
+    to centiseconds, bypassing the rounding step.
+
+    Args:
+        cs_ms: Time in milliseconds, already centisecond-aligned (multiple of 10)
+
+    Returns:
+        ASS timestamp (H:MM:SS.cc)
+    """
+    total_cs = max(cs_ms // 10, 0)
 
     cs = total_cs % 100
     total_seconds = total_cs // 100

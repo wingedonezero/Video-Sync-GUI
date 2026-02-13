@@ -229,6 +229,7 @@ def process_subtitle_track(
     # STEP 3: Apply Sync Mode
     # ================================================================
     # For non-frame-locked modes with stepping already applied, skip sync
+    sync_result = None
     should_apply_sync = True
     if item.stepping_adjusted and subtitle_sync_mode not in [
         "timebase-frame-locked-timestamps"
@@ -386,11 +387,42 @@ def process_subtitle_track(
                     f"[DIAG]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms"
                 )
 
-        subtitle_data.save(output_path, rounding=rounding_mode)
+        # Get target FPS for surgical frame-aware rounding (from sync result)
+        save_fps: float | None = None
+        if sync_result and sync_result.details:
+            save_fps = sync_result.details.get("target_fps")
+
+        surgical_stats = subtitle_data.save(
+            output_path, rounding=rounding_mode, fps=save_fps
+        )
         item.extracted_path = output_path
         runner._log_message(
             f"[SubtitleData] Saved successfully ({len(subtitle_data.events)} events)"
         )
+
+        # Log surgical rounding corrections if any were applied
+        if surgical_stats and surgical_stats.events_with_adjustments > 0:
+            runner._log_message(
+                f"[FrameAudit] Corrected: "
+                f"{surgical_stats.points_different_from_floor} timing points "
+                f"({surgical_stats.events_with_adjustments} events) "
+                f"via frame-aware rounding"
+            )
+            if surgical_stats.ends_coordinated > 0:
+                runner._log_message(
+                    f"[FrameAudit] Coordinated: "
+                    f"{surgical_stats.ends_coordinated} end times "
+                    f"to preserve duration"
+                )
+
+            # Feed correction stats back to stored frame audit result
+            from vsg_core.subtitles.sync_dispatcher import _build_audit_job_name
+
+            audit_job_name = _build_audit_job_name(source1_file, item)
+            if audit_job_name in ctx.frame_audit_results:
+                ctx.frame_audit_results[audit_job_name].apply_correction_stats(
+                    surgical_stats
+                )
 
         # DIAGNOSTIC: Read back saved file timestamps to verify
         if output_path.suffix.lower() in (".ass", ".ssa"):

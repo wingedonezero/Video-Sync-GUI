@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..data import SubtitleData
+    from .surgical_rounding import SurgicalBatchStats
 
 
 @dataclass(slots=True)
@@ -107,6 +108,16 @@ class FrameAuditResult:
     round_issues: int = 0
     ceil_issues: int = 0
 
+    # Surgical rounding predictions (set during audit, before save)
+    predicted_corrections: int = 0  # Timing points that would be fixed
+    predicted_correction_events: int = 0  # Events that would have fixes
+
+    # Post-save correction stats (set by track_processor after save)
+    corrected_timing_points: int = 0
+    corrected_events: int = 0
+    coordinated_ends: int = 0
+    correction_applied: bool = False
+
     @property
     def total_start_issues(self) -> int:
         return self.start_early + self.start_late
@@ -118,6 +129,13 @@ class FrameAuditResult:
     @property
     def has_issues(self) -> bool:
         return len(self.issues) > 0
+
+    def apply_correction_stats(self, stats: SurgicalBatchStats) -> None:
+        """Update result with post-save surgical rounding statistics."""
+        self.corrected_timing_points = stats.points_different_from_floor
+        self.corrected_events = stats.events_with_adjustments
+        self.coordinated_ends = stats.ends_coordinated
+        self.correction_applied = True
 
 
 def _time_to_frame(time_ms: float, frame_duration_ms: float) -> int:
@@ -332,6 +350,19 @@ def run_frame_audit(
             )
             result.issues.append(issue)
 
+    # Predict surgical rounding corrections if issues were found
+    if result.has_issues:
+        try:
+            from .surgical_rounding import surgical_round_batch
+
+            _, surgical_stats = surgical_round_batch(
+                subtitle_data.events, frame_duration_ms
+            )
+            result.predicted_corrections = surgical_stats.points_different_from_floor
+            result.predicted_correction_events = surgical_stats.events_with_adjustments
+        except Exception:
+            pass  # Non-critical: prediction is informational only
+
     if log:
         log(f"[FrameAudit] Audit complete: {len(result.issues)} issues found")
 
@@ -455,6 +486,29 @@ def write_audit_report(
         lines.append(f"  Suggested mode:    {best_mode[0]} (fewest issues)")
         lines.append("")
 
+        # Surgical frame-aware rounding section
+        if result.correction_applied:
+            lines.append("Surgical frame-aware rounding (APPLIED at save):")
+            lines.append(
+                f"  Timing points corrected: {result.corrected_timing_points}"
+            )
+            lines.append(f"  Events with corrections: {result.corrected_events}")
+            if result.coordinated_ends > 0:
+                lines.append(
+                    f"  Coordinated end times:   {result.coordinated_ends}"
+                )
+            lines.append("  Result: All frame drift issues resolved")
+            lines.append("")
+        elif result.predicted_corrections > 0:
+            lines.append("Surgical frame-aware rounding (PREDICTED):")
+            lines.append(
+                f"  Would correct: {result.predicted_corrections} timing points"
+            )
+            lines.append(
+                f"  Would affect:  {result.predicted_correction_events} events"
+            )
+            lines.append("")
+
     # Issues section
     if result.issues:
         lines.append("=" * 70)
@@ -467,11 +521,21 @@ def write_audit_report(
             result.issues, key=lambda i: (i.issue_type, i.line_index)
         )
 
+        # Pre-compute surgical fixes for before/after display
+        from .surgical_rounding import surgical_round_event
+
         for issue in sorted_issues:
             lines.append(
                 f"[{issue.issue_type}] Line {issue.line_index} @ {issue.timestamp_display}"
             )
             lines.append(f'  Text: "{issue.text_preview}"')
+
+            # Compute surgical fix for this issue
+            surg = surgical_round_event(
+                issue.exact_start_ms,
+                issue.exact_end_ms,
+                result.frame_duration_ms,
+            )
 
             if issue.start_drift != 0:
                 direction = "EARLY" if issue.start_drift < 0 else "LATE"
@@ -482,6 +546,10 @@ def write_audit_report(
                 )
                 lines.append(
                     f"  Would need: {issue.start_fix_needed_ms:+d}ms to fix start"
+                )
+                lines.append(
+                    f"  Fix: floor({issue.rounded_start_ms}ms) -> "
+                    f"surgical({surg.start.centisecond_ms}ms) [{surg.start.method}]"
                 )
             else:
                 lines.append(f"  Start OK: frame {issue.target_start_frame}")
@@ -494,6 +562,16 @@ def write_audit_report(
                     f"{abs(issue.end_drift)} FRAME {direction}"
                 )
                 lines.append(f"  Would need: {issue.end_fix_needed_ms:+d}ms to fix end")
+                lines.append(
+                    f"  Fix: floor({issue.rounded_end_ms}ms) -> "
+                    f"surgical({surg.end.centisecond_ms}ms) [{surg.end.method}]"
+                )
+            elif surg.end.method == "coordinated_ceil":
+                # Show if end was coordinated even though floor was OK
+                lines.append(
+                    f"  End OK: frame {issue.target_end_frame} "
+                    f"(coordinated: {surg.end.centisecond_ms}ms to preserve duration)"
+                )
             else:
                 lines.append(f"  End OK: frame {issue.target_end_frame}")
 

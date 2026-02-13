@@ -215,12 +215,16 @@ def _apply_cached_video_verified(
         runner=runner,
     )
 
+    # Include target_fps in details for surgical rounding at save time
+    details = dict(cached["details"]) if cached.get("details") else {}
+    details["target_fps"] = target_fps
+
     return OperationResult(
         success=True,
         operation="sync",
         events_affected=events_synced,
         summary=f"Video-verified (pre-computed): {cached['corrected_delay_ms']:+.1f}ms applied to {events_synced} events",
-        details=cached["details"],
+        details=details,
     )
 
 
@@ -268,6 +272,7 @@ def _apply_video_verified_reference(
         operation="sync",
         events_affected=events_synced,
         summary=f"Video-verified (Source 1 reference): {total_delay_ms:+.1f}ms applied to {events_synced} events",
+        details={"target_fps": target_fps},
     )
 
 
@@ -355,6 +360,12 @@ def _run_frame_audit_if_enabled(
                 runner._log_message(
                     f"[FrameAudit] Suggested rounding mode: {best_mode}"
                 )
+                if result.predicted_corrections > 0:
+                    runner._log_message(
+                        f"[FrameAudit] Surgical rounding will correct: "
+                        f"{result.predicted_corrections} timing points "
+                        f"({result.predicted_correction_events} events)"
+                    )
             else:
                 runner._log_message("[FrameAudit] No frame drift issues detected")
 

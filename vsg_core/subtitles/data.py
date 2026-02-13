@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
 
+    from .frame_utils.surgical_rounding import SurgicalBatchStats
+
 # =============================================================================
 # Per-Event Metadata (OCR, Sync, Stepping)
 # =============================================================================
@@ -918,16 +920,32 @@ class SubtitleData:
     # Save Methods
     # =========================================================================
 
-    def save_ass(self, path: Path | str, rounding: str = "floor") -> None:
+    def save_ass(
+        self,
+        path: Path | str,
+        rounding: str = "floor",
+        fps: float | None = None,
+    ) -> SurgicalBatchStats | None:
         """
         Save as ASS file.
 
         THIS IS THE SINGLE ROUNDING POINT.
         Float ms → centiseconds happens here.
+
+        When fps is provided, surgical frame-aware rounding is applied:
+        floor by default, ceil only when floor would land on the wrong frame.
+
+        Args:
+            path: Output path
+            rounding: Rounding mode ("floor", "round", "ceil")
+            fps: Target video FPS for surgical rounding (None = standard only)
+
+        Returns:
+            SurgicalBatchStats if surgical rounding was applied, None otherwise
         """
         from .writers.ass_writer import write_ass_file
 
-        write_ass_file(self, Path(path), rounding=rounding)
+        return write_ass_file(self, Path(path), rounding=rounding, fps=fps)
 
     def save_srt(self, path: Path | str, rounding: str = "round") -> None:
         """
@@ -939,16 +957,32 @@ class SubtitleData:
 
         write_srt_file(self, Path(path), rounding=rounding)
 
-    def save(self, path: Path | str, rounding: str | None = None) -> None:
-        """Save to file, format determined by extension."""
+    def save(
+        self,
+        path: Path | str,
+        rounding: str | None = None,
+        fps: float | None = None,
+    ) -> SurgicalBatchStats | None:
+        """
+        Save to file, format determined by extension.
+
+        Args:
+            path: Output path
+            rounding: Rounding mode ("floor", "round", "ceil")
+            fps: Target video FPS for surgical rounding (None = standard only)
+
+        Returns:
+            SurgicalBatchStats if surgical rounding was applied, None otherwise
+        """
         path = Path(path)
         ext = path.suffix.lower()
         rounding_mode = rounding or "floor"
 
         if ext in (".ass", ".ssa"):
-            self.save_ass(path, rounding=rounding_mode)
+            return self.save_ass(path, rounding=rounding_mode, fps=fps)
         elif ext == ".srt":
             self.save_srt(path, rounding=rounding_mode)
+            return None
         else:
             raise ValueError(f"Unsupported output format: {ext}")
 
