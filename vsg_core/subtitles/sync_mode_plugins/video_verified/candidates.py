@@ -38,13 +38,26 @@ def generate_frame_candidates(
 
 
 def select_checkpoint_times(duration_ms: float, num_checkpoints: int) -> list[float]:
-    """Select checkpoint times distributed across the video."""
+    """
+    Select checkpoint times evenly distributed across the video.
+
+    Places checkpoints at evenly-spaced intervals within the middle 80%
+    of the video (10% to 90%), avoiding the very start and end where
+    intros/outros may differ between sources.
+
+    For 9 checkpoints this produces: [10%, 20%, 30%, 40%, 50%, 60%, 70%, 80%, 90%]
+    """
     checkpoints = []
 
-    # Use percentage-based positions (avoiding very start/end)
-    positions = [15, 30, 50, 70, 85][:num_checkpoints]
+    # Evenly space within 10%-90% of video duration
+    margin_pct = 10
+    start_pct = margin_pct
+    end_pct = 100 - margin_pct
+    span_pct = end_pct - start_pct  # 80
 
-    for pos in positions:
+    for i in range(num_checkpoints):
+        # Center each checkpoint in its segment
+        pos = start_pct + span_pct * (i + 0.5) / num_checkpoints
         time_ms = duration_ms * pos / 100
         checkpoints.append(time_ms)
 
