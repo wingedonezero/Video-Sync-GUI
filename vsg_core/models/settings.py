@@ -202,7 +202,7 @@ class AppSettings(BaseModel):
     # =========================================================================
     video_verified_zero_check_frames: int = 3
     video_verified_min_quality_advantage: float = 0.1
-    video_verified_num_checkpoints: int = 5
+    video_verified_num_checkpoints: int = 9
     video_verified_search_range_frames: int = 3
     video_verified_sequence_length: int = 10
     video_verified_use_pts_precision: bool = False

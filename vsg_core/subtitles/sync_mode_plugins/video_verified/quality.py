@@ -215,11 +215,13 @@ def measure_frame_offset_quality(
         compute_frame_hash,
         compute_hamming_distance,
     )
+    from ...frame_utils.frame_hashing import compute_mse as _compute_mse
 
     total_score = 0.0
     matched_count = 0
     sequence_verified_count = 0
     distances: list[float] = []
+    mse_values: list[float] = []
     match_details = []
 
     # Debug: log frame mapping details for first candidate only
@@ -354,6 +356,15 @@ def measure_frame_offset_quality(
 
             distances.append(initial_distance)
 
+            # Compute raw MSE for tiebreaker ranking (independent of comparison method).
+            # MSE is more sensitive to exact pixel differences than SSIM, giving
+            # better discrimination when multiple candidates have similar SSIM scores.
+            try:
+                raw_mse = _compute_mse(source_frame, target_frame)
+                mse_values.append(raw_mse)
+            except Exception:
+                pass
+
             # Now verify with sequence of consecutive frames
             seq_matched, seq_avg_dist, _seq_distances = verify_frame_sequence(
                 source_frame_idx,
@@ -410,11 +421,13 @@ def measure_frame_offset_quality(
             continue
 
     avg_distance = sum(distances) / len(distances) if distances else float("inf")
+    avg_mse = sum(mse_values) / len(mse_values) if mse_values else float("inf")
 
     return {
         "score": total_score,
         "matched": matched_count,
         "sequence_verified": sequence_verified_count,
         "avg_distance": avg_distance,
+        "avg_mse": avg_mse,
         "match_details": match_details,
     }

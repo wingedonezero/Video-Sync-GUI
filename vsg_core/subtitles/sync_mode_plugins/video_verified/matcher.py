@@ -478,6 +478,7 @@ def calculate_video_verified_offset(
         # Convert frame offset to approximate ms for logging
         approx_ms = frame_offset * source_frame_duration_ms
         seq_verified = quality.get("sequence_verified", 0)
+        avg_mse = quality.get("avg_mse", float("inf"))
         candidate_results.append(
             {
                 "frame_offset": frame_offset,
@@ -486,19 +487,28 @@ def calculate_video_verified_offset(
                 "matched_checkpoints": quality["matched"],
                 "sequence_verified": seq_verified,
                 "avg_distance": quality["avg_distance"],
+                "avg_mse": avg_mse,
                 "match_details": quality.get("match_details", []),
             }
         )
         log(
             f"[VideoVerified]   Frame {frame_offset:+d} (~{approx_ms:+.1f}ms): "
             f"score={quality['score']:.2f}, seq_verified={seq_verified}/{len(checkpoint_times)}, "
-            f"avg_dist={quality['avg_distance']:.1f}"
+            f"avg_dist={quality['avg_distance']:.1f}, mse={avg_mse:.1f}"
         )
 
-    # Select best candidate - prefer sequence_verified count, then score, then lowest avg_distance
+    # Select best candidate:
+    # 1. Most sequence-verified checkpoints (primary)
+    # 2. Highest quality score (secondary)
+    # 3. Lowest MSE for tiebreaker — MSE is more sensitive to exact pixel
+    #    differences than SSIM distance, giving much better discrimination
+    #    when candidates have nearly identical SSIM scores (e.g. same-source
+    #    re-encodes where adjacent frames all pass SSIM thresholds easily).
+    #    For interlaced content, MSE and SSIM distance are both used since
+    #    the deinterlace artifacts affect both metrics similarly.
     best_result = max(
         candidate_results,
-        key=lambda r: (r["sequence_verified"], r["quality"], -r["avg_distance"]),
+        key=lambda r: (r["sequence_verified"], r["quality"], -r["avg_mse"]),
     )
     best_frame_offset = best_result["frame_offset"]
 
