@@ -1,0 +1,320 @@
+VIDEO-SYNC-GUI: Session Handoff Notes
+======================================
+Branch: claude/nice-feistel
+Date: 2025-02-15
+
+This document captures all findings, decisions, bugs discovered/fixed, and
+current state from the video-verified frame matching sessions.
+
+
+========================================================================
+1. PROJECT STRUCTURE
+========================================================================
+
+Main video-verified sync code:
+  vsg_core/subtitles/sync_mode_plugins/video_verified/
+    matcher.py      - Main orchestrator (calculate_video_verified_offset())
+    quality.py      - Frame quality measurement, sequence verification
+    candidates.py   - Candidate generation (generate_time_candidates, select_checkpoint_times)
+    offset.py       - Sub-frame offset calculation, VFR helpers
+
+Frame utilities:
+  vsg_core/subtitles/frame_utils/
+    video_reader.py    - VapourSynth/FFMS2 frame extraction, VFR handling
+    frame_hashing.py   - SSIM (windowed + global), MSE, perceptual hash comparison
+
+Settings:  vsg_core/models/settings.py
+UI:        vsg_qt/options_dialog/tabs.py
+Tests:     tests/test_subtitle_data.py (10 tests, all pass)
+
+
+========================================================================
+2. COMMIT HISTORY (oldest → newest on this branch)
+========================================================================
+
+c7092500 - Fix video-verified CFR checkpoint distribution and add MSE tiebreaker
+  - Added MSE as tiebreaker in candidate scoring (55x more discriminative than SSIM)
+  - Fixed checkpoint distribution to spread across video
+
+46a1b443 - Merge of CFR accuracy fixes (commit that "fixed everything" for CFR)
+  - 9 checkpoints, search range ±3 frames, sequence length 10
+  - This is the baseline that must not regress
+
+d64a05bf - Switch video-verified sync to time-domain search with raw frames
+  - Replaced frame-index search with millisecond-based time-domain search
+  - generate_time_candidates() steps by source_frame_duration_ms
+  - Handles any fps combination (23.976↔29.970, etc.)
+
+65a5960a - Fix frame-aligned offset and improve interlaced sequence discrimination
+  - Increased sequence length to 15
+  - Fixed calculate_subframe_offset() to snap correctly
+
+9391e33b - Unify video-verified settings and remove content detection
+  - Merged ~15 interlaced-specific settings into unified video_verified_* set
+  - Removed analyze_content_type() calls (was 5-30s for DVD, up to 30min for idet)
+  - Removed deinterlace/IVTC from UI (they produce worse results)
+  - Removed content_type parameter from VideoReader calls
+  - Single code path for all content types
+
+3521017d - Fix cross-encode frame matching with double-probe SSIM auto-detection
+  - Added double-probe: windowed SSIM first, if baseline > threshold → re-probe
+    with global SSIM. If global baseline ≤ threshold → use global, no widening.
+    If global still > threshold → use global + modest adaptive widening.
+  - Changed sort key from (seq_verified, quality, -MSE) to (seq_verified, -MSE)
+    removing redundant quality score that masked MSE discrimination
+  - Reduced adaptive_margin default from 15 to 8
+
+1a2b735b - Fix cross-fps sequence verification stepping by wrong frame duration
+  - verify_frame_sequence() was stepping both source and target by source
+    frame duration. For cross-fps pairs (24.405→29.970), this meant target
+    jumped ~1.23 frames per step, causing phase-dependent rounding that made
+    wrong offsets accidentally score better.
+  - Fix: use min(source_frame_duration, target_frame_duration) as step size
+
+
+========================================================================
+3. KEY FINDINGS (DVD/Interlaced/VFR/Telecine)
+========================================================================
+
+Content handling:
+- Time-domain search (ms offsets) works for ALL content types
+- Audio→video offset difference is always integer frames (0-3)
+- Deinterlacing (bwdif) gives ZERO improvement for frame matching
+- IVTC (VFM+VDecimate) is catastrophically WORSE — never use for matching
+- Raw frames (no processing) work fine for finding correct offset
+- No content type detection needed — FFMS2 gives raw frames regardless
+
+FFMS2 behavior:
+- Progressive: frames as-is
+- Soft-telecine: ignores repeat-field flags, gives original ~24fps frames
+  - real_fps may be non-standard (e.g., 24.405 instead of 23.976)
+  - VideoReader does AssumeFPS to 23.976 for display, but real_fps is used
+    for frame index math (matches actual frame count)
+- Hard telecine/interlaced: raw frames still match between different encodes
+- get_frame_index_for_time() uses _AbsoluteTime timestamps from FFMS2 for
+  accurate time→frame mapping (handles VFR correctly)
+
+Audio correlation:
+- SCC must use same language (JPN→JPN); eng doesn't match well
+- Most MPEG-2 DVDs are effectively CFR (33/34ms alternation, <0.5ms drift)
+- VFR detection at 100ms threshold catches true VFR files
+- Audio correlation is rock-solid (99%+ match quality) for these test files
+
+SSIM implementations (both in frame_hashing.py):
+- Windowed SSIM (scikit-image, use_global_ssim=False):
+  - More accurate for same-source/progressive content
+  - Produces distances 35-45 for cross-encode DVD content (too high!)
+- Global SSIM (mean/variance, use_global_ssim=True):
+  - Uses whole-image statistics instead of local windows
+  - Tolerant of deinterlace artifacts, resolution differences, encoder differences
+  - Produces much lower distances for cross-encode content
+  - Auto-selected by double-probe when windowed baseline exceeds threshold
+
+
+========================================================================
+4. CURRENT UNIFIED SETTINGS (settings.py)
+========================================================================
+
+video_verified_zero_check_frames: int = 3
+video_verified_min_quality_advantage: float = 0.1
+video_verified_num_checkpoints: int = 9
+video_verified_search_range_frames: int = 8
+video_verified_sequence_length: int = 15
+video_verified_comparison_method: "ssim"
+video_verified_ssim_threshold: int = 10
+video_verified_use_pts_precision: bool = False
+video_verified_frame_audit: bool = False
+video_verified_visual_verify: bool = False
+video_verified_adaptive_threshold: bool = True
+video_verified_adaptive_margin: int = 8
+video_verified_fallback_to_audio: bool = True
+
+Kept for VideoReader (subtitle-anchored sync mode, not video-verified):
+  interlaced_deinterlace_method: "bwdif"
+  interlaced_use_ivtc: bool = False
+
+IMPORTANT: User's saved config may still have OLD defaults (e.g.,
+sequence_length=10 instead of 15). Pydantic loads from saved JSON and
+overrides new defaults. User needs to update saved config or reset settings.
+
+
+========================================================================
+5. ALGORITHM FLOW (matcher.py)
+========================================================================
+
+1. Get audio correlation delay (pure_correlation_ms)
+2. Open VideoReaders with raw frames (deinterlace="none", no IVTC)
+3. Get real FPS from FFMS2 (real_fps for index math, fps for display)
+4. Generate time-domain candidates: audio_delay ± N * source_frame_duration
+5. Select 9 checkpoint times distributed across video
+6. Double-probe adaptive threshold:
+   a. Probe 3 points with windowed SSIM
+   b. If baseline > threshold → re-probe with global SSIM
+   c. Decision: use_global_ssim=True, threshold stays or widens modestly
+7. For each candidate offset:
+   - At each checkpoint: compare source frame at T with target at T+offset
+   - Sequence verify: check N consecutive frames match (70% threshold)
+   - Sequence step uses min(source_frame_dur, target_frame_dur)
+   - Record seq_verified count and MSE
+8. Select best: max(seq_verified, then lowest MSE as tiebreaker)
+9. Snap to frame-aligned offset via calculate_subframe_offset()
+10. Return final_offset = sub_frame_offset + global_shift
+
+
+========================================================================
+6. TEST FILES AND KNOWN-CORRECT DELAYS
+========================================================================
+
+Location: /home/chaoz/Desktop/Makemkv/Test Files/Interlaced/
+Test logs: /home/chaoz/Desktop/Makemkv/Test Files/Interlaced/new logs/
+
+Shows: 009-1, Allison & Lillia, Blassreiter, Dragonaut, Hunter x Hunter,
+       Starship Operators
+
+Known-correct SCC audio delays (JPN→JPN):
+  009-1 S1↔S2:     -356.967ms  (same fps 29.970→29.970)
+  009-1 S1↔S3:     -446.050ms  (cross-fps 23.976→29.970)
+  Allison S1↔S2:   -119.873ms  (cross-encode 23.976→29.970, diff resolution)
+  Starship S1↔S2:    -5.673ms  (soft-telecine 24.405→29.970)
+  Starship S1↔S3:    -5.673ms  (soft-telecine 24.342→29.970)
+
+Test case details:
+  009-1 S2: 29.970fps → 29.970fps (same fps, both interlaced DVD)
+    - Source: 43482 frames, Target: 43470 frames
+    - Adaptive: baseline 12.3 → threshold 27 (old code), should be better now
+    - CORRECT result: -367.033ms (-11 frames), 9/9 seq_verified
+
+  009-1 S3: 23.976fps → 29.970fps (cross-fps, different encode)
+    - Source: 34785 frames, Target: 43470 frames
+    - No adaptive widening in old log (threshold stayed at 10)
+    - WAS WRONG: picked -404.3ms (-10f) with 5/9, should be -446ms (-11f)
+    - Problem: windowed SSIM distances 10-22 caused poor discrimination
+
+  Allison S2: 23.976fps → 29.970fps (cross-encode, diff resolution 704x480 vs 720x480)
+    - Source: 35244 frames (FFMS2), Target: 44056 frames
+    - Source reported as progressive, Target as interlaced/tff (telecine DVD)
+    - Windowed SSIM baseline: 45.0 (huge — different masters/resolutions)
+    - Old code widened threshold to 60, killing ALL discrimination
+    - WAS WRONG: picked -78.2ms (-2f) with 9/9, should be ~-120ms (-3f)
+
+  Starship S2: 24.405fps → 29.970fps (soft-telecine)
+    - Source: 36771 frames (soft-telecine detected), Target: 45180 frames
+    - real_fps=24.405 (FFMS2 raw), source_frame_duration=40.975ms
+    - No adaptive widening (baseline < 10)
+    - WAS WRONG: picked +35.3ms (+1f) with 7/9, should be 0ms
+    - Bug: sequence stepping used source frame duration (40.975ms) for both
+      sides, causing target (33.367ms/frame) to have inconsistent rounding
+    - FIXED in 1a2b735b: use min(source, target) frame duration for stepping
+
+  Starship S3: 24.342fps → 29.970fps (soft-telecine, different encode)
+    - Source: 36675 frames, Target: 45180 frames
+    - Adaptive: baseline 35.1 → threshold 50 (old code)
+    - CORRECT result: 0ms, 8/9 seq_verified
+
+
+========================================================================
+7. BUGS FOUND AND FIXED IN THIS SESSION
+========================================================================
+
+Bug 1: Windowed SSIM too strict for cross-encode content
+  - Windowed SSIM produces distances 35-45 for different DVD encodes
+  - Caused adaptive threshold to over-widen (10→60), killing discrimination
+  - FIX (3521017d): Double-probe — if windowed baseline > threshold, re-probe
+    with global SSIM. Global SSIM is much more tolerant.
+
+Bug 2: Redundant quality score in candidate sort key
+  - Sort was (seq_verified, quality, -MSE) but quality was derived from
+    seq_verified, making it a redundant intermediate that masked MSE
+  - FIX (3521017d): Changed to (seq_verified, -MSE)
+
+Bug 3: Adaptive margin too large
+  - With global SSIM (lower baselines), margin of 15 was excessive
+  - FIX (3521017d): Reduced to 8
+
+Bug 4: Cross-fps sequence verification used wrong step size
+  - verify_frame_sequence() stepped both source and target by source_frame_duration
+  - For cross-fps (24.405→29.970), target jumped ~1.23 frames per step
+  - Phase-dependent rounding made wrong offsets accidentally score better
+  - FIX (1a2b735b): Use min(source, target) frame duration as step
+
+Bug 5 (NOT A CODE BUG): Sequence length = 10 instead of 15
+  - User's saved config overrides new default of 15
+  - Need to manually update saved config or reset settings
+
+
+========================================================================
+8. WHAT STILL NEEDS TESTING
+========================================================================
+
+- Re-run ALL interlaced test files with the latest 3 commits (3521017d +
+  1a2b735b + the sequence step fix) to verify:
+  - 009-1 S2 (same fps): still correct
+  - 009-1 S3 (cross-fps): fixed by double-probe global SSIM?
+  - Allison (cross-encode): fixed by double-probe global SSIM?
+  - Starship S2 (soft-telecine): fixed by min-step + MSE tiebreaker?
+  - Starship S3 (soft-telecine): still correct?
+
+- Test normal CFR content ("all files 23") to verify no regression from
+  the unification changes. CFR same-source content should:
+  - Use windowed SSIM (baseline < 10, no global switch)
+  - Get 9/9 seq_verified at correct offset
+  - Have very low MSE at correct offset
+
+- Update saved config: video_verified_sequence_length from 10 to 15
+
+- Test shows not yet tested: Blassreiter, Dragonaut, Hunter x Hunter
+
+
+========================================================================
+9. ARCHITECTURE NOTES
+========================================================================
+
+VideoReader (video_reader.py):
+  - Wraps VapourSynth + FFMS2 for frame extraction
+  - get_frame_index_for_time(): uses _AbsoluteTime from FFMS2 for VFR accuracy
+  - real_fps: pre-AssumeFPS fps (matches actual frame count)
+  - fps: post-AssumeFPS fps (used for display/standard calculations)
+  - For soft-telecine: AssumeFPS relabels to 23.976, but real_fps stays ~24.4
+  - content_type parameter removed from video-verified calls (not needed)
+  - deinterlace/IVTC settings still used by subtitle-anchored sync mode
+
+compare_frames (frame_hashing.py):
+  - Returns (distance, is_match) tuple
+  - distance: (1.0 - SSIM) * 100 for SSIM method (0=identical, 10=SSIM 0.90)
+  - use_global_ssim parameter selects between windowed (scikit-image) and
+    global (mean/variance) implementations
+  - Global SSIM: less sensitive to local pixel differences, better for
+    cross-encode/deinterlaced content
+
+generate_time_candidates (candidates.py):
+  - Generates offsets in ms: audio_delay + N * source_frame_duration
+  - N ranges from -search_range to +search_range (default ±8)
+  - Also includes audio_delay itself and 0ms as candidates
+
+select_checkpoint_times (candidates.py):
+  - Distributes N checkpoints across video duration
+  - Excludes first/last 15% to avoid credits/intros
+
+calculate_subframe_offset (offset.py):
+  - Snaps time-domain winner to frame-aligned output
+  - integer_frames * source_frame_duration_ms
+  - Optionally uses PTS precision from match_details
+
+
+========================================================================
+10. REMOVED FEATURES (intentional)
+========================================================================
+
+- Content type detection (analyze_content_type): Removed from matcher.py.
+  Was expensive (5-30s for DVD ffprobe, up to 30min for idet full decode).
+  Not needed — FFMS2 gives accurate fps, adaptive probe handles cross-encode.
+
+- Deinterlace/IVTC UI widgets: Removed from video-verified settings tab.
+  Raw frames produce better matching results than deinterlaced frames.
+  Settings still exist in settings.py for subtitle-anchored sync mode.
+
+- Separate interlaced settings: ~15 interlaced_* settings merged into
+  unified video_verified_* set. Single code path handles all content.
+
+- generate_frame_candidates(): Dead code deleted from candidates.py.
+  Replaced by generate_time_candidates() for time-domain search.
