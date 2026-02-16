@@ -34,7 +34,9 @@ from .frame_audit import (
 # Frame hashing and comparison
 # ============================================================================
 from .frame_hashing import (
+    MultiMetricResult,
     compare_frames,
+    compare_frames_multi,
     compute_frame_hash,
     compute_hamming_distance,
     compute_mse,
@@ -112,6 +114,7 @@ __all__ = [
     "CreditsInfo",
     "FrameAuditIssue",
     "FrameAuditResult",
+    "MultiMetricResult",
     "IdetResult",
     "RegionStats",
     "RepeatPictResult",
@@ -125,6 +128,7 @@ __all__ = [
     "clear_content_analysis_cache",
     "clear_vfr_cache",
     "compare_frames",
+    "compare_frames_multi",
     "compare_video_properties",
     "compute_frame_hash",
     "compute_hamming_distance",

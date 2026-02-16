@@ -13,10 +13,28 @@ from __future__ import annotations
 
 import gc
 import io
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from PIL import Image
+
+
+@dataclass(slots=True)
+class MultiMetricResult:
+    """Result of comparing two frames using all available metrics.
+
+    All three metrics (phash, SSIM, MSE) are computed in a single call
+    to avoid redundant numpy conversions.
+    """
+
+    phash_distance: int  # Hamming distance (0=identical)
+    phash_match: bool  # phash_distance <= threshold
+    ssim_distance: float  # (1-SSIM)*100 (0=identical, <10=match)
+    ssim_match: bool  # ssim_distance <= threshold
+    mse_value: float  # Raw MSE value
+    mse_distance: float  # MSE/100 capped at 100
+    mse_match: bool  # mse_distance <= threshold
 
 
 def compute_perceptual_hash(
@@ -287,3 +305,94 @@ def compare_frames(
         max_dist = threshold if threshold is not None else 5
         is_match = distance <= max_dist
         return (distance, is_match)
+
+
+def compare_frames_multi(
+    frame1: Image.Image,
+    frame2: Image.Image,
+    hash_algorithm: str = "phash",
+    hash_size: int = 8,
+    hash_threshold: int = 5,
+    ssim_threshold: int = 10,
+    mse_threshold: int = 5,
+    use_global_ssim: bool = False,
+) -> MultiMetricResult:
+    """
+    Compare two frames using ALL metrics (phash, SSIM, MSE) in a single call.
+
+    Converts frames to grayscale numpy arrays once and reuses for SSIM + MSE,
+    avoiding redundant conversions. phash is computed separately via imagehash.
+
+    Args:
+        frame1: First PIL Image object
+        frame2: Second PIL Image object
+        hash_algorithm: Hash algorithm for phash ('phash', 'dhash', etc.)
+        hash_size: Hash size for phash
+        hash_threshold: Max hamming distance for phash match
+        ssim_threshold: Max SSIM distance for match (default 10 = SSIM > 0.90)
+        mse_threshold: Max MSE distance for match (default 5 = MSE < 500)
+        use_global_ssim: If True, use global SSIM (better for interlaced content)
+
+    Returns:
+        MultiMetricResult with all three metric distances and match booleans
+    """
+    import numpy as np
+
+    # --- phash ---
+    phash_dist = 999
+    try:
+        h1 = compute_frame_hash(frame1, hash_size, hash_algorithm)
+        h2 = compute_frame_hash(frame2, hash_size, hash_algorithm)
+        if h1 is not None and h2 is not None:
+            phash_dist = compute_hamming_distance(h1, h2)
+    except Exception:
+        pass
+
+    # --- Convert to grayscale arrays ONCE for SSIM + MSE ---
+    arr1 = np.array(frame1.convert("L"), dtype=np.float64)
+    arr2 = np.array(frame2.convert("L"), dtype=np.float64)
+
+    if arr1.shape != arr2.shape:
+        from PIL import Image as PILImage
+
+        frame2_resized = frame2.resize(frame1.size, PILImage.Resampling.LANCZOS)
+        arr2 = np.array(frame2_resized.convert("L"), dtype=np.float64)
+
+    # --- MSE (trivial, reuse arrays) ---
+    mse_val = float(np.mean((arr1 - arr2) ** 2))
+    mse_dist = min(mse_val / 100, 100)
+
+    # --- SSIM (reuse arrays) ---
+    ssim_dist = 100.0  # worst case
+    if not use_global_ssim:
+        try:
+            from skimage.metrics import structural_similarity
+
+            # structural_similarity needs uint8 arrays
+            arr1_u8 = arr1.astype(np.uint8) if arr1.dtype != np.uint8 else arr1
+            arr2_u8 = arr2.astype(np.uint8) if arr2.dtype != np.uint8 else arr2
+            ssim_value = structural_similarity(arr1_u8, arr2_u8, data_range=255)
+            ssim_dist = (1.0 - ssim_value) * 100
+        except ImportError:
+            use_global_ssim = True  # fall through to global
+
+    if use_global_ssim:
+        C1 = (0.01 * 255) ** 2
+        C2 = (0.03 * 255) ** 2
+        mu1, mu2 = arr1.mean(), arr2.mean()
+        sigma1_sq, sigma2_sq = arr1.var(), arr2.var()
+        sigma12 = ((arr1 - mu1) * (arr2 - mu2)).mean()
+        ssim_value = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / (
+            (mu1**2 + mu2**2 + C1) * (sigma1_sq + sigma2_sq + C2)
+        )
+        ssim_dist = (1.0 - float(ssim_value)) * 100
+
+    return MultiMetricResult(
+        phash_distance=phash_dist,
+        phash_match=phash_dist <= hash_threshold,
+        ssim_distance=ssim_dist,
+        ssim_match=ssim_dist <= ssim_threshold,
+        mse_value=mse_val,
+        mse_distance=mse_dist,
+        mse_match=mse_dist <= mse_threshold,
+    )

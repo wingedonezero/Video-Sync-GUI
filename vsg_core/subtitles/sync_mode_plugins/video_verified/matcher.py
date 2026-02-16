@@ -479,6 +479,9 @@ def calculate_video_verified_offset(
         approx_ms = frame_offset * source_frame_duration_ms
         seq_verified = quality.get("sequence_verified", 0)
         avg_mse = quality.get("avg_mse", float("inf"))
+        total_tested = quality.get("total_frames_tested", 0)
+        total_matched = quality.get("total_frames_matched", 0)
+        phash_exact = quality.get("phash_exact_matches", 0)
         candidate_results.append(
             {
                 "frame_offset": frame_offset,
@@ -489,13 +492,32 @@ def calculate_video_verified_offset(
                 "avg_distance": quality["avg_distance"],
                 "avg_mse": avg_mse,
                 "match_details": quality.get("match_details", []),
+                # Multi-metric fields
+                "total_frames_tested": total_tested,
+                "total_frames_matched": total_matched,
+                "phash_exact_matches": phash_exact,
+                "avg_ssim_distance": quality.get("avg_distance", float("inf")),
+                "per_checkpoint_summary": quality.get(
+                    "per_checkpoint_summary", []
+                ),
             }
         )
+        # Improved per-candidate logging with frame counts
         log(
             f"[VideoVerified]   Frame {frame_offset:+d} (~{approx_ms:+.1f}ms): "
-            f"score={quality['score']:.2f}, seq_verified={seq_verified}/{len(checkpoint_times)}, "
-            f"avg_dist={quality['avg_distance']:.1f}, mse={avg_mse:.1f}"
+            f"{total_matched}/{total_tested} frames matched, "
+            f"seq={seq_verified}/{len(checkpoint_times)}, "
+            f"phash_exact={phash_exact}/{total_tested}"
         )
+        # Per-checkpoint breakdown
+        for cp in quality.get("per_checkpoint_summary", []):
+            status = "PASS" if cp["verified"] else "FAIL"
+            log(
+                f"[VideoVerified]     CP {cp['checkpoint_ms']/1000:.0f}s: "
+                f"{cp['seq_matched']}/{cp['seq_total']} matched, "
+                f"phash={cp['phash_exact']}/{cp['seq_total']}, "
+                f"ssim={cp['avg_ssim_dist']:.1f}, mse={cp['avg_mse']:.0f} [{status}]"
+            )
 
     # Select best candidate:
     # 1. Most sequence-verified checkpoints (primary)
@@ -512,11 +534,66 @@ def calculate_video_verified_offset(
     )
     best_frame_offset = best_result["frame_offset"]
 
-    log("[VideoVerified] ───────────────────────────────────────")
+    # ─── RESULTS SUMMARY ─────────────────────────────────────────────
+    log("[VideoVerified] ═══════════════════════════════════════")
+    log("[VideoVerified] RESULTS SUMMARY")
+    log("[VideoVerified] ═══════════════════════════════════════")
+
+    best_tested = best_result.get("total_frames_tested", 0)
+    best_matched = best_result.get("total_frames_matched", 0)
+    best_phash = best_result.get("phash_exact_matches", 0)
+
     log(
-        f"[VideoVerified] Best frame offset: {best_frame_offset:+d} frames "
-        f"(seq_verified={best_result['sequence_verified']}/{len(checkpoint_times)}, score={best_result['quality']:.2f})"
+        f"[VideoVerified] Winner: frame {best_frame_offset:+d} "
+        f"({best_matched}/{best_tested} frames matched, "
+        f"seq={best_result['sequence_verified']}/{len(checkpoint_times)}, "
+        f"phash_exact={best_phash}/{best_tested})"
     )
+
+    # Runner-up comparison
+    sorted_candidates = sorted(
+        candidate_results,
+        key=lambda r: (r["sequence_verified"], r["quality"], -r["avg_mse"]),
+        reverse=True,
+    )
+    if len(sorted_candidates) > 1:
+        runner_up = sorted_candidates[1]
+        runner_tested = runner_up.get("total_frames_tested", 0)
+        runner_matched = runner_up.get("total_frames_matched", 0)
+        log(
+            f"[VideoVerified] Runner-up: frame {runner_up['frame_offset']:+d} "
+            f"({runner_matched}/{runner_tested} frames matched, "
+            f"seq={runner_up['sequence_verified']}/{len(checkpoint_times)})"
+        )
+
+    # Metric agreement: which offset does each metric independently pick?
+    phash_winner = max(
+        candidate_results,
+        key=lambda r: r.get("phash_exact_matches", 0),
+    )
+    ssim_winner = min(
+        candidate_results,
+        key=lambda r: r.get("avg_ssim_distance", float("inf")),
+    )
+    mse_winner = min(
+        candidate_results,
+        key=lambda r: r["avg_mse"],
+    )
+
+    agree_count = sum(
+        [
+            phash_winner["frame_offset"] == best_frame_offset,
+            ssim_winner["frame_offset"] == best_frame_offset,
+            mse_winner["frame_offset"] == best_frame_offset,
+        ]
+    )
+    log(
+        f"[VideoVerified] Metric agreement: {agree_count}/3 "
+        f"(phash={phash_winner['frame_offset']:+d}, "
+        f"ssim={ssim_winner['frame_offset']:+d}, "
+        f"mse={mse_winner['frame_offset']:+d})"
+    )
+    log("[VideoVerified] ───────────────────────────────────────")
 
     # Check if frame matching actually worked
     # Require at least one sequence-verified checkpoint for reliable results
@@ -564,6 +641,42 @@ def calculate_video_verified_offset(
             "checkpoints": len(checkpoint_times),
             "sub_frame_precision": False,
         }
+
+    # ─── FINAL VERIFICATION PASS ────────────────────────────────────
+    from .verification import run_final_verification
+
+    verification = run_final_verification(
+        best_frame_offset=best_frame_offset,
+        source_reader=source_reader,
+        target_reader=target_reader,
+        source_duration=source_duration,
+        source_frame_duration_ms=source_frame_duration_ms,
+        target_frame_duration_ms=target_frame_duration_ms,
+        hash_algorithm=hash_algorithm,
+        hash_size=hash_size,
+        hash_threshold=hash_threshold,
+        ssim_threshold=ssim_threshold,
+        use_global_ssim=use_interlaced_settings,
+        num_verification_points=15,
+        checkpoint_times_used=checkpoint_times,
+        metric_agreement=agree_count,
+        log=log,
+    )
+
+    v_matched = verification["frames_matched"]
+    v_total = verification["frames_tested"]
+    confidence = verification["confidence"]
+    v_pct = (100 * v_matched / v_total) if v_total > 0 else 0
+
+    log(
+        f"[VideoVerified] Final verification: {v_matched}/{v_total} matched ({v_pct:.0f}%)"
+    )
+    log(f"[VideoVerified] Confidence: {confidence}")
+    if confidence == "LOW":
+        log(
+            "[VideoVerified] ⚠ Low confidence — result may be unreliable"
+        )
+    log("[VideoVerified] ───────────────────────────────────────")
 
     # Calculate offset in milliseconds
     # By default uses frame-based (frame_offset * frame_duration)
@@ -623,4 +736,8 @@ def calculate_video_verified_offset(
         "target_content_type": target_props.get("content_type", "unknown"),
         "source_fps": fps,
         "target_fps": target_fps,
+        # Multi-metric verification
+        "verification": verification,
+        "confidence": confidence,
+        "metric_agreement": agree_count,
     }
