@@ -62,33 +62,6 @@ FrameComparisonMethodStr = Literal["hash", "ssim", "mse"]
 SubAnchorFallbackStr = Literal["abort", "use-median"]
 
 # =========================================================================
-# Interlaced / Telecine Settings
-# =========================================================================
-
-# Content detection mode for interlaced handling
-InterlacedForceModeStr = Literal["auto", "interlaced", "telecine", "progressive"]
-
-# Analyzed video content type (from idet analysis)
-ContentTypeStr = Literal[
-    "progressive",  # True progressive, no duplicates
-    "interlaced",  # Pure interlaced (TFF or BFF)
-    "telecine",  # Legacy: detected from metadata only
-    "telecine_hard",  # Interlaced with pulldown (needs VFM + VDecimate)
-    "telecine_soft",  # Progressive with pulldown/duplicates (needs VDecimate only)
-    "mixed",  # Mix of interlaced and progressive sections
-    "unknown",  # Could not determine
-]
-
-# Video field order (from analysis)
-FieldOrderStr = Literal["progressive", "tff", "bff"]
-
-# Hash algorithm for interlaced content (includes ahash, not in progressive)
-InterlacedHashAlgorithmStr = Literal["ahash", "phash", "dhash", "whash"]
-
-# Deinterlace method for frame extraction
-DeinterlaceMethodStr = Literal["bwdif", "yadif", "yadifmod", "bob", "w3fdif"]
-
-# =========================================================================
 # Audio Analysis Settings
 # =========================================================================
 

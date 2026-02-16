@@ -31,13 +31,10 @@ from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     AnalysisModeStr,
     CorrelationMethodSourceSepStr,
     CorrelationMethodStr,
-    DeinterlaceMethodStr,
     DelaySelectionModeStr,
     FilteringMethodStr,
     FrameComparisonMethodStr,
     FrameHashAlgorithmStr,
-    InterlacedForceModeStr,
-    InterlacedHashAlgorithmStr,
     OcrBinarizationMethodStr,
     OcrEngineStr,
     OcrOutputFormatStr,
@@ -208,23 +205,6 @@ class AppSettings(BaseModel):
     video_verified_use_pts_precision: bool = False
     video_verified_frame_audit: bool = False
     video_verified_visual_verify: bool = False
-
-    # =========================================================================
-    # Interlaced Video Settings
-    # =========================================================================
-    interlaced_handling_enabled: bool = False
-    interlaced_force_mode: InterlacedForceModeStr = "auto"
-    interlaced_num_checkpoints: int = 5
-    interlaced_search_range_frames: int = 5
-    interlaced_hash_algorithm: InterlacedHashAlgorithmStr = "ahash"
-    interlaced_hash_size: int = 8
-    interlaced_hash_threshold: int = 25
-    interlaced_comparison_method: FrameComparisonMethodStr = "ssim"
-    interlaced_ssim_threshold: int = 25  # SSIM distance threshold for interlaced
-    interlaced_fallback_to_audio: bool = True
-    interlaced_sequence_length: int = 5
-    interlaced_deinterlace_method: DeinterlaceMethodStr = "bwdif"
-    interlaced_use_ivtc: bool = False
 
     # =========================================================================
     # Analysis/Correlation Settings
