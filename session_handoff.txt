@@ -318,3 +318,184 @@ calculate_subframe_offset (offset.py):
 
 - generate_frame_candidates(): Dead code deleted from candidates.py.
   Replaced by generate_time_candidates() for time-domain search.
+
+
+========================================================================
+11. CROSS-FPS / INTERLACED FRAME MATCHING TESTING (Session 2)
+========================================================================
+
+Context: After reverting the unified interlaced/CFR path (commit 3beccac0)
+because IVTC and deinterlacing caused more issues than they solved, we did
+exhaustive independent testing to validate that raw frames + time-domain
+mapping works across ALL format combinations.
+
+Approach: Standalone Python test scripts using VapourSynth/FFMS2 for frame
+extraction, phash + SSIM for match verification, audio correlation for
+delay estimation. Tests used 3 checkpoints at 25%/50%/75% of common
+duration, 100 frames per checkpoint (300 total), sweep ± N frame offsets
+around predicted delay.
+
+------------------------------------------------------------------------
+11a. TEST: Starship Operators (same master, CFR same-fps baseline)
+------------------------------------------------------------------------
+File: test_cross_fps.py
+Location: /home/chaoz/Desktop/Makemkv/Test Files/Interlaced/
+
+  Ep1: S1 29.970fps CFR ↔ S2 29.970fps CFR (same fps)
+    Audio delay: -5.673ms
+    Method: Sweep offsets in S1 frame units around audio delay
+    Result: 300/300 phash matches at 0 frame offset (0ms)
+    Confirms: baseline same-fps same-master matching works perfectly
+
+  Ep2: S1 29.970fps CFR ↔ S2 23.976fps CFR (cross-fps)
+    Audio delay: -991.610ms
+    Method: Same sweep, offsets in S1 frame units
+    Result: 300/300 phash matches at -30 S1-frames (-1001ms)
+    Key finding: PTS delta is stable across all checkpoints while index
+    offset grows over time. PTS delta is the meaningful value for mkvmerge,
+    not frame index offset.
+
+------------------------------------------------------------------------
+11b. TEST: Allison & Lillia (interlaced ↔ progressive, cross-fps)
+------------------------------------------------------------------------
+File: test_cross_fps.py
+
+  S1 29.970fps CFR interlaced TFF (720x480) ↔ S2 23.976fps CFR progressive (704x480)
+    Audio delay: -119.873ms
+    Method: Same sweep in S1 frame units
+    Result: 300/300 phash matches at -2 S1-frames (-66.7ms)
+    Key finding: phash handles interlaced vs progressive with no
+    deinterlacing needed. The 32x32 phash downscale naturally low-pass
+    filters away interlace comb artifacts. Different resolutions
+    (720x480 vs 704x480) also handled fine by phash downsampling.
+
+------------------------------------------------------------------------
+11c. TEST: Blassreiter (3 sources, cross-format, cross-master)
+------------------------------------------------------------------------
+File: test_blassreiter.py
+Location: /home/chaoz/Desktop/Makemkv/Test Files/Interlaced/Blassreiter/
+
+Sources:
+  S1: 720x480 29.778fps VFR soft-telecine (progressive, 50/33ms gaps) 42195f
+  S2: 720x480 29.970fps CFR interlaced TFF 42468f
+  S3: 1280x720 23.976fps CFR progressive (bluray/webdl) 34529f
+
+Audio correlation (JPN tracks must match language AND format: 5.1↔5.1):
+  S1↔S2 (5.1↔5.1 JPN): +1026ms, conf 0.49 (low but consistent)
+  S1↔S3 (stereo JPN): +144ms, conf 0.98
+  S2↔S3: -880ms, conf 0.22
+
+Results:
+  S1↔S2 (same resolution, VFR↔CFR, progressive↔interlaced):
+    300/300 matches at +30 frames = +1001ms, avg phash 1.48
+    Works: phash handles VFR↔CFR AND progressive↔interlaced simultaneously
+
+  S1↔S3 (different master, 720x480 DVD ↔ 1280x720 BD):
+    0/300 matches at ALL offsets, avg phash ~30
+    Fails: completely different masters, luma mean 106 vs 151
+
+  S2↔S3 (different master, 720x480 DVD ↔ 1280x720 BD):
+    0/300 matches at ALL offsets, avg phash ~31
+    Fails: same reason as S1↔S3
+
+  Additional metric sweep (phash, dhash, ahash, whash, ssim, mse, ncc)
+  every 5s across full duration for S1↔S3: No metric consistently works
+  for true different-master (DVD↔BD). Two lucky hits at t=35s and t=90s
+  across all metrics, everything else is noise.
+
+Key finding: phash works for same-master cross-format (interlaced↔
+progressive, VFR↔CFR, different resolutions within same master).
+Completely fails for genuinely different masters (DVD↔BD) where the
+source material was authored differently with different color grading,
+resolution, and encoding. Audio correlation is the only option for
+true different-master content.
+
+------------------------------------------------------------------------
+11d. TEST: VideoTimestamps library for time-domain frame mapping
+------------------------------------------------------------------------
+File: test_videotimestamps.py
+Location: /home/chaoz/Desktop/Makemkv/Test Files/Interlaced/
+Library: https://github.com/moi15moi/VideoTimestamps (v1.1.0)
+
+Purpose: Instead of sweeping frame index offsets and converting with
+average frame durations (lossy for VFR), use the VideoTimestamps library
+to do exact PTS-based frame↔time mapping.
+
+API pattern:
+  from video_timestamps import VideoTimestamps, TimeType
+  from fractions import Fraction
+  from pathlib import Path
+
+  vts = VideoTimestamps.from_video_file(Path(video_path))
+  # frame_to_time returns SECONDS as Fraction (not ms!)
+  ref_time = vts.frame_to_time(frame_num, TimeType.EXACT)
+  # time_to_frame takes seconds as Fraction, returns int frame
+  frame = vts.time_to_frame(time_fraction, TimeType.START)
+  # pts_list contains ms values, time_scale = 1000
+
+  # For files where video isn't stream 0 (e.g. subtitle first):
+  vts = VideoTimestamps.from_video_file(path, index=1)
+
+Mapping pattern (ref frame → target frame with delay):
+  delay_s = Fraction(int(delay_ms * 1000), 1000000)
+  ref_time = vts_ref.frame_to_time(ref_frame, TimeType.EXACT)
+  tgt_time = ref_time + delay_s  # positive = tgt ahead of ref
+  tgt_frame = vts_tgt.time_to_frame(tgt_time, TimeType.START)
+
+Sign convention: tgt_time = ref_time + delay
+  Positive delay = target content is temporally ahead of reference
+  (e.g., if S2 plays 1 second of black before S1 starts, delay = +1000ms)
+
+Tested on confirmed-matching pairs:
+
+  Starship Ep1 (29.970↔29.970 CFR, 0ms delay):
+    300/300 matches — trivial case, validates the mapping is correct
+
+  Starship Ep2 (29.970↔23.976 CFR, +1001ms delay):
+    299/300 matches — cross-fps with exact Fraction arithmetic
+    Initially got 37/300 due to two bugs:
+      Bug 1: frame_to_time returns seconds, code divided by time_scale
+              unnecessarily in some paths (unit confusion)
+      Bug 2: delay sign was wrong (-1001 instead of +1001). In test_cross_fps
+              convention, offset=-1001 meant S1 behind S2. In VideoTimestamps
+              test with ref=S1, tgt=S2, since S2 is AHEAD, delay must be
+              +1001 (tgt_time = ref_time + positive_delay)
+
+  Blassreiter S1↔S2 (29.778 VFR ↔ 29.970 CFR, +1001ms delay):
+    300/300 matches — VFR↔CFR with exact PTS mapping
+
+Key finding: VideoTimestamps provides clean exact frame↔time mapping
+using Fraction arithmetic. Properly handles VFR, different CFR rates,
+and any FPS combination. The time-domain approach (map through real PTS)
+is fundamentally correct for all cases unlike index-offset approaches
+that drift with different frame rates.
+
+------------------------------------------------------------------------
+11e. OVERALL FINDINGS FROM TESTING
+------------------------------------------------------------------------
+
+What works for frame matching (no deinterlace/IVTC needed):
+  - Same-fps CFR ↔ CFR: phash perfect (ph=0)
+  - Cross-fps CFR ↔ CFR: phash perfect with correct time-domain offset
+  - Interlaced ↔ progressive (same master): phash works, comb filtered
+    by 32x32 downscale
+  - VFR ↔ CFR (same master): phash works with PTS-based mapping
+  - Different resolution same master (720x480 ↔ 704x480): phash works
+  - Different encode same master (different BD releases): app's SSIM
+    verifier works with 9 checkpoints + voting (phash_exact=85/90)
+
+What does NOT work:
+  - True different master (DVD ↔ BD): no visual metric works. Different
+    color grading, resolution, luma levels. Only audio correlation.
+
+Audio correlation notes:
+  - Must match language AND channel format (5.1↔5.1, stereo↔stereo)
+  - Wrong track selection gives ~0.21 confidence vs 0.98 correct
+  - First chunk can be noisy (silence/intro), "first stable" mode handles it
+  - Correlation gets the delay within ~1 frame, video verifier refines
+
+VideoTimestamps vs index offset:
+  - Index offset grows over time with different FPS
+  - PTS delta stays constant — this is what mkvmerge needs
+  - VideoTimestamps provides exact PTS↔frame mapping via Fraction math
+  - Avoids floating-point drift from average frame duration calculations
