@@ -64,7 +64,6 @@ def calculate_video_verified_offset(
     """
     from ....models.settings import AppSettings
     from ...frame_utils import detect_video_properties
-    from ...frame_utils.video_properties import analyze_content_type
 
     if settings is None:
         settings = AppSettings()
@@ -94,56 +93,7 @@ def calculate_video_verified_offset(
     source_props = detect_video_properties(source_video, runner)
     target_props = detect_video_properties(target_video, runner)
 
-    # Determine if we should use interlaced handling
-    interlaced_handling_enabled = settings.interlaced_handling_enabled
-    force_mode = settings.interlaced_force_mode
-
-    # Run content analysis for DVD content (MPEG-2 codec gate)
-    # This uses idet + mpdecimate on the whole file for precise detection
-    source_analysis = analyze_content_type(source_video, runner, source_props)
-    target_analysis = analyze_content_type(target_video, runner, target_props)
-
-    # Use analyzed content_type (more precise than metadata-only)
-    source_content_type = source_analysis.content_type
-    target_content_type = target_analysis.content_type
-
-    # Check if either video needs interlaced handling
-    _interlaced_types = (
-        "interlaced",
-        "telecine",
-        "telecine_hard",
-        "telecine_soft",
-        "mixed",
-    )
-    source_needs_interlaced = source_content_type in _interlaced_types
-    target_needs_interlaced = target_content_type in _interlaced_types
-    either_interlaced = source_needs_interlaced or target_needs_interlaced
-
-    # Determine if we should use interlaced settings
-    use_interlaced_settings = False
-    if force_mode == "progressive":
-        use_interlaced_settings = False
-    elif force_mode in ("interlaced", "telecine") or (
-        force_mode == "auto" and interlaced_handling_enabled and either_interlaced
-    ):
-        use_interlaced_settings = True
-
-    if use_interlaced_settings:
-        log("[VideoVerified] Using INTERLACED settings")
-        if source_needs_interlaced:
-            log(
-                f"[VideoVerified]   Source: {source_content_type} "
-                f"({source_props.get('width')}x{source_props.get('height')}, "
-                f"confidence={source_analysis.confidence:.0%})"
-            )
-        if target_needs_interlaced:
-            log(
-                f"[VideoVerified]   Target: {target_content_type} "
-                f"({target_props.get('width')}x{target_props.get('height')}, "
-                f"confidence={target_analysis.confidence:.0%})"
-            )
-
-    # Detect FPS (initial - may be updated after IVTC)
+    # Detect FPS
     initial_fps = source_props.get("fps", 23.976)
     if not initial_fps:
         initial_fps = 23.976
@@ -151,24 +101,14 @@ def calculate_video_verified_offset(
 
     log(f"[VideoVerified] Initial FPS: {initial_fps:.3f}")
 
-    # Get settings parameters - use interlaced settings if appropriate
-    if use_interlaced_settings:
-        num_checkpoints = settings.interlaced_num_checkpoints
-        search_range_frames = settings.interlaced_search_range_frames
-        hash_algorithm = settings.interlaced_hash_algorithm
-        hash_size = settings.interlaced_hash_size
-        hash_threshold = settings.interlaced_hash_threshold
-        window_radius = settings.frame_window_radius
-        comparison_method = settings.interlaced_comparison_method
-        # interlaced_fallback_to_audio is accessed later if needed
-    else:
-        num_checkpoints = settings.video_verified_num_checkpoints
-        search_range_frames = settings.video_verified_search_range_frames
-        hash_algorithm = settings.frame_hash_algorithm
-        hash_size = settings.frame_hash_size
-        hash_threshold = settings.frame_hash_threshold
-        window_radius = settings.frame_window_radius
-        comparison_method = settings.frame_comparison_method
+    # Get settings parameters
+    num_checkpoints = settings.video_verified_num_checkpoints
+    search_range_frames = settings.video_verified_search_range_frames
+    hash_algorithm = settings.frame_hash_algorithm
+    hash_size = settings.frame_hash_size
+    hash_threshold = settings.frame_hash_threshold
+    window_radius = settings.frame_window_radius
+    comparison_method = settings.frame_comparison_method
 
     log(
         f"[VideoVerified] Checkpoints: {num_checkpoints}, Search: ±{search_range_frames} frames"
@@ -208,166 +148,32 @@ def calculate_video_verified_offset(
 
     log(f"[VideoVerified] Source duration: ~{source_duration / 1000:.1f}s")
 
-    # Open video readers with per-video processing based on content type
-    # NOTE: We do this BEFORE calculating frame offsets because processing may change FPS
+    # Open video readers
     try:
-        # Determine processing for each video independently based on analysis.
-        # For cross-encode comparison, VFM (IVTC field matching) is NOT used:
-        # VFM makes non-deterministic field-matching decisions that differ between
-        # encodes, producing incomparable progressive frames.  Instead, all
-        # Processing strategy for different content types:
-        #
-        # telecine_hard/telecine → Full IVTC (VFM + VDecimate → ~24fps film)
-        #   Bwdif/yadif CANNOT fix telecine: different encodes have different
-        #   telecine phase, so frame N deinterlaced from encode A ≠ frame N
-        #   from encode B (avg_dist 35+). VFM-only (no VDecimate) also fails
-        #   because VFM makes encode-dependent field-match decisions.
-        #   Full IVTC recovers real progressive film frames at ~24fps.
-        #   After VDecimate + AssumeFPS(24000/1001), time-based frame lookup
-        #   gives the correct film frame regardless of which telecine frames
-        #   VDecimate dropped — exactly like the soft-telecine case.
-        #
-        # telecine_soft → passthrough (pulldown already removed by container)
-        # interlaced/mixed → deinterlace (bwdif/yadif)
-        # progressive → passthrough
-        _interlaced_types = ("telecine", "telecine_hard", "mixed", "interlaced")
-        _telecine_types = ("telecine", "telecine_hard")
-
-        # Determine per-video processing strategy
-        source_use_ivtc = (
-            use_interlaced_settings and source_content_type in _telecine_types
-        )
-        target_use_ivtc = (
-            use_interlaced_settings and target_content_type in _telecine_types
-        )
-
-        source_apply_decimate = (
-            use_interlaced_settings
-            and settings.interlaced_use_ivtc
-            and source_content_type == "telecine_soft"
-        )
-        # For telecine: full IVTC handles everything, no bwdif needed.
-        # For pure interlaced/mixed: use explicit deinterlace method.
-        # "auto" checks ffprobe's scan_type which can be wrong (e.g.
-        # container says progressive for actually-interlaced MPEG-2).
-        if source_use_ivtc:
-            source_deinterlace = "none"  # IVTC handles it
-        elif use_interlaced_settings and source_content_type in _interlaced_types:
-            source_deinterlace = settings.interlaced_deinterlace_method
-        else:
-            source_deinterlace = "auto"
-
-        target_apply_decimate = (
-            use_interlaced_settings
-            and settings.interlaced_use_ivtc
-            and target_content_type == "telecine_soft"
-        )
-        if target_use_ivtc:
-            target_deinterlace = "none"  # IVTC handles it
-        elif use_interlaced_settings and target_content_type in _interlaced_types:
-            target_deinterlace = settings.interlaced_deinterlace_method
-        else:
-            target_deinterlace = "auto"
-
-        log(f"[VideoVerified] Source: {source_content_type}")
-        if source_use_ivtc:
-            log(
-                "[VideoVerified]   Processing: Full IVTC (VFM+VDecimate → ~24fps film frames)"
-            )
-        elif source_content_type in _interlaced_types and use_interlaced_settings:
-            log(f"[VideoVerified]   Processing: deinterlace ({source_deinterlace})")
-        elif source_apply_decimate:
-            log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
-        else:
-            log("[VideoVerified]   Processing: none (progressive)")
-
-        log(f"[VideoVerified] Target: {target_content_type}")
-        if target_use_ivtc:
-            log(
-                "[VideoVerified]   Processing: Full IVTC (VFM+VDecimate → ~24fps film frames)"
-            )
-        elif target_content_type in _interlaced_types and use_interlaced_settings:
-            log(f"[VideoVerified]   Processing: deinterlace ({target_deinterlace})")
-        elif target_apply_decimate:
-            log("[VideoVerified]   Processing: VDecimate (telecine_soft -> ~24fps)")
-        else:
-            log("[VideoVerified]   Processing: none (progressive)")
-
-        # Create readers with per-video settings
-        # For telecine: apply_ivtc=True runs full IVTC (VFM + VDecimate)
-        # to recover real ~24fps progressive film frames. After VDecimate +
-        # AssumeFPS(24000/1001), time-based frame lookup aligns correctly
-        # across encodes — same as the proven soft-telecine path.
-        # skip_decimate_in_ivtc=False: we WANT VDecimate to produce real 24fps.
         source_reader = VideoReader(
             source_video,
             runner,
             temp_dir=temp_dir,
-            deinterlace=source_deinterlace,
-            content_type=source_content_type,
-            ivtc_field_order=source_analysis.field_order,
-            apply_ivtc=source_use_ivtc,
-            skip_decimate_in_ivtc=False,
-            apply_decimate=source_apply_decimate,
             settings=settings,
         )
         target_reader = VideoReader(
             target_video,
             runner,
             temp_dir=temp_dir,
-            deinterlace=target_deinterlace,
-            content_type=target_content_type,
-            ivtc_field_order=target_analysis.field_order,
-            apply_ivtc=target_use_ivtc,
-            skip_decimate_in_ivtc=False,
-            apply_decimate=target_apply_decimate,
             settings=settings,
         )
 
-        # Get processed FPS from readers (after IVTC/deinterlace/decimate)
-        # Use source reader's FPS for logging and legacy calculations.
+        # Get FPS from readers
         fps = source_reader.fps if source_reader.fps else initial_fps
         target_fps = target_reader.fps if target_reader.fps else initial_fps
 
-        # Log FPS info, especially if processing changed it
-        any_fps_changed = (
-            source_reader.ivtc_applied
-            or target_reader.ivtc_applied
-            or source_reader.decimate_applied
-            or target_reader.decimate_applied
-            or source_reader.deinterlace_applied
-            or target_reader.deinterlace_applied
-        )
-        if any_fps_changed:
-            log(
-                f"[VideoVerified] Processed FPS: source={fps:.3f}, target={target_fps:.3f}"
-            )
-            if abs(fps - target_fps) > 0.1:
-                log(
-                    f"[VideoVerified] WARNING: FPS mismatch after processing "
-                    f"({fps:.3f} vs {target_fps:.3f})"
-                )
-        else:
-            log(f"[VideoVerified] FPS: {fps:.3f} (frame: {1000.0 / fps:.3f}ms)")
+        log(f"[VideoVerified] FPS: source={fps:.3f}, target={target_fps:.3f}")
 
         # Timebase for frame index calculation.
-        # Two cases:
-        # 1. IVTC/VDecimate applied: VDecimate actually removes frames, so
-        #    the post-IVTC fps (23.976) IS the real frame rate. Use reader.fps.
-        # 2. AssumeFPS-only (no frame removal): AssumeFPS only relabels fps,
-        #    frame count unchanged. Must use real_fps (pre-AssumeFPS) so that
-        #    time→index math matches the actual frame count. E.g. FFMS2
-        #    reports 29.778fps (42195 frames), AssumeFPS says 29.970 but
-        #    get_frame(N) still returns the Nth of 42195 frames.
+        # Use real_fps (pre-AssumeFPS) when available so that
+        # time→index math matches the actual frame count.
         def _get_indexing_fps(reader, processed_fps):
             """Get the correct FPS for time→frame index conversion."""
-            if getattr(reader, "ivtc_applied", False):
-                # VDecimate changed the frame count — post-IVTC fps is correct
-                return processed_fps
-            if getattr(reader, "decimate_applied", False):
-                # Same: VDecimate changed the frame count
-                return processed_fps
-            # No decimation — use real FFMS2 fps (before AssumeFPS relabeling)
             real = getattr(reader, "real_fps", None)
             return real if real else processed_fps
 
@@ -413,43 +219,18 @@ def calculate_video_verified_offset(
     # Test each candidate frame offset
     candidate_results = []
 
-    # Get sequence length based on content type
-    if use_interlaced_settings:
-        sequence_length = settings.interlaced_sequence_length
-    else:
-        sequence_length = settings.video_verified_sequence_length
+    sequence_length = settings.video_verified_sequence_length
 
     # Get SSIM/MSE threshold (separate from hash threshold, different scale)
     # Only used when comparison_method is 'ssim' or 'mse'; None = defaults
     if comparison_method in ("ssim", "mse"):
-        if use_interlaced_settings:
-            ssim_threshold: int | None = settings.interlaced_ssim_threshold
-        else:
-            ssim_threshold = settings.frame_ssim_threshold
+        ssim_threshold: int | None = settings.frame_ssim_threshold
         log(
             f"[VideoVerified] SSIM/MSE distance threshold: {ssim_threshold} "
             f"(SSIM > {1.0 - ssim_threshold / 100:.2f})"
         )
     else:
         ssim_threshold = None
-
-    # Determine IVTC/VFM tolerance for sequence verification.
-    # VFM field-matching is content-dependent: different encodes of the same
-    # content produce different field-match decisions for some frames (near
-    # scene changes, high motion). This means frame N after VFM on encode A
-    # may correspond to frame N±1 after VFM on encode B. Allow ±1 frame
-    # tolerance so sequence verification can handle this.
-    source_ivtc = getattr(source_reader, "ivtc_applied", False)
-    target_ivtc = getattr(target_reader, "ivtc_applied", False)
-    source_vfm = getattr(source_reader, "vfm_applied", False)
-    target_vfm = getattr(target_reader, "vfm_applied", False)
-    any_field_processing = source_ivtc or target_ivtc or source_vfm or target_vfm
-    ivtc_tolerance = 1 if any_field_processing else 0
-    if ivtc_tolerance > 0:
-        reason = "VFM" if (source_vfm or target_vfm) else "IVTC"
-        log(
-            f"[VideoVerified] {reason} detected — using ±1 frame tolerance in sequence verification"
-        )
 
     log(
         f"[VideoVerified] Sequence verification: {sequence_length} consecutive frames must match"
@@ -472,8 +253,8 @@ def calculate_video_verified_offset(
             log,
             sequence_verify_length=sequence_length,
             ssim_threshold=ssim_threshold,
-            ivtc_tolerance=ivtc_tolerance,
-            use_global_ssim=use_interlaced_settings,
+            ivtc_tolerance=0,
+            use_global_ssim=False,
         )
         # Convert frame offset to approximate ms for logging
         approx_ms = frame_offset * source_frame_duration_ms
@@ -520,8 +301,6 @@ def calculate_video_verified_offset(
             )
 
     # Select best candidate:
-    # 1. Most sequence-verified checkpoints (primary)
-    # 2. Highest quality score (secondary)
     # Ranking key (most important → least important):
     # 1. sequence_verified — how many checkpoints passed sequence verification
     # 2. total_frames_matched — of all N×seq_len frames, how many matched on
@@ -621,9 +400,7 @@ def calculate_video_verified_offset(
 
         log("[VideoVerified] This could mean:")
         log("[VideoVerified]   - Videos have different encodes/color grading")
-        log("[VideoVerified]   - Different telecine/pulldown patterns (common for DVD)")
         log("[VideoVerified]   - One video has hardcoded subs/watermarks")
-        log("[VideoVerified]   - Deinterlacing producing different results")
         log(
             f"[VideoVerified] Falling back to audio correlation: {pure_correlation_ms:+.3f}ms"
         )
@@ -660,7 +437,7 @@ def calculate_video_verified_offset(
         hash_size=hash_size,
         hash_threshold=hash_threshold,
         ssim_threshold=ssim_threshold,
-        use_global_ssim=use_interlaced_settings,
+        use_global_ssim=False,
         num_verification_points=15,
         checkpoint_times_used=checkpoint_times,
         metric_agreement=agree_count,
@@ -735,7 +512,6 @@ def calculate_video_verified_offset(
         "candidates": candidate_results,
         "checkpoints": len(checkpoint_times),
         "use_pts_precision": use_pts,
-        "use_interlaced_settings": use_interlaced_settings,
         "source_content_type": source_props.get("content_type", "unknown"),
         "target_content_type": target_props.get("content_type", "unknown"),
         "source_fps": fps,

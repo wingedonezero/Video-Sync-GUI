@@ -5,9 +5,7 @@ Shared frame timing and video utility functions for subtitle synchronization.
 This package has been modularized for better maintainability:
 - timing.py: Frame/time conversion functions (CFR and VFR support)
 - video_properties.py: Video property detection (FPS, interlacing, resolution)
-- content_analysis.py: DVD content type analysis (idet, repeat_pict, metadata)
 - video_reader.py: Multi-backend video reader (VapourSynth, FFMS2, OpenCV, FFmpeg)
-- video_filters.py: VapourSynth deinterlace/IVTC/decimate filters
 - frame_hashing.py: Perceptual hash and frame comparison functions
 - frame_audit.py: Frame alignment audit (centisecond rounding drift)
 - surgical_rounding.py: Surgical frame-aware rounding (floor→ceil when needed)
@@ -74,16 +72,11 @@ from .timing import (
 # Video property detection
 # ============================================================================
 from .video_properties import (
-    ContentAnalysis,
-    IdetResult,
-    RepeatPictResult,
-    analyze_content_type,
-    clear_content_analysis_cache,
     compare_video_properties,
     detect_video_fps,
     detect_video_properties,
-    get_video_duration_ms,  # Convenience function for duration
-    get_video_properties,  # Convenience wrapper for detect_video_properties
+    get_video_duration_ms,
+    get_video_properties,
 )
 
 # ============================================================================
@@ -110,22 +103,17 @@ from .visual_verify import (
 # Public API
 # ============================================================================
 __all__ = [
-    "ContentAnalysis",
     "CreditsInfo",
     "FrameAuditIssue",
     "FrameAuditResult",
     "MultiMetricResult",
-    "IdetResult",
     "RegionStats",
-    "RepeatPictResult",
     "SampleResult",
     "SurgicalBatchStats",
     "SurgicalEventResult",
     "SurgicalRoundResult",
     "VideoReader",
     "VisualVerifyResult",
-    "analyze_content_type",
-    "clear_content_analysis_cache",
     "clear_vfr_cache",
     "compare_frames",
     "compare_frames_multi",

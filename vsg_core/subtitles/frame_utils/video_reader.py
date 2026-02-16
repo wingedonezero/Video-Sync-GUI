@@ -4,7 +4,6 @@ Video reader with multi-backend support for efficient frame extraction.
 
 Contains:
 - VideoReader class with VapourSynth, FFMS2, OpenCV, FFmpeg backends
-- Video filter application delegated to video_filters.py
 - FFMS2 index cache path generation
 """
 
@@ -76,31 +75,14 @@ class VideoReader:
     2. pyffms2 (fast - indexed seeking, but re-indexes each time)
     3. OpenCV (medium - keeps file open, but seeks from keyframes)
     4. FFmpeg (slow - spawns process per frame)
-
-    Supports automatic deinterlacing for interlaced content with configurable methods:
-    - 'auto': Auto-detect and deinterlace only if interlaced
-    - 'none': Never deinterlace (raw frames)
-    - 'yadif': YADIF deinterlacer (good quality, moderate speed)
-    - 'yadifmod': YADIFmod (better edge handling than YADIF)
-    - 'bob': Bob deinterlacer (fast, doubles framerate)
-    - 'bwdif': BWDIF (motion adaptive, best quality)
     """
-
-    # Available deinterlace methods
-    DEINTERLACE_METHODS = ["auto", "none", "yadif", "yadifmod", "bob", "bwdif"]
 
     def __init__(
         self,
         video_path: str,
         runner,
         temp_dir: Path | None = None,
-        deinterlace: str = "auto",
         settings: AppSettings | None = None,
-        content_type: str | None = None,
-        ivtc_field_order: str | None = None,
-        apply_ivtc: bool = False,
-        apply_decimate: bool = False,
-        skip_decimate_in_ivtc: bool = False,
         use_vapoursynth: bool = True,
     ):
         self.video_path = video_path
@@ -113,32 +95,17 @@ class VideoReader:
         self.use_ffms2 = False
         self.use_opencv = False
         self.fps = None
-        self.original_fps = None  # FPS before IVTC/decimate (if applied)
         self.temp_dir = temp_dir
-        self.deinterlace_method = deinterlace
         self.settings = settings
         self.is_interlaced = False
         self.field_order = "progressive"
-        self.deinterlace_applied = False
-        self.content_type = content_type  # 'progressive', 'interlaced', 'telecine'
-        # Optional field-order override from content analysis (idet/repeat_pict).
-        # This is critical when container metadata reports "progressive" for
-        # hard-telecined MPEG-2, where IVTC still needs a stable field order.
-        self.ivtc_field_order = ivtc_field_order
-        self.apply_ivtc = apply_ivtc  # Whether to apply IVTC for telecine content
-        self.apply_decimate = apply_decimate  # Whether to apply VDecimate only (no VFM)
-        self.skip_decimate_in_ivtc = skip_decimate_in_ivtc  # VFM only, no VDecimate
-        self.ivtc_applied = False  # Whether full IVTC (VFM+VDecimate) was applied
-        self.vfm_applied = False  # Whether VFM-only was applied (no VDecimate)
-        self.decimate_applied = False  # Whether VDecimate-only was applied
         self.is_vfr = False  # True if VFR container detected
         self.is_soft_telecine = False  # True if VFR from soft-telecine removal
         self.target_fps = None  # Target FPS after normalization (for soft-telecine)
-        self.fps_normalized = False  # Whether AssumeFPS was applied
         self.real_fps: float | None = None  # Actual FFMS2 fps before AssumeFPS
 
-        # Detect video properties for interlacing info
-        self._detect_interlacing()
+        # Detect video properties for metadata
+        self._detect_properties()
 
         # Try VapourSynth first (fastest - persistent index caching)
         if self._use_vapoursynth_requested and self._try_vapoursynth():
@@ -212,8 +179,8 @@ class VideoReader:
                 "[FrameUtils] Install opencv for better performance: pip install opencv-python"
             )
 
-    def _detect_interlacing(self):
-        """Detect if video is interlaced and check for VFR/soft-telecine."""
+    def _detect_properties(self):
+        """Detect video properties (FPS, interlacing metadata, VFR info)."""
         try:
             from .video_properties import detect_video_properties
 
@@ -226,98 +193,15 @@ class VideoReader:
             self.is_soft_telecine = props.get("is_soft_telecine", False)
 
             if self.is_soft_telecine:
-                # Store the original (correct) FPS for normalization
                 self.target_fps = props.get("original_fps", 23.976)
                 self.runner._log_message(
                     f"[FrameUtils] Soft-telecine detected: container={props.get('fps', 0):.3f}fps, "
                     f"original={self.target_fps:.3f}fps"
                 )
-                self.runner._log_message(
-                    "[FrameUtils] Will apply AssumeFPS to normalize timing"
-                )
-            elif self.is_interlaced:
-                self.runner._log_message(
-                    f"[FrameUtils] Interlaced content detected: {self.field_order.upper()}"
-                )
         except Exception as e:
-            self.runner._log_message(f"[FrameUtils] Could not detect interlacing: {e}")
+            self.runner._log_message(f"[FrameUtils] Could not detect properties: {e}")
             self.is_interlaced = False
             self.field_order = "progressive"
-
-    def _should_deinterlace(self) -> bool:
-        """Determine if deinterlacing should be applied."""
-        if self.deinterlace_method == "none":
-            return False
-        if self.deinterlace_method == "auto":
-            return self.is_interlaced
-        # Explicit method selected - always deinterlace
-        return True
-
-    def _get_deinterlace_method(self) -> str:
-        """Get the actual deinterlace method to use."""
-        if self.deinterlace_method == "auto":
-            # Use interlaced deinterlace method setting, default to bwdif
-            if self.settings is not None:
-                return self.settings.interlaced_deinterlace_method
-            return "bwdif"
-        return self.deinterlace_method
-
-    def _get_effective_field_order(self) -> str:
-        """Get the effective field order, preferring idet/ContentAnalysis over ffprobe."""
-        if self.ivtc_field_order in ("tff", "bff"):
-            return self.ivtc_field_order
-        if self.field_order in ("tff", "bff"):
-            return self.field_order
-        return "tff"  # Safe default
-
-    def _apply_deinterlace_filter(self, clip, core):
-        """Apply deinterlace filter to VapourSynth clip."""
-        from .video_filters import apply_deinterlace_filter
-
-        method = self._get_deinterlace_method()
-        field_order = self._get_effective_field_order()
-        clip, applied = apply_deinterlace_filter(
-            clip, core, method, field_order, self.runner
-        )
-        self.deinterlace_applied = applied
-        return clip
-
-    def _should_apply_ivtc(self) -> bool:
-        """Determine if IVTC should be applied to this video."""
-        # Must be explicitly enabled
-        if not self.apply_ivtc:
-            return False
-
-        # Content type must be telecine (either detected or passed in)
-        if self.content_type in ("telecine", "telecine_hard", "mixed"):
-            return True
-
-        # Also check if detected as interlaced NTSC DVD (likely telecine)
-        # This handles cases where content_type wasn't passed but we detected it
-        return bool(self.is_interlaced and self.fps and abs(self.fps - 29.97) < 0.1)
-
-    def _apply_ivtc_filter(self, clip, core):
-        """Apply IVTC to recover progressive frames from telecine."""
-        from .video_filters import apply_ivtc_filter
-
-        field_order = self._get_effective_field_order()
-        result = apply_ivtc_filter(
-            clip, core, field_order, self.skip_decimate_in_ivtc, self.runner
-        )
-        self.original_fps = result.original_fps
-        self.ivtc_applied = result.ivtc_applied
-        self.vfm_applied = result.vfm_applied
-        self.deinterlace_applied = result.deinterlace_applied
-        return result.clip
-
-    def _apply_decimate_filter(self, clip, core):
-        """Apply VDecimate only (no VFM) for progressive content with duplicates."""
-        from .video_filters import apply_decimate_filter
-
-        result = apply_decimate_filter(clip, core, self.runner)
-        self.original_fps = result.original_fps
-        self.decimate_applied = result.decimate_applied
-        return result.clip
 
     def _try_vapoursynth(self) -> bool:
         """
@@ -389,7 +273,6 @@ class VideoReader:
 
             # Detect soft-telecine: ffprobe says ~30fps but FFMS2 sees ~24fps
             # This happens when MakeMKV/mkvmerge removes soft-telecine pulldown
-            # ffprobe reads container metadata (30fps), FFMS2 reads actual timestamps (~24fps)
             from .video_properties import detect_video_properties
 
             props = detect_video_properties(self.video_path, self.runner)
@@ -409,9 +292,6 @@ class VideoReader:
 
             if is_soft_telecine_mismatch:
                 self.is_soft_telecine = True
-                # Don't modify the clip - just override fps for calculations
-                # The actual film content is 23.976fps, FFMS2's VFR timestamps are just display hints
-                # Frame indices are still correct (sequential film frames)
                 self.target_fps = 24000 / 1001  # 23.976fps - the actual film fps
                 self.runner._log_message(
                     f"[FrameUtils] Soft-telecine detected: ffprobe={ffprobe_fps:.3f}fps, "
@@ -429,36 +309,6 @@ class VideoReader:
                 clip = core.std.AssumeFPS(clip, fpsnum=30000, fpsden=1001)
                 self.runner._log_message(
                     f"[FrameUtils] Normalized FPS ({clip_fps:.3f} -> 29.970)"
-                )
-
-            # Log final clip state before processing
-            final_clip_fps = clip.fps_num / clip.fps_den
-            self.runner._log_message(
-                f"[FrameUtils] Pre-process state: clip_fps={final_clip_fps:.3f}, "
-                f"is_soft_telecine={self.is_soft_telecine}, "
-                f"target_fps={self.target_fps}, "
-                f"deinterlace={self.deinterlace_method}, "
-                f"content_type={self.content_type}"
-            )
-
-            # Apply IVTC or deinterlacing based on content type
-            # Priority: IVTC for telecine > deinterlace for interlaced
-            #         > decimate for progressive-with-pulldown > passthrough
-            if self._should_apply_ivtc():
-                # Telecine content: apply IVTC to recover progressive frames
-                clip = self._apply_ivtc_filter(clip, core)
-            elif self._should_deinterlace():
-                # Pure interlaced content: apply deinterlacing
-                clip = self._apply_deinterlace_filter(clip, core)
-            elif self.apply_decimate and not self.is_soft_telecine:
-                # Progressive content with duplicate frames (2:3 pulldown)
-                # Skip when is_soft_telecine: pulldown already removed by container,
-                # FFMS2 delivers real ~24fps frames — VDecimate would destroy content.
-                clip = self._apply_decimate_filter(clip, core)
-            elif self.apply_decimate and self.is_soft_telecine:
-                self.runner._log_message(
-                    "[FrameUtils] Skipping VDecimate: soft-telecine pulldown already "
-                    "removed by container (FFMS2 sees actual film frames)"
                 )
 
             # Keep clip in original format (usually YUV)
@@ -479,22 +329,6 @@ class VideoReader:
                 processing_status = (
                     f", soft-telecine (using {self.fps:.3f}fps for calc)"
                 )
-            if self.vfm_applied:
-                processing_status += (
-                    f", VFM-only ({self.original_fps:.3f}fps, no VDecimate)"
-                )
-            elif self.ivtc_applied:
-                processing_status += (
-                    f", IVTC applied ({self.original_fps:.3f} -> {self.fps:.3f}fps)"
-                )
-            elif self.decimate_applied:
-                processing_status += f", VDecimate applied ({self.original_fps:.3f} -> {self.fps:.3f}fps)"
-            elif self.deinterlace_applied:
-                processing_status += (
-                    f", deinterlaced with {self._get_deinterlace_method()}"
-                )
-            elif self.is_interlaced and self.deinterlace_method == "none":
-                processing_status += ", interlaced (deinterlace disabled)"
 
             self.runner._log_message(
                 f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f}{processing_status})"
@@ -840,10 +674,6 @@ class VideoReader:
             # VapourSynth can provide 8-bit, 10-bit, 12-bit, or 16-bit data
             if y_plane.dtype == np.uint16:
                 # For 10-bit (0-1023) or 16-bit (0-65535), normalize to 8-bit (0-255)
-                # Most anime is 10-bit, so values are in 0-1023 range
-                # Right-shift by (bit_depth - 8) to normalize
-                # For 10-bit: shift right by 2 (divide by 4)
-                # For 16-bit: shift right by 8 (divide by 256)
                 max_val = y_plane.max()
                 if max_val <= 1023:  # 10-bit
                     y_plane = (y_plane >> 2).astype(np.uint8)
@@ -920,20 +750,13 @@ class VideoReader:
             y_plane = np.asarray(frame[0])
 
             # Normalize bit depth to 8-bit for PIL
-            # VapourSynth can provide 8-bit, 10-bit, 12-bit, or 16-bit data
             if y_plane.dtype == np.uint16:
-                # For 10-bit (0-1023) or 16-bit (0-65535), normalize to 8-bit (0-255)
-                # Most anime is 10-bit, so values are in 0-1023 range
-                # Right-shift by (bit_depth - 8) to normalize
-                # For 10-bit: shift right by 2 (divide by 4)
-                # For 16-bit: shift right by 8 (divide by 256)
                 max_val = y_plane.max()
                 if max_val <= 1023:  # 10-bit
                     y_plane = (y_plane >> 2).astype(np.uint8)
                 else:  # 12-bit or 16-bit
                     y_plane = (y_plane >> 8).astype(np.uint8)
             elif y_plane.dtype != np.uint8:
-                # Ensure we have uint8
                 y_plane = y_plane.astype(np.uint8)
 
             # Convert to PIL Image (grayscale mode 'L')
@@ -961,8 +784,7 @@ class VideoReader:
             frame = self.source.get_frame(frame_num)
 
             # Convert to PIL Image
-            # FFMS2 returns frames as numpy arrays in RGB format
-            frame_array = frame.planes[0]  # Get RGB data
+            frame_array = frame.planes[0]
 
             # Normalize bit depth to 8-bit for PIL if needed
             if frame_array.dtype == np.uint16:
@@ -974,7 +796,6 @@ class VideoReader:
             elif frame_array.dtype != np.uint8:
                 frame_array = frame_array.astype(np.uint8)
 
-            # Create PIL Image from numpy array
             return Image.fromarray(frame_array)
 
         except Exception as e:

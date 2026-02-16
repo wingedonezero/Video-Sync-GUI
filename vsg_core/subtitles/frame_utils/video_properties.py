@@ -6,10 +6,6 @@ Contains:
 - FPS detection
 - Comprehensive video property detection (interlacing, duration, resolution)
 - Video property comparison for sync strategy selection
-
-Content type analysis (idet, repeat_pict, metadata) has been moved to
-content_analysis.py. The dataclasses and analyze_content_type() are
-re-exported here for backward compatibility.
 """
 
 from __future__ import annotations
@@ -19,25 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-# Re-export content analysis types and functions for backward compatibility.
-# External callers can still do:
-#   from .video_properties import ContentAnalysis, analyze_content_type
-from .content_analysis import (
-    ContentAnalysis,
-    IdetResult,
-    RepeatPictResult,
-    analyze_content_type,
-    clear_content_analysis_cache,
-)
-
 __all__ = [
-    # Re-exported from content_analysis for backward compat
-    "ContentAnalysis",
-    "IdetResult",
-    "RepeatPictResult",
-    "analyze_content_type",
-    "clear_content_analysis_cache",
-    # Property detection
     "compare_video_properties",
     "detect_video_fps",
     "detect_video_properties",
