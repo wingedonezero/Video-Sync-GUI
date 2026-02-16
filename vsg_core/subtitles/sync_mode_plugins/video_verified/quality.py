@@ -5,6 +5,7 @@ Frame quality measurement and sequence verification for video-verified sync.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +13,20 @@ from .offset import get_vfr_frame_for_time
 
 if TYPE_CHECKING:
     from PIL import Image
+
+
+@dataclass(slots=True)
+class SequenceResult:
+    """Result of verifying a sequence of consecutive frames."""
+
+    matched: int  # Frames matching on primary metric
+    avg_distance: float  # Average primary metric distance
+    distances: list[int]  # Per-frame primary metric distances
+    total_tested: int  # Frames actually compared
+    phash_exact: int  # Frames with phash hamming distance = 0
+    phash_distances: list[int]  # Per-frame phash distances
+    ssim_distances: list[float]  # Per-frame SSIM distances
+    mse_values: list[float]  # Per-frame raw MSE values
 
 
 def normalize_frame_pair(
@@ -53,16 +68,17 @@ def verify_frame_sequence(
     ssim_threshold: int | None = None,
     ivtc_tolerance: int = 0,
     use_global_ssim: bool = False,
-) -> tuple[int, float, list[int]]:
+) -> SequenceResult:
     """
     Verify that a sequence of consecutive frames match between source and target.
+
+    Uses compare_frames_multi() to compute ALL metrics (phash, SSIM, MSE) for
+    each frame pair. The primary metric (determined by comparison_method) is used
+    for the matched count and threshold check, while all metrics are collected.
 
     This is the key to accurate offset detection - if the offset is correct,
     then source[N], source[N+1], source[N+2], ... should match
     target[N+offset], target[N+offset+1], target[N+offset+2], ...
-
-    For hash comparison, NO window search is used - frames must match at exact
-    positions. This prevents false positives from window compensation.
 
     For IVTC content, ivtc_tolerance allows ±N frame tolerance per step to
     handle VDecimate drift (different encodes drop different frames).
@@ -76,38 +92,41 @@ def verify_frame_sequence(
         hash_algorithm: Hash algorithm to use
         hash_size: Hash size
         hash_threshold: Maximum distance for a hash match
-        comparison_method: 'hash', 'ssim', or 'mse'
+        comparison_method: 'hash', 'ssim', or 'mse' — determines primary metric
         ssim_threshold: Maximum SSIM/MSE distance for a match. If None, uses
-            hash_threshold for all methods (backwards compat).
+            defaults (ssim=10, mse=5).
         ivtc_tolerance: Frame tolerance for IVTC content (0=exact, 1=±1 frame)
+        use_global_ssim: Use global SSIM (better for interlaced content)
 
     Returns:
-        Tuple of (matched_count, avg_distance, distances_list)
+        SequenceResult with per-frame data for all metrics
     """
-    from ...frame_utils import (
-        compare_frames,
-        compute_frame_hash,
-        compute_hamming_distance,
-    )
+    from ...frame_utils import compare_frames_multi
 
-    # Determine the effective threshold for SSIM/MSE methods
-    effective_ssim_threshold = ssim_threshold if ssim_threshold is not None else None
+    # Determine effective thresholds
+    eff_ssim_thresh = ssim_threshold if ssim_threshold is not None else 10
+    eff_mse_thresh = 5  # default MSE distance threshold
 
     matched = 0
     distances: list[int] = []
+    phash_exact = 0
+    phash_distances: list[int] = []
+    ssim_distances: list[float] = []
+    mse_values: list[float] = []
+    total_tested = 0
 
     for i in range(sequence_length):
         source_idx = source_start_idx + i
 
         # For IVTC content, try ±tolerance around the expected target frame
-        # to handle VDecimate drift (different encodes drop different frames)
         target_candidates = [target_start_idx + i]
         if ivtc_tolerance > 0:
             for delta in range(1, ivtc_tolerance + 1):
                 target_candidates.append(target_start_idx + i + delta)
                 target_candidates.append(target_start_idx + i - delta)
 
-        best_distance = float("inf")
+        best_multi = None
+        best_primary_dist = float("inf")
         best_match = False
 
         for target_idx in target_candidates:
@@ -121,49 +140,63 @@ def verify_frame_sequence(
                 if source_frame is None or target_frame is None:
                     continue
 
-                # Normalize resolution if frames differ in size
                 source_frame, target_frame = normalize_frame_pair(
                     source_frame, target_frame
                 )
 
-                if comparison_method in ("ssim", "mse"):
-                    distance, is_match = compare_frames(
-                        source_frame,
-                        target_frame,
-                        method=comparison_method,
-                        hash_algorithm=hash_algorithm,
-                        hash_size=hash_size,
-                        threshold=effective_ssim_threshold,
-                        use_global_ssim=use_global_ssim,
-                    )
-                else:
-                    source_hash = compute_frame_hash(
-                        source_frame, hash_size, hash_algorithm
-                    )
-                    target_hash = compute_frame_hash(
-                        target_frame, hash_size, hash_algorithm
-                    )
+                multi = compare_frames_multi(
+                    source_frame,
+                    target_frame,
+                    hash_algorithm=hash_algorithm,
+                    hash_size=hash_size,
+                    hash_threshold=hash_threshold,
+                    ssim_threshold=eff_ssim_thresh,
+                    mse_threshold=eff_mse_thresh,
+                    use_global_ssim=use_global_ssim,
+                )
 
-                    if source_hash is None or target_hash is None:
-                        continue
+                # Determine primary metric distance and match
+                if comparison_method == "ssim":
+                    primary_dist = multi.ssim_distance
+                    is_match = multi.ssim_match
+                elif comparison_method == "mse":
+                    primary_dist = multi.mse_distance
+                    is_match = multi.mse_match
+                else:  # hash
+                    primary_dist = multi.phash_distance
+                    is_match = multi.phash_match
 
-                    distance = compute_hamming_distance(source_hash, target_hash)
-                    is_match = distance <= hash_threshold
-
-                if distance < best_distance:
-                    best_distance = distance
+                if primary_dist < best_primary_dist:
+                    best_primary_dist = primary_dist
                     best_match = is_match
+                    best_multi = multi
 
             except Exception:
                 continue
 
-        if best_distance < float("inf"):
-            distances.append(int(best_distance))
+        if best_multi is not None:
+            total_tested += 1
+            distances.append(int(best_primary_dist))
+            phash_distances.append(best_multi.phash_distance)
+            ssim_distances.append(best_multi.ssim_distance)
+            mse_values.append(best_multi.mse_value)
+
+            if best_multi.phash_distance == 0:
+                phash_exact += 1
             if best_match:
                 matched += 1
 
     avg_dist = sum(distances) / len(distances) if distances else float("inf")
-    return matched, avg_dist, distances
+    return SequenceResult(
+        matched=matched,
+        avg_distance=avg_dist,
+        distances=distances,
+        total_tested=total_tested,
+        phash_exact=phash_exact,
+        phash_distances=phash_distances,
+        ssim_distances=ssim_distances,
+        mse_values=mse_values,
+    )
 
 
 def measure_frame_offset_quality(
@@ -186,36 +219,24 @@ def measure_frame_offset_quality(
     use_global_ssim: bool = False,
 ) -> dict[str, Any]:
     """
-    Measure quality of a candidate frame offset using sequence verification.
+    Measure quality of a candidate frame offset using multi-metric sequence verification.
 
     Algorithm:
-    1. At each checkpoint, test if source frame N matches target frame N+offset
-    2. If initial frame matches, verify with SEQUENCE of consecutive frames
-    3. Sequence verification uses NO window - frames must match at exact positions
-    4. This prevents false positives where window search compensates for wrong offset
-
-    The sequence verification is key: if offset is correct, then frames
-    N, N+1, N+2, ... in source should match N+offset, N+offset+1, N+offset+2, ...
-    in target. If offset is wrong, the sequence will fail even if single frames
-    happen to match due to similar content.
-
-    Args:
-        frame_offset: Integer frame offset to test (target_frame = source_frame + offset)
-        checkpoint_times: List of times in the source video to check
-        sequence_verify_length: Number of consecutive frames to verify (default 10)
-        ssim_threshold: SSIM/MSE distance threshold (None = use compare_frames defaults)
-        ivtc_tolerance: Frame tolerance for IVTC content (0=exact, 1=±1 frame)
-        ... (other args same as before)
+    1. At each checkpoint, compare source frame N vs target frame N+offset using ALL
+       metrics (phash, SSIM, MSE) via compare_frames_multi()
+    2. Verify with SEQUENCE of consecutive frames (also multi-metric)
+    3. Primary metric (from comparison_method) determines sequence_verified status
+    4. All metrics are collected for cross-validation and logging
 
     Returns:
-        Dict with score, matched count, avg_distance, sequence_verified count, and match_details
+        Dict with score, matched count, avg_distance, sequence_verified count,
+        match_details, per_checkpoint_summary, and frame counts for all metrics.
     """
-    from ...frame_utils import (
-        compare_frames,
-        compute_frame_hash,
-        compute_hamming_distance,
-    )
-    from ...frame_utils.frame_hashing import compute_mse as _compute_mse
+    from ...frame_utils import compare_frames_multi
+
+    # Determine effective thresholds
+    eff_ssim_thresh = ssim_threshold if ssim_threshold is not None else 10
+    eff_mse_thresh = 5  # default MSE distance threshold
 
     total_score = 0.0
     matched_count = 0
@@ -223,6 +244,12 @@ def measure_frame_offset_quality(
     distances: list[float] = []
     mse_values: list[float] = []
     match_details = []
+    per_checkpoint_summary = []
+
+    # Aggregate frame counts across all checkpoints
+    total_frames_tested = 0
+    total_frames_matched = 0  # matched on primary metric
+    total_phash_exact = 0
 
     # Debug: log frame mapping details for first candidate only
     if frame_offset == 0:
@@ -254,13 +281,10 @@ def measure_frame_offset_quality(
 
     for checkpoint_ms in checkpoint_times:
         # Source frame at checkpoint time
-        # Use timestamp-based lookup (handles VFR/non-linear timestamps correctly)
-        # Falls back to CFR math when timestamps are linear
         ts_frame = source_reader.get_frame_index_for_time(checkpoint_ms)
         if ts_frame is not None:
             source_frame_idx = ts_frame
         else:
-            # Fallback: try VFR VideoTimestamps, then CFR
             is_source_vfr = getattr(source_reader, "is_soft_telecine", False)
             source_path = getattr(source_reader, "video_path", "")
             vfr_frame = get_vfr_frame_for_time(
@@ -271,11 +295,7 @@ def measure_frame_offset_quality(
             else:
                 source_frame_idx = int(checkpoint_ms / source_frame_duration_ms)
 
-        # Target frame with this offset (STRICT - no window for initial test)
-        # Convert frame_offset to a TIME offset using source frame duration,
-        # then find the target frame at (checkpoint_time + offset_time).
-        # This correctly handles VFR targets where frame indices don't map
-        # linearly to time (e.g., MPEG-2 DVDs with non-constant frame durations).
+        # Target frame with this offset (TIME-based)
         offset_time_ms = frame_offset * source_frame_duration_ms
         target_time_ms = checkpoint_ms + offset_time_ms
 
@@ -296,10 +316,10 @@ def measure_frame_offset_quality(
             )
 
         try:
-            # First, check if the single frame matches (strict, no window)
+            # Get the initial frame pair
             source_frame = source_reader.get_frame_at_index(source_frame_idx)
 
-            # Debug: save first checkpoint frames at offset 0 for visual inspection
+            # Debug: save first checkpoint frames at offset 0
             if frame_offset == 0 and checkpoint_ms == checkpoint_times[0]:
                 try:
                     import tempfile
@@ -326,47 +346,34 @@ def measure_frame_offset_quality(
                 source_frame, target_frame
             )
 
-            if comparison_method in ("ssim", "mse"):
-                # Use compare_frames with configurable SSIM/MSE threshold
-                initial_distance, initial_match = compare_frames(
-                    source_frame,
-                    target_frame,
-                    method=comparison_method,
-                    hash_algorithm=hash_algorithm,
-                    hash_size=hash_size,
-                    threshold=ssim_threshold,
-                    use_global_ssim=use_global_ssim,
-                )
-            else:
-                # Default: use perceptual hash comparison
-                source_hash = compute_frame_hash(
-                    source_frame, hash_size, hash_algorithm
-                )
-                if source_hash is None:
-                    continue
+            # Multi-metric comparison for the initial frame
+            initial_multi = compare_frames_multi(
+                source_frame,
+                target_frame,
+                hash_algorithm=hash_algorithm,
+                hash_size=hash_size,
+                hash_threshold=hash_threshold,
+                ssim_threshold=eff_ssim_thresh,
+                mse_threshold=eff_mse_thresh,
+                use_global_ssim=use_global_ssim,
+            )
 
-                target_hash = compute_frame_hash(
-                    target_frame, hash_size, hash_algorithm
-                )
-                if target_hash is None:
-                    continue
-
-                initial_distance = compute_hamming_distance(source_hash, target_hash)
-                initial_match = initial_distance <= hash_threshold
+            # Primary metric for backward-compatible ranking
+            if comparison_method == "ssim":
+                initial_distance = initial_multi.ssim_distance
+                initial_match = initial_multi.ssim_match
+            elif comparison_method == "mse":
+                initial_distance = initial_multi.mse_distance
+                initial_match = initial_multi.mse_match
+            else:  # hash
+                initial_distance = initial_multi.phash_distance
+                initial_match = initial_multi.phash_match
 
             distances.append(initial_distance)
+            mse_values.append(initial_multi.mse_value)
 
-            # Compute raw MSE for tiebreaker ranking (independent of comparison method).
-            # MSE is more sensitive to exact pixel differences than SSIM, giving
-            # better discrimination when multiple candidates have similar SSIM scores.
-            try:
-                raw_mse = _compute_mse(source_frame, target_frame)
-                mse_values.append(raw_mse)
-            except Exception:
-                pass
-
-            # Now verify with sequence of consecutive frames
-            seq_matched, seq_avg_dist, _seq_distances = verify_frame_sequence(
+            # Sequence verification (multi-metric)
+            seq_result = verify_frame_sequence(
                 source_frame_idx,
                 target_frame_idx,
                 sequence_verify_length,
@@ -381,40 +388,71 @@ def measure_frame_offset_quality(
                 use_global_ssim=use_global_ssim,
             )
 
-            # Sequence is verified if majority of frames match
-            # Require at least 70% of sequence to match
+            # Sequence is verified if majority of frames match on primary metric
             min_sequence_matches = int(sequence_verify_length * 0.7)
-            sequence_verified = seq_matched >= min_sequence_matches
+            sequence_verified = seq_result.matched >= min_sequence_matches
 
-            # Record match details
+            # Aggregate frame counts
+            total_frames_tested += seq_result.total_tested
+            total_frames_matched += seq_result.matched
+            total_phash_exact += seq_result.phash_exact
+
+            # Compute per-checkpoint averages
+            cp_avg_ssim = (
+                sum(seq_result.ssim_distances) / len(seq_result.ssim_distances)
+                if seq_result.ssim_distances
+                else float("inf")
+            )
+            cp_avg_mse = (
+                sum(seq_result.mse_values) / len(seq_result.mse_values)
+                if seq_result.mse_values
+                else float("inf")
+            )
+
+            per_checkpoint_summary.append(
+                {
+                    "checkpoint_ms": checkpoint_ms,
+                    "source_frame": source_frame_idx,
+                    "target_frame": target_frame_idx,
+                    "seq_matched": seq_result.matched,
+                    "seq_total": seq_result.total_tested,
+                    "phash_exact": seq_result.phash_exact,
+                    "avg_ssim_dist": cp_avg_ssim,
+                    "avg_mse": cp_avg_mse,
+                    "verified": sequence_verified,
+                }
+            )
+
+            # Record match details (backward-compatible)
             match_details.append(
                 {
                     "source_frame": source_frame_idx,
                     "target_frame": target_frame_idx,
                     "distance": initial_distance,
                     "is_match": initial_match,
-                    "sequence_matched": seq_matched,
+                    "sequence_matched": seq_result.matched,
                     "sequence_length": sequence_verify_length,
                     "sequence_verified": sequence_verified,
-                    "sequence_avg_dist": seq_avg_dist,
+                    "sequence_avg_dist": seq_result.avg_distance,
+                    # Multi-metric data
+                    "phash_distance": initial_multi.phash_distance,
+                    "ssim_distance": initial_multi.ssim_distance,
+                    "mse_value": initial_multi.mse_value,
                 }
             )
 
             if sequence_verified:
                 sequence_verified_count += 1
                 matched_count += 1
-                # High score for sequence-verified matches
-                # Score based on how many frames in sequence matched
-                seq_ratio = seq_matched / sequence_verify_length
-                total_score += 2.0 * seq_ratio  # Up to 2.0 for perfect sequence
+                seq_ratio = seq_result.matched / sequence_verify_length
+                total_score += 2.0 * seq_ratio
             elif initial_match:
-                # Initial frame matched but sequence didn't verify
-                # Give partial score but much lower than verified
                 matched_count += 1
                 total_score += 0.3
             else:
-                # No match at all
-                total_score += max(0, 0.1 - (initial_distance / (hash_threshold * 4)))
+                total_score += max(
+                    0, 0.1 - (initial_distance / (hash_threshold * 4))
+                )
 
         except Exception as e:
             log(f"[VideoVerified] Checkpoint error: {e}")
@@ -430,4 +468,9 @@ def measure_frame_offset_quality(
         "avg_distance": avg_distance,
         "avg_mse": avg_mse,
         "match_details": match_details,
+        # New multi-metric fields
+        "total_frames_tested": total_frames_tested,
+        "total_frames_matched": total_frames_matched,
+        "phash_exact_matches": total_phash_exact,
+        "per_checkpoint_summary": per_checkpoint_summary,
     }
