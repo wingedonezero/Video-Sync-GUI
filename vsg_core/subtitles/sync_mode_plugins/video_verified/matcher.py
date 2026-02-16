@@ -522,16 +522,24 @@ def calculate_video_verified_offset(
     # Select best candidate:
     # 1. Most sequence-verified checkpoints (primary)
     # 2. Highest quality score (secondary)
-    # 3. Lowest MSE for tiebreaker — MSE is more sensitive to exact pixel
-    #    differences than SSIM distance, giving much better discrimination
-    #    when candidates have nearly identical SSIM scores (e.g. same-source
-    #    re-encodes where adjacent frames all pass SSIM thresholds easily).
-    #    For interlaced content, MSE and SSIM distance are both used since
-    #    the deinterlace artifacts affect both metrics similarly.
-    best_result = max(
-        candidate_results,
-        key=lambda r: (r["sequence_verified"], r["quality"], -r["avg_mse"]),
-    )
+    # Ranking key (most important → least important):
+    # 1. sequence_verified — how many checkpoints passed sequence verification
+    # 2. total_frames_matched — of all N×seq_len frames, how many matched on
+    #    the primary metric (SSIM). Finer than seq count since it captures
+    #    partial checkpoint success (e.g. 86/90 vs 82/90).
+    # 3. phash_exact_matches — hamming distance 0 count. Binary "same frame"
+    #    signal immune to threshold tuning; strongest discriminator between
+    #    correct offset and ±1 neighbors (typically 85/90 vs 58-66/90).
+    # 4. -avg_mse — MSE tiebreaker for when everything else ties.
+    def _rank_key(r):
+        return (
+            r["sequence_verified"],
+            r.get("total_frames_matched", 0),
+            r.get("phash_exact_matches", 0),
+            -r["avg_mse"],
+        )
+
+    best_result = max(candidate_results, key=_rank_key)
     best_frame_offset = best_result["frame_offset"]
 
     # ─── RESULTS SUMMARY ─────────────────────────────────────────────
@@ -551,11 +559,7 @@ def calculate_video_verified_offset(
     )
 
     # Runner-up comparison
-    sorted_candidates = sorted(
-        candidate_results,
-        key=lambda r: (r["sequence_verified"], r["quality"], -r["avg_mse"]),
-        reverse=True,
-    )
+    sorted_candidates = sorted(candidate_results, key=_rank_key, reverse=True)
     if len(sorted_candidates) > 1:
         runner_up = sorted_candidates[1]
         runner_tested = runner_up.get("total_frames_tested", 0)
