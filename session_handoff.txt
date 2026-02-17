@@ -607,6 +607,39 @@ comparing.
 Test files: test_ep2_sequence_slide.py, test_ep2_slide_deinterlaced.py
 
 ------------------------------------------------------------------------
+12c-2. DEINTERLACED TEST: 009-1 EP1 (same fps works, cross fps fails)
+------------------------------------------------------------------------
+
+Test: 009-1 EP1, ISC with bwdif deinterlacing
+
+Sources:
+  S1: 29.970fps interlaced TFF, 720×480 (43470 frames) — deinterlaced
+  S2: 29.970fps interlaced TFF, 720×480 (43482 frames) — deinterlaced
+  S3: 23.976fps progressive, 704×384 (34785 frames) — already progressive
+
+Audio correlation: S1↔S2 = -356.967ms, S1↔S3 = -446.050ms
+
+S1↔S2 (same fps, both deinterlaced with bwdif): WORKS
+  8/9 consensus at +22 frames (+734.1ms), 1 outlier at +24f
+  299/299 matches at every position
+  Mean score: 0.9956, range [0.9932, 0.9974]
+  Deinterlacing was sufficient — same resolution, same fps, same master
+
+S1↔S3 (cross fps 29.970↔23.976, deinterlaced↔progressive): FAILED
+  0/100 matches at every position, random offsets
+  Scores near zero: mean 0.134, range [-0.003, 0.350]
+  Score landscape completely flat — no peak at all
+  Different resolution (720×480 vs 704×384) + different fps makes
+  ISC unable to recognize the content as matching
+
+Key finding: bwdif deinterlacing solves same-fps interlaced↔interlaced
+matching. Cross-fps + different resolution remains unsolvable by neural
+sequence sliding — must fall back to audio correlation only.
+
+Test file: /home/chaoz/Desktop/Makemkv/Test Files/Interlaced/009-1/
+           test_ep1_sequence_slide.py
+
+------------------------------------------------------------------------
 12d. MODELS AND DEPENDENCIES INSTALLED
 ------------------------------------------------------------------------
 
@@ -649,14 +682,23 @@ TransVCL (video copy detection):
    anime scenes where neighboring frames are nearly identical), not
    the models.
 
-3. Different fps / interlaced content needs preprocessing before
-   sequence sliding can work. Frame-by-frame sliding assumes 1:1
-   frame correspondence. Cross-fps needs time-based sampling.
+3. bwdif deinterlacing + same-fps sliding WORKS. 009-1 S1↔S2: both
+   interlaced 29.970fps deinterlaced with bwdif → 8/9 exact, 0.995+
+   scores, 299/299 matches. Deinterlacing does NOT change frame rate
+   or frame count — just cleans combing artifacts in place.
 
-4. The existing phash/SSIM approach in the app already handles the
-   interlaced/cross-fps cases well (per session_handoff section 11).
-   Neural sequence sliding would be an upgrade for same-fps verification
-   but adds a heavy ML dependency (torch, ISC model).
+4. Cross-fps + different resolution FAILS even with deinterlacing.
+   009-1 S1↔S3 (29.970↔23.976, 720×480↔704×384): scores near zero.
+   Starship Operators S1↔S2 (29.970↔24.405): same failure.
+   Must fall back to audio-correlation-only for these pairs.
 
-5. For production: sequence sliding centered on the audio correlation
+5. For production, video-verified mode needs to detect pair type:
+   - Same fps (or close): use ISC sequence sliding for verification
+   - Cross fps / interlaced↔progressive with different resolution:
+     skip visual verification, trust audio correlation only
+   - Gate: if either source is MPEG2 interlaced/telecine AND fps
+     differs significantly, use audio-only path. But pure progressive
+     MPEG2 at same fps should still use visual verification.
+
+6. For production: sequence sliding centered on the audio correlation
    offset would give frame-exact verification with ±a few frame search.
