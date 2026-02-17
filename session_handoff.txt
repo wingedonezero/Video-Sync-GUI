@@ -563,9 +563,23 @@ Test: Outbreak Company EP3, Source 1 ↔ Source 2
     Mean score: 0.9989, range [0.9984, 0.9993]
     ~55s per position
 
-Score landscape shows a perfect symmetric peak at the correct offset,
-with scores dropping ~0.0014 per frame away from peak. Completely
-unambiguous — no false peaks.
+Score landscape (DINOv3-B, 50% position) — perfect symmetric gradient:
+  off= +15: 0.9880    off= +20: 0.9948    off= +23: 0.9992 ★ PEAK
+  off= +16: 0.9894    off= +21: 0.9962    off= +24: 0.9977
+  off= +17: 0.9909    off= +22: 0.9977    off= +25: 0.9962
+  off= +18: 0.9923                         off= +26: 0.9948
+  off= +19: 0.9936                         off= +31: 0.9880
+Drops ~0.0014 per frame from peak, perfectly symmetric both sides.
+Completely unambiguous — no false peaks anywhere in ±5s range.
+
+How the sliding works:
+  1. Extract ISC/DINOv3 features for every frame in a 10s source window
+  2. Extract features for a wider target window (10s + 2×5s padding)
+  3. Slide source sequence across target one frame at a time
+  4. At each slide position p: pair src[i] with tgt[p+i], compute
+     cosine similarity for each pair, take mean across all pairs
+  5. Position with highest mean = correct offset
+  Key function: slide_and_score() — normalize features, dot product
 
 ISC is the better choice: 2.3× faster, slightly higher scores, 256-dim
 vs 768-dim features. ISC = Image Similarity Challenge (Meta ISC21),
@@ -632,12 +646,45 @@ S1↔S3 (cross fps 29.970↔23.976, deinterlaced↔progressive): FAILED
   Different resolution (720×480 vs 704×384) + different fps makes
   ISC unable to recognize the content as matching
 
+Deinterlace method: VapourSynth bwdif (bob-weave deinterlace filter)
+  core.std.SetFieldBased(clip, 2)  # mark TFF
+  core.bwdif.Bwdif(clip_marked, field=2)  # auto detect, same framerate
+  Does NOT change frame rate or frame count — just cleans combing in place.
+
 Key finding: bwdif deinterlacing solves same-fps interlaced↔interlaced
 matching. Cross-fps + different resolution remains unsolvable by neural
 sequence sliding — must fall back to audio correlation only.
 
 Test file: /home/chaoz/Desktop/Makemkv/Test Files/Interlaced/009-1/
            test_ep1_sequence_slide.py
+
+------------------------------------------------------------------------
+12c-3. APP METHOD vs ISC: Head-to-head on 009-1 S1↔S2 (deinterlaced)
+------------------------------------------------------------------------
+
+Same test pair: 009-1 EP1 S1↔S2, both bwdif deinterlaced, same fps.
+
+App's current method (phash/SSIM/MSE, 9 checkpoints, ±8f search):
+  WRONG ANSWER: picked +0ms (should be ~-357ms / -11 frames)
+  Every candidate: 1/9 seq_verified — ZERO discrimination
+  SSIM distances: 31–35 across ALL candidates (threshold=10)
+  phash distances: 14–18 across ALL candidates (threshold=5)
+  Only 15–22/135 frames matched (11–16%)
+  Even the correct offset (-11f) has avg_ssim=32.8 — virtually
+  indistinguishable from wrong offsets (avg_ssim=31.1 at 0f)
+
+ISC sequence sliding (same pair, same deinterlacing):
+  CORRECT ANSWER: 8/9 exact at +22 frames
+  Scores: 0.9932–0.9974, 299/299 matches at every position
+  Clear unambiguous peak with smooth gradient
+
+Conclusion: The app's phash/SSIM/MSE approach cannot discriminate
+between candidate offsets on interlaced DVD content, even with
+deinterlacing. The pixel-level differences between different DVD
+encodes are too large (SSIM ~0.67). ISC's learned features see
+through encoding differences that pixel metrics cannot.
+
+Test file: test_ep1_app_method.py
 
 ------------------------------------------------------------------------
 12d. MODELS AND DEPENDENCIES INSTALLED
