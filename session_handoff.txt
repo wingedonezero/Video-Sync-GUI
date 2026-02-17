@@ -499,3 +499,164 @@ VideoTimestamps vs index offset:
   - PTS delta stays constant — this is what mkvmerge needs
   - VideoTimestamps provides exact PTS↔frame mapping via Fraction math
   - Avoids floating-point drift from average frame duration calculations
+
+
+========================================================================
+12. NEURAL FEATURE SEQUENCE SLIDING (Session 3)
+========================================================================
+
+Context: Explored whether AI/neural visual features could verify frame
+offsets more robustly than per-frame SSIM/phash, especially for
+cross-encode content. Tested many approaches; most failed at per-frame
+matching but sequence sliding was a breakthrough.
+
+------------------------------------------------------------------------
+12a. PER-FRAME NEURAL MATCHING: ALL FAILED
+------------------------------------------------------------------------
+
+Test files: Outbreak Company EP3, Source 1 ↔ Source 2
+  Same master, same fps (23.976↔23.976), ground truth offset: -23 frames
+  Test: 90 checkpoints across episode, sweep ±30 offsets per checkpoint,
+  check if the model picks offset=0 (correct match) as most similar.
+
+Results (per-frame, higher = better):
+  DINOv2 ViT-B/14 (224×224 CLS):          34/90 (37.8%) — best per-frame
+  DINOv3 ViT-S/16 (448×448):               2/90 (2.2%)
+  DINOv3 ViT-B/16 (448×448):               1/90 (1.1%)
+  DINOv3-B + Danbooru ResNet50 (2816-dim):  2/90 (2.2%)
+  ISC ft_v107 (256-dim):                    0/90 (0.0%)
+  DnS descriptor:                           0/90 (0.0%)
+  S2VS (ViSiL head):                        0/90 (0.0%)
+  LPIPS VGG:                                1/90 (0.0%)
+  DreamSim:                                 0/90 (0.0%)
+
+Why per-frame fails: Within static anime scenes, neighboring frames are
+virtually identical to ANY vision model. A frame at offset +5 looks just
+as similar as offset 0. The models aren't broken — single frames don't
+carry enough temporal signal for same-master content.
+
+Test files created in: /home/chaoz/Desktop/Makemkv/Test Files/Outbreak Company/
+  test_ep3_dinov3_perframe.py, test_ep3_dinov3_danbooru.py,
+  test_ep3_lpips_dreamsim.py, test_ep3_isc_perframe.py
+
+------------------------------------------------------------------------
+12b. SEQUENCE SLIDING: BREAKTHROUGH (100% accuracy)
+------------------------------------------------------------------------
+
+Approach (user's idea): Instead of matching individual frames, slide a
+10-second SEQUENCE from Source 1 across a wider window in Source 2.
+At each slide position, compute mean cosine similarity across all
+aligned frame pairs. The position with the highest cumulative score
+is the correct offset. Like visual cross-correlation.
+
+Test: Outbreak Company EP3, Source 1 ↔ Source 2
+  Same master, same fps (23.976↔23.976)
+  10-second window, ±5s slide range, 9 positions (10%–90% of episode)
+
+  ISC (256-dim):
+    9/9 exact match (100%), 239/239 frame matches at every position
+    Mean score: 0.9993, range [0.9987, 0.9996]
+    ~23s per position
+
+  DINOv3 ViT-B/16 (768-dim):
+    9/9 exact match (100%), 239/239 frame matches at every position
+    Mean score: 0.9989, range [0.9984, 0.9993]
+    ~55s per position
+
+Score landscape shows a perfect symmetric peak at the correct offset,
+with scores dropping ~0.0014 per frame away from peak. Completely
+unambiguous — no false peaks.
+
+ISC is the better choice: 2.3× faster, slightly higher scores, 256-dim
+vs 768-dim features. ISC = Image Similarity Challenge (Meta ISC21),
+designed for near-duplicate image detection — exactly this use case.
+
+Test file: test_ep3_sequence_slide_v2.py
+
+Sign convention note: The sliding finds that source frame N's content
+appears at target frame N+23 (offset = tgt_frame - src_frame = +23).
+The audio correlation reports -959ms / -23 frames using the opposite
+convention (delay to apply). Same information, different sign.
+
+------------------------------------------------------------------------
+12c. INTERLACED TEST: SEQUENCE SLIDING FAILS (different fps)
+------------------------------------------------------------------------
+
+Test: Starship Operators EP2, Source 1 ↔ Source 2
+  Source 1: 29.970fps interlaced (MPEG2, field_order=tt)
+  Source 2: 24.405fps progressive with 2:3 pulldown
+  Audio correlation: -991.610ms
+
+Results (frame-by-frame sliding, no preprocessing):
+  ISC: 0/8 positions, scores 0.13–0.28, 0/299 matches, random offsets
+  DINOv3-B: 0/8 positions, scores 0.27–0.66, 0/299 matches, random
+
+Total failure because:
+  1. Different frame rates (29.970 vs 24.405) — frame-by-frame sliding
+     doesn't work, frames don't correspond 1:1 in time
+  2. Interlaced vs progressive — pixel content looks fundamentally different
+     (combing artifacts vs clean frames)
+  3. Both are originally 24fps content telecined differently
+
+Attempted fix: bwdif deinterlace on Source 1 + time-based sampling
+(sample every 100ms, map to nearest frame in each source). Test was
+stopped before completion — needs further investigation into proper
+IVTC for both sources to recover original 24fps content before
+comparing.
+
+Test files: test_ep2_sequence_slide.py, test_ep2_slide_deinterlaced.py
+
+------------------------------------------------------------------------
+12d. MODELS AND DEPENDENCIES INSTALLED
+------------------------------------------------------------------------
+
+ISC feature extractor:
+  pip install isc-feature-extractor
+  Usage: from isc_feature_extractor import create_model
+  model, preprocess = create_model(weight_name='isc_ft_v107', device='cuda')
+  Features: 256-dim per image, ResNet-based, fast
+
+DINOv3 ViT-B/16:
+  Installed via: pip install dinov3easy (wrapper package)
+  Weights downloaded to /tmp/dinov3_weights/:
+    dinov3_vitb16_pretrain_lvd1689m.pth (327MB)
+    dinov3_vitl16_pretrain_lvd1689m.pth (1.2GB)
+  Requires HuggingFace gated repo access for official weights
+  Local repo path for torch.hub.load:
+    .venv/.../dinov3easy/dinov3/
+  Had to fix hardcoded checkpoint path in:
+    .venv/.../dinov3easy/checkpoints/checkpoints_location.txt
+
+RF5/danbooru-pretrained (PyTorch anime ResNet50):
+  Loaded via torch.hub: torch.hub.load('RF5/danbooru-pretrained', 'resnet50')
+  Model structure: Sequential(backbone_conv_layers, head)
+  Backbone features: model[0] → (B, 2048, H, W) → avgpool → (B, 2048)
+
+TransVCL (video copy detection):
+  Cloned to /tmp/TransVCL/, model at transvcl/weights/model_1.pth
+  Uses ISC features at 1fps → Transformer → segment detection
+  Found segments correctly but per-frame matching still failed
+
+------------------------------------------------------------------------
+12e. KEY TAKEAWAYS
+------------------------------------------------------------------------
+
+1. Sequence sliding works perfectly for same-master same-fps content.
+   ISC is the recommended model (faster, higher scores, simpler).
+
+2. Per-frame neural matching is fundamentally wrong for this use case.
+   All 9+ models tested failed. The problem is the content (static
+   anime scenes where neighboring frames are nearly identical), not
+   the models.
+
+3. Different fps / interlaced content needs preprocessing before
+   sequence sliding can work. Frame-by-frame sliding assumes 1:1
+   frame correspondence. Cross-fps needs time-based sampling.
+
+4. The existing phash/SSIM approach in the app already handles the
+   interlaced/cross-fps cases well (per session_handoff section 11).
+   Neural sequence sliding would be an upgrade for same-fps verification
+   but adds a heavy ML dependency (torch, ISC model).
+
+5. For production: sequence sliding centered on the audio correlation
+   offset would give frame-exact verification with ±a few frame search.
