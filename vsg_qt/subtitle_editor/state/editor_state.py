@@ -333,7 +333,10 @@ class EditorState(QObject):
         """
         kept = set()
         for i, event in enumerate(self.events):
+            # Comments are not subject to filtering — always treat as kept
+            # so preview dimming and effect flagging don't misfire on them
             if event.is_comment:
+                kept.add(i)
                 continue
 
             style_match = event.style in self._filter_styles
