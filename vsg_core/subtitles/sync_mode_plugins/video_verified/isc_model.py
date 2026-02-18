@@ -40,12 +40,8 @@ def get_model_dir() -> Path:
 def is_model_downloaded() -> bool:
     """Check if the ISC model weights have been downloaded."""
     model_dir = get_model_dir()
-    # torch.hub saves as: checkpoints/isc_ft_v107.pth.tar
-    checkpoint_dir = model_dir / "checkpoints"
-    if not checkpoint_dir.exists():
-        return False
-    # Look for any .pth.tar file
-    return any(checkpoint_dir.glob("*.pth.tar"))
+    # isc-feature-extractor saves directly as: isc_ft_v107.pth.tar
+    return any(model_dir.glob("*.pth.tar"))
 
 
 def create_isc_model(
