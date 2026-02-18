@@ -87,8 +87,10 @@ def calculate_neural_verified_offset(
     batch_size = getattr(settings, "neural_batch_size", 32)
 
     log(f"[NeuralVerified] Model: ISC ft_v107 (256-dim)")
-    log(f"[NeuralVerified] Window: {window_sec}s, Slide: ±{slide_range_sec}s, "
-        f"Positions: {num_positions}, Batch: {batch_size}")
+    log(
+        f"[NeuralVerified] Window: {window_sec}s, Slide: ±{slide_range_sec}s, "
+        f"Positions: {num_positions}, Batch: {batch_size}"
+    )
 
     # Open video clips with VapourSynth
     try:
@@ -135,16 +137,22 @@ def calculate_neural_verified_offset(
     tgt_fps = tgt_yuv.fps.numerator / tgt_yuv.fps.denominator
     src_frame_dur_ms = 1000.0 / src_fps
 
-    log(f"[NeuralVerified] Source: {src_yuv.num_frames}f @ {src_fps:.3f}fps, "
-        f"{src_yuv.width}x{src_yuv.height}")
-    log(f"[NeuralVerified] Target: {tgt_yuv.num_frames}f @ {tgt_fps:.3f}fps, "
-        f"{tgt_yuv.width}x{tgt_yuv.height}")
+    log(
+        f"[NeuralVerified] Source: {src_yuv.num_frames}f @ {src_fps:.3f}fps, "
+        f"{src_yuv.width}x{src_yuv.height}"
+    )
+    log(
+        f"[NeuralVerified] Target: {tgt_yuv.num_frames}f @ {tgt_fps:.3f}fps, "
+        f"{tgt_yuv.width}x{tgt_yuv.height}"
+    )
 
     # Check FPS compatibility — for now we only handle same-fps content
     fps_ratio = max(src_fps, tgt_fps) / min(src_fps, tgt_fps)
     if fps_ratio > 1.01:
-        log(f"[NeuralVerified] WARNING: FPS mismatch ({src_fps:.3f} vs {tgt_fps:.3f}), "
-            f"ratio={fps_ratio:.4f}")
+        log(
+            f"[NeuralVerified] WARNING: FPS mismatch ({src_fps:.3f} vs {tgt_fps:.3f}), "
+            f"ratio={fps_ratio:.4f}"
+        )
         log("[NeuralVerified] Cross-fps matching not yet supported in production")
         log("[NeuralVerified] Falling back to audio correlation")
         return total_delay_ms, {
@@ -187,9 +195,7 @@ def calculate_neural_verified_offset(
     log(f"[NeuralVerified] Model load time: {t_model:.1f}s")
 
     # Select test positions (evenly across 10%–90%)
-    positions_pct = [
-        10 + 80 * (i + 0.5) / num_positions for i in range(num_positions)
-    ]
+    positions_pct = [10 + 80 * (i + 0.5) / num_positions for i in range(num_positions)]
 
     log(f"[NeuralVerified] ─────────────────────────────────────")
     log(f"[NeuralVerified] Testing {num_positions} positions")
@@ -215,20 +221,26 @@ def calculate_neural_verified_offset(
         tgt_frames = list(range(tgt_window_start, tgt_window_end))
 
         if len(tgt_frames) <= len(src_frames):
-            log(f"[NeuralVerified]   [{i+1}/{num_positions}] {pct:.0f}% — SKIPPED (edge)")
+            log(
+                f"[NeuralVerified]   [{i + 1}/{num_positions}] {pct:.0f}% — SKIPPED (edge)"
+            )
             continue
 
         # Extract features
         src_feats = _extract_features_batch(
-            src_rgb, src_frames, model, device, batch_size, torch)
+            src_rgb, src_frames, model, device, batch_size, torch
+        )
         tgt_feats = _extract_features_batch(
-            tgt_rgb, tgt_frames, model, device, batch_size, torch)
+            tgt_rgb, tgt_frames, model, device, batch_size, torch
+        )
 
         # Slide and score
         scores, match_counts = _slide_and_score(src_feats, tgt_feats)
 
         if len(scores) == 0:
-            log(f"[NeuralVerified]   [{i+1}/{num_positions}] {pct:.0f}% — SKIPPED (no slides)")
+            log(
+                f"[NeuralVerified]   [{i + 1}/{num_positions}] {pct:.0f}% — SKIPPED (no slides)"
+            )
             continue
 
         best_pos = int(np.argmax(scores))
@@ -267,11 +279,13 @@ def calculate_neural_verified_offset(
         }
         landscapes.append(landscape)
 
-        log(f"[NeuralVerified]   [{i+1}/{num_positions}] {pct:.0f}% @{src_start}f → "
+        log(
+            f"[NeuralVerified]   [{i + 1}/{num_positions}] {pct:.0f}% @{src_start}f → "
             f"offset={offset_frames:+d}f ({offset_ms:+.1f}ms) "
             f"score={scores[best_pos]:.4f} "
             f"match={int(match_counts[best_pos])}/{len(src_frames)} "
-            f"grad={gradient:.4f}/f ({dt:.1f}s)")
+            f"grad={gradient:.4f}/f ({dt:.1f}s)"
+        )
 
     dt_total = time.time() - t_total_start
 
@@ -310,23 +324,31 @@ def calculate_neural_verified_offset(
     log(f"[NeuralVerified] ═══════════════════════════════════════")
     log(f"[NeuralVerified] RESULTS SUMMARY")
     log(f"[NeuralVerified] ═══════════════════════════════════════")
-    log(f"[NeuralVerified] Consensus: {consensus_frames:+d}f = {consensus_ms:+.1f}ms "
-        f"({consensus_count}/{len(results)} positions)")
-    log(f"[NeuralVerified] Mean score: {mean_score:.4f}, "
-        f"Range: [{min_score:.4f}, {max(scores_list):.4f}]")
+    log(
+        f"[NeuralVerified] Consensus: {consensus_frames:+d}f = {consensus_ms:+.1f}ms "
+        f"({consensus_count}/{len(results)} positions)"
+    )
+    log(
+        f"[NeuralVerified] Mean score: {mean_score:.4f}, "
+        f"Range: [{min_score:.4f}, {max(scores_list):.4f}]"
+    )
     log(f"[NeuralVerified] Mean gradient: {mean_gradient:.4f}/frame")
     log(f"[NeuralVerified] Confidence: {confidence}")
     log(f"[NeuralVerified] Audio correlation: {pure_correlation_ms:+.3f}ms")
 
     diff_ms = consensus_ms - pure_correlation_ms
     diff_frames = diff_ms / src_frame_dur_ms
-    log(f"[NeuralVerified] Difference from audio: {diff_ms:+.1f}ms ({diff_frames:+.1f} frames)")
+    log(
+        f"[NeuralVerified] Difference from audio: {diff_ms:+.1f}ms ({diff_frames:+.1f} frames)"
+    )
 
     if abs(diff_ms) > src_frame_dur_ms / 2:
         log(f"[NeuralVerified] VIDEO OFFSET DIFFERS FROM AUDIO CORRELATION")
 
-    log(f"[NeuralVerified] Total time: {dt_total:.1f}s "
-        f"({dt_total/len(results):.1f}s/position)")
+    log(
+        f"[NeuralVerified] Total time: {dt_total:.1f}s "
+        f"({dt_total / len(results):.1f}s/position)"
+    )
     log(f"[NeuralVerified] ─────────────────────────────────────")
 
     # Score landscape summary for top 3 positions
@@ -338,8 +360,10 @@ def calculate_neural_verified_offset(
         best_off_f = (tgt_ws + bp) - src_start
         best_off_ms = best_off_f * src_frame_dur_ms
 
-        log(f"[NeuralVerified]   Landscape {land['position_pct']:.0f}%: "
-            f"peak {best_off_f:+d}f ({best_off_ms:+.1f}ms) score={sc[bp]:.4f}")
+        log(
+            f"[NeuralVerified]   Landscape {land['position_pct']:.0f}%: "
+            f"peak {best_off_f:+d}f ({best_off_ms:+.1f}ms) score={sc[bp]:.4f}"
+        )
 
         # Show ±5 frames around peak
         for delta in range(-5, 6):
@@ -348,8 +372,10 @@ def calculate_neural_verified_offset(
                 off_f = (tgt_ws + pos) - src_start
                 off_ms = off_f * src_frame_dur_ms
                 marker = " ★" if delta == 0 else ""
-                log(f"[NeuralVerified]     {off_f:+4d}f ({off_ms:+7.1f}ms): "
-                    f"{sc[pos]:.4f}{marker}")
+                log(
+                    f"[NeuralVerified]     {off_f:+4d}f ({off_ms:+7.1f}ms): "
+                    f"{sc[pos]:.4f}{marker}"
+                )
 
     log(f"[NeuralVerified] ─────────────────────────────────────")
 
@@ -408,18 +434,23 @@ def calculate_neural_verified_offset(
 
 def _open_clip(video_path: str, vs, temp_dir: Path | None = None):
     """Open a video with VapourSynth/FFMS2 and return (yuv_clip, rgb_clip)."""
+    from ...frame_utils.video_reader import _get_ffms2_cache_path
+
     core = vs.core
 
-    # Use temp_dir for ffms2 index if available
-    if temp_dir:
-        cache_path = str(Path(temp_dir) / (Path(video_path).name + ".ffindex"))
-    else:
-        cache_path = video_path + ".ffindex"
+    # Use the same cache-path logic as the classic matcher so indexes
+    # always land in job_temp/ffindex/ (never next to the source file).
+    cache_path = str(_get_ffms2_cache_path(video_path, temp_dir))
 
     try:
         clip = core.ffms2.Source(source=video_path, cachefile=cache_path)
     except Exception:
-        clip = core.ffms2.Source(source=video_path)
+        # Delete stale index and retry — still specify cachefile so the
+        # index never lands next to the original source file.
+        stale = Path(cache_path)
+        if stale.exists():
+            stale.unlink(missing_ok=True)
+        clip = core.ffms2.Source(source=video_path, cachefile=cache_path)
 
     rgb_clip = core.resize.Bicubic(clip, format=vs.RGB24, matrix_in_s="170m")
     return clip, rgb_clip
@@ -434,8 +465,9 @@ def _frame_to_tensor(frame, device, F):
     b = np.asarray(frame[2])
     rgb_np = np.stack([r, g, b], axis=0).astype(np.float32) / 255.0
     tensor = torch.from_numpy(rgb_np).unsqueeze(0).to(device)
-    resized = F.interpolate(tensor, size=(512, 512),
-                            mode="bilinear", align_corners=False)
+    resized = F.interpolate(
+        tensor, size=(512, 512), mode="bilinear", align_corners=False
+    )
     mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
     normalized = (resized - mean) / std
@@ -455,12 +487,12 @@ def _extract_features_batch(rgb_clip, frame_nums, model, device, batch_size, tor
 
     first_frame = frame_nums[0]
     last_frame = frame_nums[-1]
-    is_contiguous = (frame_nums == list(range(first_frame, last_frame + 1)))
+    is_contiguous = frame_nums == list(range(first_frame, last_frame + 1))
 
     with torch.no_grad():
         if is_contiguous:
             # Fast path: use clip.frames() for contiguous ranges
-            trimmed = rgb_clip[first_frame:last_frame + 1]
+            trimmed = rgb_clip[first_frame : last_frame + 1]
             for i, frame in enumerate(trimmed.frames()):
                 tensor = _frame_to_tensor(frame, device, F)
                 batch_tensors.append(tensor)
@@ -507,7 +539,7 @@ def _slide_and_score(src_feats: np.ndarray, tgt_feats: np.ndarray):
     scores = np.zeros(max_slides)
     match_counts = np.zeros(max_slides, dtype=int)
     for p in range(max_slides):
-        pair_sims = np.sum(src_norm * tgt_norm[p:p + S], axis=1)
+        pair_sims = np.sum(src_norm * tgt_norm[p : p + S], axis=1)
         scores[p] = pair_sims.mean()
         match_counts[p] = np.sum(pair_sims > 0.5)
 
@@ -575,8 +607,10 @@ def _write_debug_report(
         lines.append(f"Frame duration: {src_frame_dur_ms:.2f}ms")
         lines.append(f"Audio correlation: {pure_correlation_ms:+.3f}ms")
         lines.append(f"")
-        lines.append(f"RESULT: {consensus_frames:+d}f = {consensus_ms:+.1f}ms "
-                      f"({consensus_count}/{len(results)} consensus)")
+        lines.append(
+            f"RESULT: {consensus_frames:+d}f = {consensus_ms:+.1f}ms "
+            f"({consensus_count}/{len(results)} consensus)"
+        )
         lines.append(f"Confidence: {confidence}")
         lines.append(f"Mean score: {mean_score:.4f}")
         lines.append(f"Total time: {dt_total:.1f}s")
@@ -608,9 +642,11 @@ def _write_debug_report(
             best_off_ms = best_off_f * src_frame_dur_ms
 
             lines.append(f"")
-            lines.append(f"  Position {land['position_pct']:.0f}% (src={src_start}) — "
-                         f"peak: {best_off_f:+d}f ({best_off_ms:+.1f}ms) "
-                         f"score={sc[bp]:.4f}")
+            lines.append(
+                f"  Position {land['position_pct']:.0f}% (src={src_start}) — "
+                f"peak: {best_off_f:+d}f ({best_off_ms:+.1f}ms) "
+                f"score={sc[bp]:.4f}"
+            )
 
             for delta in range(-15, 16):
                 pos = bp + delta
@@ -620,8 +656,10 @@ def _write_debug_report(
                     marker = " ★" if delta == 0 else ""
                     bar_val = max(0, (sc[pos] - 0.3) * 60)
                     bar = "█" * int(bar_val)
-                    lines.append(f"    {off_f:+4d}f ({off_ms:+7.1f}ms): "
-                                 f"{sc[pos]:.4f} {bar}{marker}")
+                    lines.append(
+                        f"    {off_f:+4d}f ({off_ms:+7.1f}ms): "
+                        f"{sc[pos]:.4f} {bar}{marker}"
+                    )
 
         report_path.write_text("\n".join(lines), encoding="utf-8")
         log(f"[NeuralVerified] Debug report saved: {report_path}")
