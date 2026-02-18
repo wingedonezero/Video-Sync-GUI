@@ -42,7 +42,10 @@ def main() -> int:
         "--target-video", required=True, help="Path to target video file"
     )
     parser.add_argument(
-        "--total-delay-ms", required=True, type=float, help="Total delay with global shift"
+        "--total-delay-ms",
+        required=True,
+        type=float,
+        help="Total delay with global shift",
     )
     parser.add_argument(
         "--global-shift-ms", required=True, type=float, help="Global shift component"
@@ -57,12 +60,22 @@ def main() -> int:
         "--temp-dir", required=False, help="Temp directory for ffms2 index"
     )
     parser.add_argument(
-        "--video-duration-ms", required=False, type=float, default=0,
-        help="Video duration in ms (0 = auto-detect)"
+        "--video-duration-ms",
+        required=False,
+        type=float,
+        default=0,
+        help="Video duration in ms (0 = auto-detect)",
     )
     parser.add_argument(
-        "--debug-output-dir", required=False,
-        help="Directory for debug reports (omit to disable)"
+        "--debug-output-dir",
+        required=False,
+        help="Directory for debug reports (omit to disable)",
+    )
+    parser.add_argument(
+        "--source-key",
+        required=False,
+        default="",
+        help="Source identifier (e.g., 'Source 2') for debug report naming",
     )
     args = parser.parse_args()
 
@@ -100,6 +113,7 @@ def main() -> int:
             temp_dir=temp_dir,
             video_duration_ms=video_duration_ms,
             debug_output_dir=debug_output_dir,
+            source_key=args.source_key,
         )
     except Exception as exc:
         payload = {"success": False, "error": f"Neural matching failed: {exc}"}
@@ -145,6 +159,7 @@ def _make_serializable(obj):
     # numpy types
     try:
         import numpy as np
+
         if isinstance(obj, (np.integer,)):
             return int(obj)
         if isinstance(obj, (np.floating,)):
