@@ -140,6 +140,11 @@ def _run_neural_matching(
     if debug_output_dir:
         cmd.extend(["--debug-output-dir", str(debug_output_dir)])
 
+    # Log command for debugging (shows exact argument values)
+    runner._log_message(
+        f"[NeuralVerified] Subprocess cmd: {' '.join(repr(c) for c in cmd)}"
+    )
+
     # Run subprocess
     json_prefix = "__VSG_NEURAL_JSON__ "
     json_payload = None
@@ -321,9 +326,26 @@ def run_per_source_preprocessing(
                 runner._log_message(
                     f"[VideoVerified] ✗ {source_key}: frame matching failed, using audio correlation"
                 )
+                # Store fallback so per-track processing uses audio correlation
+                # instead of re-running classic frame matching from scratch
+                ctx.video_verified_sources[source_key] = {
+                    "original_delay_ms": original_delay,
+                    "corrected_delay_ms": original_delay,
+                    "details": details,
+                    "fallback": True,
+                }
+                ctx.subtitle_delays_ms[source_key] = original_delay
 
         except Exception as e:
             runner._log_message(f"[VideoVerified] ✗ {source_key}: ERROR - {e}")
+            # Store fallback on exception too — same reasoning
+            ctx.video_verified_sources[source_key] = {
+                "original_delay_ms": original_delay,
+                "corrected_delay_ms": original_delay,
+                "details": {"reason": f"fallback-exception: {e}"},
+                "fallback": True,
+            }
+            ctx.subtitle_delays_ms[source_key] = original_delay
 
     runner._log_message(
         "\n[VideoVerified] ═══════════════════════════════════════════════════════"

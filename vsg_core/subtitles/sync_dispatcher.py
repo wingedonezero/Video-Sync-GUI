@@ -192,9 +192,14 @@ def _apply_cached_video_verified(
     from vsg_core.subtitles.sync_utils import apply_delay_to_events
 
     cached = ctx.video_verified_sources[source_key]
-    runner._log_message(
-        f"[Sync] Using pre-computed video-verified delay for {source_key}"
-    )
+    if cached.get("fallback"):
+        runner._log_message(
+            f"[Sync] Using audio correlation fallback for {source_key} (frame matching failed)"
+        )
+    else:
+        runner._log_message(
+            f"[Sync] Using pre-computed video-verified delay for {source_key}"
+        )
     runner._log_message(f"[Sync]   Delay: {cached['corrected_delay_ms']:+.1f}ms")
 
     # Apply the delay directly to subtitle events (like time-based mode)
@@ -223,7 +228,11 @@ def _apply_cached_video_verified(
         success=True,
         operation="sync",
         events_affected=events_synced,
-        summary=f"Video-verified (pre-computed): {cached['corrected_delay_ms']:+.1f}ms applied to {events_synced} events",
+        summary=(
+            f"Audio correlation fallback: {cached['corrected_delay_ms']:+.1f}ms applied to {events_synced} events"
+            if cached.get("fallback")
+            else f"Video-verified (pre-computed): {cached['corrected_delay_ms']:+.1f}ms applied to {events_synced} events"
+        ),
         details=details,
     )
 
