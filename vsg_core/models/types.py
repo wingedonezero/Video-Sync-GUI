@@ -27,19 +27,11 @@ SnapModeStr = Literal["previous", "nearest"]
 # How subtitle sync delay is calculated
 SubtitleSyncModeStr = Literal[
     "time-based",
-    "timebase-frame-locked-timestamps",
-    "subtitle-anchored-frame-snap",
     "video-verified",
 ]
 
 # Final rounding for all sync modes
 SubtitleRoundingStr = Literal["floor", "round", "ceil"]
-
-# Frame snap mode for VideoTimestamps (timebase-frame-locked)
-VideoTimestampsSnapModeStr = Literal["start", "exact"]
-
-# Rounding mode for VideoTimestamps frame boundaries
-VideoTimestampsRoundingStr = Literal["floor", "round", "ceil"]
 
 # Sync timing direction
 SyncModeStr = Literal["positive_only", "allow_negative"]
@@ -56,13 +48,6 @@ FrameComparisonMethodStr = Literal["hash", "ssim", "mse"]
 
 # Video-verified matching method
 VideoVerifiedMethodStr = Literal["classic", "neural"]
-
-# =========================================================================
-# Fallback Modes (what to do when sync mode fails)
-# =========================================================================
-
-# Subtitle-anchored-frame-snap fallback
-SubAnchorFallbackStr = Literal["abort", "use-median"]
 
 # =========================================================================
 # Audio Analysis Settings

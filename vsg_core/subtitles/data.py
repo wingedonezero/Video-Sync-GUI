@@ -1067,7 +1067,7 @@ class SubtitleData:
         This dispatches to the registered sync plugin for the mode.
 
         Args:
-            mode: Sync mode name (e.g., 'timebase-frame-locked-timestamps')
+            mode: Sync mode name (e.g., 'time-based', 'video-verified')
             total_delay_ms: Total delay from correlation/analysis (raw float)
             global_shift_ms: User global shift (raw float)
             target_fps: Target video FPS

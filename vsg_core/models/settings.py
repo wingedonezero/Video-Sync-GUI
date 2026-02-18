@@ -49,14 +49,11 @@ from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     SteppingFillModeStr,
     SteppingFilteredFallbackStr,
     SteppingQualityModeStr,
-    SubAnchorFallbackStr,
     SubtitleRoundingStr,
     SubtitleSyncModeStr,
     SyncModeStr,
     SyncStabilityOutlierModeStr,
     VideoSnapModeStr,
-    VideoTimestampsRoundingStr,
-    VideoTimestampsSnapModeStr,
     VideoVerifiedMethodStr,
 )
 
@@ -169,31 +166,16 @@ class AppSettings(BaseModel):
     time_based_bypass_subtitle_data: bool = True
     subtitle_rounding: SubtitleRoundingStr = "floor"
     subtitle_target_fps: float = 0.0
-    videotimestamps_snap_mode: VideoTimestampsSnapModeStr = "start"
-    videotimestamps_rounding: VideoTimestampsRoundingStr = "round"
 
     # =========================================================================
-    # Frame Matching Settings (shared by all frame-based sync modes)
+    # Frame Matching Settings (used by video-verified classic mode)
     # =========================================================================
     frame_hash_algorithm: FrameHashAlgorithmStr = "dhash"
     frame_hash_size: int = 8
     frame_hash_threshold: int = 5
     frame_window_radius: int = 5
-    frame_search_range_ms: int = 2000
-    frame_agreement_tolerance_ms: int = 100
-    frame_use_vapoursynth: bool = True
     frame_comparison_method: FrameComparisonMethodStr = "hash"
     frame_ssim_threshold: int = 10  # SSIM distance threshold (0-100, lower=stricter)
-
-    # =========================================================================
-    # Subtitle-Anchored Frame Snap Settings
-    # =========================================================================
-    sub_anchor_fallback_mode: SubAnchorFallbackStr = "abort"
-
-    # =========================================================================
-    # Frame Lock Settings
-    # =========================================================================
-    frame_lock_submillisecond_precision: bool = False
 
     # =========================================================================
     # Video-Verified Sync Settings

@@ -214,7 +214,7 @@ def get_vfr_timestamps(
         video_path: Path to video file
         fps: Frame rate
         runner: CommandRunner for logging
-        settings: AppSettings with videotimestamps_rounding setting
+        settings: AppSettings (currently unused, reserved for future options)
     """
     try:
         from fractions import Fraction
@@ -224,12 +224,8 @@ def get_vfr_timestamps(
             RoundingMethod,
         )
 
-        # Get rounding method from settings (default: ROUND)
-        rounding_str = (
-            settings.videotimestamps_rounding.upper()
-            if settings is not None
-            else "ROUND"
-        )
+        # Rounding method for VideoTimestamps (ROUND is the standard default)
+        rounding_str = "ROUND"
 
         if rounding_str == "FLOOR":
             rounding_method = RoundingMethod.FLOOR

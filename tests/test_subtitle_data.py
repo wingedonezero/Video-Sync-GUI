@@ -180,7 +180,7 @@ With multiple lines.
 
 
 def test_sync_plugin_registry():
-    """Test sync plugin registry and timebase-frame-locked plugin."""
+    """Test sync plugin registry lists expected plugins."""
     print("\n=== Test: Sync Plugin Registry ===")
 
     from vsg_core.subtitles.sync_modes import get_sync_plugin, list_sync_plugins
@@ -189,18 +189,18 @@ def test_sync_plugin_registry():
     plugins = list_sync_plugins()
     print(f"  Registered plugins: {list(plugins.keys())}")
 
-    assert "timebase-frame-locked-timestamps" in plugins
     assert "time-based" in plugins
-
-    # Get plugin instance
-    plugin = get_sync_plugin("timebase-frame-locked-timestamps")
-    assert plugin is not None
-    assert plugin.name == "timebase-frame-locked-timestamps"
+    assert "video-verified" in plugins
 
     # Get time-based plugin
     tb_plugin = get_sync_plugin("time-based")
     assert tb_plugin is not None
     assert tb_plugin.name == "time-based"
+
+    # Get video-verified plugin
+    vv_plugin = get_sync_plugin("video-verified")
+    assert vv_plugin is not None
+    assert vv_plugin.name == "video-verified"
 
     print("  PASSED: Plugin registry works correctly")
     return True
@@ -416,72 +416,6 @@ def test_validation():
     return True
 
 
-def test_timebase_frame_locked_sync():
-    """Test timebase-frame-locked-timestamps sync mode."""
-    print("\n=== Test: TimeBase Frame-Locked Sync Mode ===")
-
-    from collections import OrderedDict
-
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
-    from vsg_core.subtitles.sync_modes import get_sync_plugin
-
-    # Get the plugin
-    plugin = get_sync_plugin("timebase-frame-locked-timestamps")
-    assert plugin is not None
-    print(f"  Plugin: {plugin.name}")
-    print(f"  Description: {plugin.description}")
-
-    # Create test data
-    data = SubtitleData()
-    data.styles = OrderedDict([("Default", SubtitleStyle.default())])
-    data.events = [
-        SubtitleEvent(start_ms=1000.0, end_ms=2000.0, text="Event 1"),
-        SubtitleEvent(start_ms=3000.0, end_ms=4000.0, text="Event 2"),
-        SubtitleEvent(start_ms=5000.0, end_ms=6000.0, text="Event 3"),
-    ]
-
-    original_starts = [e.start_ms for e in data.events]
-
-    # Test without target video (should fail gracefully)
-    result = data.apply_sync(
-        mode="timebase-frame-locked-timestamps",
-        total_delay_ms=500.0,
-        global_shift_ms=500.0,
-        target_fps=23.976,
-        target_video=None,  # No video
-    )
-
-    print(f"  Without video: success={result.success}")
-    assert not result.success, "Should fail without target video"
-    assert "Target video required" in result.error
-
-    # Test with fake video path (will use fallback calculation)
-    # Since we don't have a real video, VideoTimestamps will fail
-    # but the plugin should still apply delay
-    result2 = data.apply_sync(
-        mode="timebase-frame-locked-timestamps",
-        total_delay_ms=500.0,
-        global_shift_ms=500.0,
-        target_fps=23.976,
-        target_video="/fake/video.mkv",  # Fake path - VTS will fail, falls back to simple calc
-    )
-
-    print(f"  With video (fallback mode): success={result2.success}")
-    print(f"  Events affected: {result2.events_affected}")
-
-    # The sync should work even without real VideoTimestamps
-    assert result2.success, f"Sync should succeed with fallback: {result2.error}"
-
-    # Verify timing was adjusted
-    for i, event in enumerate(data.events):
-        print(f"  Event {i}: {original_starts[i]} -> {event.start_ms}")
-        # Should be close to original + delay (may have frame snapping adjustments)
-        assert event.start_ms >= original_starts[i], "Event should be delayed"
-
-    print("  PASSED: TimeBase Frame-Locked sync works correctly")
-    return True
-
-
 def test_mkvmerge_sync_mode():
     """Test time-based sync in mkvmerge mode (no subtitle modification)."""
     print("\n=== Test: MKVMerge Sync Mode ===")
@@ -608,7 +542,6 @@ def run_all_tests():
         test_srt_parsing,
         test_sync_plugin_registry,
         test_time_based_sync,
-        test_timebase_frame_locked_sync,
         test_mkvmerge_sync_mode,
         test_float_precision_through_pipeline,
         test_style_operations,

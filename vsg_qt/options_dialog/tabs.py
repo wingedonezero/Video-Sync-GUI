@@ -1757,145 +1757,17 @@ class SubtitleSyncTab(QWidget):
         self.widgets["subtitle_sync_mode"].addItems(
             [
                 "time-based",
-                "timebase-frame-locked-timestamps",
-                "subtitle-anchored-frame-snap",
                 "video-verified",
             ]
         )
         self.widgets["subtitle_sync_mode"].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based: Simple delay via mkvmerge --sync (fastest)\n"
-            "• timebase-frame-locked: Time-based + VideoTimestamps frame-alignment\n"
-            "• subtitle-anchored-frame-snap: Visual-only using subtitle positions\n"
             "• video-verified: Audio correlation verified against video frames\n"
             "  (catches cases where audio is offset but subs should be 0ms)"
         )
         mode_layout.addRow("Mode:", self.widgets["subtitle_sync_mode"])
         main_layout.addWidget(mode_group)
-
-        # ===== SHARED FRAME MATCHING SETTINGS =====
-        frame_group = QGroupBox("Frame Matching Settings (All Frame-Based Modes)")
-        frame_layout = QFormLayout(frame_group)
-
-        self.widgets["frame_hash_algorithm"] = QComboBox()
-        self.widgets["frame_hash_algorithm"].addItems(
-            ["dhash", "phash", "average_hash", "whash"]
-        )
-        self.widgets["frame_hash_algorithm"].setToolTip(
-            "Hash algorithm for frame comparison:\n\n"
-            "• dhash (Default): Difference hash - fast, good for scene cuts\n"
-            "• phash: Perceptual hash - better for heavy re-encoding\n"
-            "• average_hash: Simple averaging - fastest but less accurate\n"
-            "• whash: Wavelet hash - most robust for processed videos"
-        )
-
-        self.widgets["frame_hash_size"] = QComboBox()
-        # Use addItem with integer data to ensure proper type is saved
-        self.widgets["frame_hash_size"].addItem("4", 4)
-        self.widgets["frame_hash_size"].addItem("8", 8)
-        self.widgets["frame_hash_size"].addItem("16", 16)
-        self.widgets["frame_hash_size"].setCurrentIndex(1)  # Default 8
-        self.widgets["frame_hash_size"].setToolTip(
-            "Hash size (resolution):\n\n"
-            "• 4: Very tolerant (16-bit hash)\n"
-            "• 8 (Default): Balanced precision (64-bit hash)\n"
-            "• 16: Very precise (256-bit hash)"
-        )
-
-        self.widgets["frame_hash_threshold"] = QSpinBox()
-        self.widgets["frame_hash_threshold"].setRange(0, 50)
-        self.widgets["frame_hash_threshold"].setValue(5)
-        self.widgets["frame_hash_threshold"].setToolTip(
-            "Max hamming distance for frame match:\n\n"
-            "• 0-3: Strict (near-perfect match required)\n"
-            "• 5 (Default): Balanced (minor compression differences OK)\n"
-            "• 10-15: Tolerant (heavy re-encoding OK)\n"
-            "• 20-30: Loose (different encodes, streaming vs BD)\n"
-            "• 30-50: Very loose (DVD, different regions)\n\n"
-            "If frame matching fails, check the log for suggested value."
-        )
-
-        self.widgets["frame_window_radius"] = QSpinBox()
-        self.widgets["frame_window_radius"].setRange(1, 10)
-        self.widgets["frame_window_radius"].setValue(5)
-        self.widgets["frame_window_radius"].setToolTip(
-            "Sliding window radius (frames before/after):\n\n"
-            "Window size = 2*N+1 frames for temporal consistency.\n\n"
-            "• 3: 7-frame window (faster)\n"
-            "• 5 (Default): 11-frame window (recommended)\n"
-            "• 7+: 15+ frame window (more robust, slower)"
-        )
-
-        self.widgets["frame_search_range_ms"] = QSpinBox()
-        self.widgets["frame_search_range_ms"].setRange(500, 10000)
-        self.widgets["frame_search_range_ms"].setValue(2000)
-        self.widgets["frame_search_range_ms"].setSingleStep(500)
-        self.widgets["frame_search_range_ms"].setSuffix(" ms")
-        self.widgets["frame_search_range_ms"].setToolTip(
-            "Search range around expected position (±N ms):\n\n"
-            "• 1000ms: Tight search (~24 frames at 24fps)\n"
-            "• 2000ms (Default): Standard search (~48 frames)\n"
-            "• 5000ms: Wide search for large timing differences"
-        )
-
-        self.widgets["frame_agreement_tolerance_ms"] = QSpinBox()
-        self.widgets["frame_agreement_tolerance_ms"].setRange(10, 500)
-        self.widgets["frame_agreement_tolerance_ms"].setValue(100)
-        self.widgets["frame_agreement_tolerance_ms"].setSingleStep(10)
-        self.widgets["frame_agreement_tolerance_ms"].setSuffix(" ms")
-        self.widgets["frame_agreement_tolerance_ms"].setToolTip(
-            "Agreement tolerance for checkpoint measurements:\n\n"
-            "All checkpoints must agree within this tolerance.\n\n"
-            "• 50ms: Strict (~1-2 frames)\n"
-            "• 100ms (Default): Standard (~2-3 frames)\n"
-            "• 200ms: Loose (~5 frames)"
-        )
-
-        self.widgets["frame_use_vapoursynth"] = QCheckBox("Use VapourSynth indexing")
-        self.widgets["frame_use_vapoursynth"].setChecked(True)
-        self.widgets["frame_use_vapoursynth"].setToolTip(
-            "Use VapourSynth for frame extraction:\n\n"
-            "• Checked (Default): Much faster after first run (cached .lwi index)\n"
-            "• Unchecked: Use ffprobe/ffmpeg fallback (slower but no dependencies)"
-        )
-
-        self.widgets["frame_comparison_method"] = QComboBox()
-        self.widgets["frame_comparison_method"].addItems(["hash", "ssim", "mse"])
-        self.widgets["frame_comparison_method"].setToolTip(
-            "Frame comparison method for video-verified sync:\n\n"
-            "• hash (Default): Perceptual hashing - fast, good for most cases\n"
-            "• ssim: Structural Similarity Index - more accurate, slightly slower\n"
-            "  Best for sources with color grading or encoding differences\n"
-            "• mse: Mean Squared Error - fast, works well for similar encodes\n\n"
-            "If hash gives inconsistent results, try SSIM for better accuracy."
-        )
-
-        frame_layout.addRow("Hash Algorithm:", self.widgets["frame_hash_algorithm"])
-        frame_layout.addRow("Hash Size:", self.widgets["frame_hash_size"])
-        frame_layout.addRow("Hash Threshold:", self.widgets["frame_hash_threshold"])
-        frame_layout.addRow("Window Radius:", self.widgets["frame_window_radius"])
-        frame_layout.addRow("Search Range:", self.widgets["frame_search_range_ms"])
-        frame_layout.addRow("Tolerance:", self.widgets["frame_agreement_tolerance_ms"])
-        frame_layout.addRow("", self.widgets["frame_use_vapoursynth"])
-        frame_layout.addRow(
-            "Comparison Method:", self.widgets["frame_comparison_method"]
-        )
-
-        self.widgets["frame_ssim_threshold"] = QSpinBox()
-        self.widgets["frame_ssim_threshold"].setRange(1, 50)
-        self.widgets["frame_ssim_threshold"].setValue(10)
-        self.widgets["frame_ssim_threshold"].setToolTip(
-            "SSIM/MSE distance threshold for progressive/CFR content:\n\n"
-            "Only used when Comparison Method is 'ssim' or 'mse'.\n"
-            "Distance = (1 - SSIM) * 100, so lower = stricter.\n\n"
-            "• 5: Very strict (SSIM > 0.95)\n"
-            "• 10 (Default): Standard (SSIM > 0.90)\n"
-            "• 15: Tolerant (SSIM > 0.85)\n"
-            "• 25: Very tolerant (SSIM > 0.75)"
-        )
-        frame_layout.addRow("SSIM Threshold:", self.widgets["frame_ssim_threshold"])
-
-        main_layout.addWidget(frame_group)
 
         # ===== SHARED OUTPUT SETTINGS =====
         output_group = QGroupBox("Output Settings")
@@ -1913,11 +1785,10 @@ class SubtitleSyncTab(QWidget):
         output_layout.addRow("Rounding:", self.widgets["subtitle_rounding"])
         main_layout.addWidget(output_group)
 
-        # ===== MODE-SPECIFIC SETTINGS =====
-        specific_group = QGroupBox("Mode-Specific Settings")
-        specific_layout = QFormLayout(specific_group)
+        # ===== TIME-BASED SETTINGS =====
+        time_group = QGroupBox("Time-Based Settings")
+        time_layout = QFormLayout(time_group)
 
-        # --- Time-based options ---
         self.widgets["time_based_use_raw_values"] = QCheckBox(
             "Apply delay directly to subtitle file"
         )
@@ -1926,54 +1797,18 @@ class SubtitleSyncTab(QWidget):
             "• Unchecked (Default): Use mkvmerge --sync (delay in container)\n"
             "• Checked: Modify subtitle timestamps directly in the file"
         )
-        specific_layout.addRow("", self.widgets["time_based_use_raw_values"])
+        time_layout.addRow("", self.widgets["time_based_use_raw_values"])
+        main_layout.addWidget(time_group)
 
-        # --- Timebase-frame-locked options ---
-        self.widgets["frame_lock_submillisecond_precision"] = QCheckBox(
-            "Use sub-millisecond precision"
-        )
-        self.widgets["frame_lock_submillisecond_precision"].setToolTip(
-            "Experimental: Preserve sub-millisecond precision when calculating frame boundaries.\n\n"
-            "Default (unchecked): Truncates to integer milliseconds before frame calculation.\n"
-            "  e.g., 1234.567ms → 1234ms → frame lookup\n\n"
-            "Checked: Preserves fractional milliseconds in frame calculation.\n"
-            "  e.g., 1234.567ms → 1234.567ms → frame lookup\n\n"
-            "The difference only matters when timing is very close to a frame boundary.\n"
-            "Since ASS format saves at 10ms (centisecond) precision anyway, this rarely matters.\n"
-            "Try enabling if you see 1-frame alignment issues."
-        )
-        specific_layout.addRow("", self.widgets["frame_lock_submillisecond_precision"])
-
-        self.widgets["videotimestamps_snap_mode"] = QComboBox()
-        self.widgets["videotimestamps_snap_mode"].addItems(["start", "exact"])
-        self.widgets["videotimestamps_snap_mode"].setToolTip(
-            "Frame snapping mode for VideoTimestamps:\n\n"
-            "• start: Snap to the exact frame START boundary (current behavior)\n"
-            "• exact: Snap to the frame's display window boundary\n\n"
-            "Use exact if you see consistent 1-3 frame offsets on VFR-like sources.\n"
-            "Start is typically safer for CFR sources."
-        )
-        specific_layout.addRow(
-            "Frame Snap Mode:", self.widgets["videotimestamps_snap_mode"]
-        )
-
-        # --- Subtitle-anchored options ---
-        self.widgets["sub_anchor_fallback_mode"] = QComboBox()
-        self.widgets["sub_anchor_fallback_mode"].addItems(["abort", "use-median"])
-        self.widgets["sub_anchor_fallback_mode"].setToolTip(
-            "What to do if checkpoints disagree:\n"
-            "• abort: Fail the job\n"
-            "• use-median: Use median offset anyway"
-        )
-        specific_layout.addRow(
-            "SubAnchor Fallback:", self.widgets["sub_anchor_fallback_mode"]
-        )
-
-        # --- Video-verified options ---
+        # ===== VIDEO-VERIFIED SETTINGS =====
+        vv_group = QGroupBox("Video-Verified Settings")
+        vv_layout = QFormLayout(vv_group)
 
         # Method selection (classic vs neural)
         self.widgets["video_verified_method"] = QComboBox()
-        self.widgets["video_verified_method"].addItem("Classic (phash/SSIM/MSE)", "classic")
+        self.widgets["video_verified_method"].addItem(
+            "Classic (phash/SSIM/MSE)", "classic"
+        )
         self.widgets["video_verified_method"].addItem("Neural (ISC Features)", "neural")
         self.widgets["video_verified_method"].setToolTip(
             "Frame matching method:\n\n"
@@ -1983,8 +1818,88 @@ class SubtitleSyncTab(QWidget):
             "  for near-duplicate frame detection. More accurate for\n"
             "  challenging content. Requires GPU and ISC model download."
         )
+        vv_layout.addRow("Matching Method:", self.widgets["video_verified_method"])
 
-        # Classic-specific settings
+        # --- Classic-specific settings ---
+
+        self.widgets["frame_hash_algorithm"] = QComboBox()
+        self.widgets["frame_hash_algorithm"].addItems(
+            ["dhash", "phash", "average_hash", "whash"]
+        )
+        self.widgets["frame_hash_algorithm"].setToolTip(
+            "Hash algorithm for frame comparison:\n\n"
+            "• dhash (Default): Difference hash - fast, good for scene cuts\n"
+            "• phash: Perceptual hash - better for heavy re-encoding\n"
+            "• average_hash: Simple averaging - fastest but less accurate\n"
+            "• whash: Wavelet hash - most robust for processed videos"
+        )
+        vv_layout.addRow("Hash Algorithm:", self.widgets["frame_hash_algorithm"])
+
+        self.widgets["frame_hash_size"] = QComboBox()
+        self.widgets["frame_hash_size"].addItem("4", 4)
+        self.widgets["frame_hash_size"].addItem("8", 8)
+        self.widgets["frame_hash_size"].addItem("16", 16)
+        self.widgets["frame_hash_size"].setCurrentIndex(1)  # Default 8
+        self.widgets["frame_hash_size"].setToolTip(
+            "Hash size (resolution):\n\n"
+            "• 4: Very tolerant (16-bit hash)\n"
+            "• 8 (Default): Balanced precision (64-bit hash)\n"
+            "• 16: Very precise (256-bit hash)"
+        )
+        vv_layout.addRow("Hash Size:", self.widgets["frame_hash_size"])
+
+        self.widgets["frame_hash_threshold"] = QSpinBox()
+        self.widgets["frame_hash_threshold"].setRange(0, 50)
+        self.widgets["frame_hash_threshold"].setValue(5)
+        self.widgets["frame_hash_threshold"].setToolTip(
+            "Max hamming distance for frame match:\n\n"
+            "• 0-3: Strict (near-perfect match required)\n"
+            "• 5 (Default): Balanced (minor compression differences OK)\n"
+            "• 10-15: Tolerant (heavy re-encoding OK)\n"
+            "• 20-30: Loose (different encodes, streaming vs BD)\n"
+            "• 30-50: Very loose (DVD, different regions)\n\n"
+            "If frame matching fails, check the log for suggested value."
+        )
+        vv_layout.addRow("Hash Threshold:", self.widgets["frame_hash_threshold"])
+
+        self.widgets["frame_window_radius"] = QSpinBox()
+        self.widgets["frame_window_radius"].setRange(1, 10)
+        self.widgets["frame_window_radius"].setValue(5)
+        self.widgets["frame_window_radius"].setToolTip(
+            "Sliding window radius (frames before/after):\n\n"
+            "Window size = 2*N+1 frames for temporal consistency.\n\n"
+            "• 3: 7-frame window (faster)\n"
+            "• 5 (Default): 11-frame window (recommended)\n"
+            "• 7+: 15+ frame window (more robust, slower)"
+        )
+        vv_layout.addRow("Window Radius:", self.widgets["frame_window_radius"])
+
+        self.widgets["frame_comparison_method"] = QComboBox()
+        self.widgets["frame_comparison_method"].addItems(["hash", "ssim", "mse"])
+        self.widgets["frame_comparison_method"].setToolTip(
+            "Frame comparison method:\n\n"
+            "• hash (Default): Perceptual hashing - fast, good for most cases\n"
+            "• ssim: Structural Similarity Index - more accurate, slightly slower\n"
+            "  Best for sources with color grading or encoding differences\n"
+            "• mse: Mean Squared Error - fast, works well for similar encodes\n\n"
+            "If hash gives inconsistent results, try SSIM for better accuracy."
+        )
+        vv_layout.addRow("Comparison Method:", self.widgets["frame_comparison_method"])
+
+        self.widgets["frame_ssim_threshold"] = QSpinBox()
+        self.widgets["frame_ssim_threshold"].setRange(1, 50)
+        self.widgets["frame_ssim_threshold"].setValue(10)
+        self.widgets["frame_ssim_threshold"].setToolTip(
+            "SSIM/MSE distance threshold for progressive/CFR content:\n\n"
+            "Only used when Comparison Method is 'ssim' or 'mse'.\n"
+            "Distance = (1 - SSIM) * 100, so lower = stricter.\n\n"
+            "• 5: Very strict (SSIM > 0.95)\n"
+            "• 10 (Default): Standard (SSIM > 0.90)\n"
+            "• 15: Tolerant (SSIM > 0.85)\n"
+            "• 25: Very tolerant (SSIM > 0.75)"
+        )
+        vv_layout.addRow("SSIM Threshold:", self.widgets["frame_ssim_threshold"])
+
         self.widgets["video_verified_zero_check_frames"] = QSpinBox()
         self.widgets["video_verified_zero_check_frames"].setRange(1, 10)
         self.widgets["video_verified_zero_check_frames"].setValue(3)
@@ -1996,6 +1911,10 @@ class SubtitleSyncTab(QWidget):
             "• 2: Only verify very small offsets (~80ms at 24fps)\n"
             "• 3 (Default): Verify ~125ms offsets (recommended)\n"
             "• 5: Verify larger offsets (~200ms)"
+        )
+        vv_layout.addRow(
+            "Zero-Check Threshold:",
+            self.widgets["video_verified_zero_check_frames"],
         )
 
         self.widgets["video_verified_min_quality_advantage"] = QDoubleSpinBox()
@@ -2010,6 +1929,10 @@ class SubtitleSyncTab(QWidget):
             "• 0.1 (Default): Slight preference for 0ms when close\n"
             "• 0.2: Strong preference for 0ms (only use non-zero if clearly better)"
         )
+        vv_layout.addRow(
+            "Quality Margin:",
+            self.widgets["video_verified_min_quality_advantage"],
+        )
 
         self.widgets["video_verified_num_checkpoints"] = QSpinBox()
         self.widgets["video_verified_num_checkpoints"].setRange(3, 10)
@@ -2021,6 +1944,7 @@ class SubtitleSyncTab(QWidget):
             "• 5 (Default): Balanced\n"
             "• 7+: Very thorough"
         )
+        vv_layout.addRow("Checkpoints:", self.widgets["video_verified_num_checkpoints"])
 
         self.widgets["video_verified_search_range_frames"] = QSpinBox()
         self.widgets["video_verified_search_range_frames"].setRange(1, 10)
@@ -2031,6 +1955,9 @@ class SubtitleSyncTab(QWidget):
             "• 2: Tight search (fewer candidates)\n"
             "• 3 (Default): Standard search\n"
             "• 5: Wide search (more thorough)"
+        )
+        vv_layout.addRow(
+            "Search Range:", self.widgets["video_verified_search_range_frames"]
         )
 
         self.widgets["video_verified_sequence_length"] = QSpinBox()
@@ -2044,18 +1971,26 @@ class SubtitleSyncTab(QWidget):
             "• 10 (Default): Good balance of speed and accuracy\n"
             "• 20+: Very strict verification"
         )
+        vv_layout.addRow(
+            "Sequence Length:", self.widgets["video_verified_sequence_length"]
+        )
 
         self.widgets["video_verified_use_pts_precision"] = QCheckBox()
         self.widgets["video_verified_use_pts_precision"].setChecked(False)
         self.widgets["video_verified_use_pts_precision"].setToolTip(
             "Use PTS (Presentation Timestamps) for sub-frame precision:\n\n"
-            "OFF (Default): Use frame-based offset (frame_offset × frame_duration)\n"
+            "OFF (Default): Use frame-based offset (frame_offset * frame_duration)\n"
             "  - Simple and reliable when frames match perfectly\n"
             "  - Avoids container timing noise from muxing quirks\n\n"
             "ON: Use actual PTS timestamps from container\n"
             "  - May help with VFR (variable frame rate) content\n"
             "  - Can introduce noise from container start time differences"
         )
+        vv_layout.addRow(
+            "Use PTS Precision:", self.widgets["video_verified_use_pts_precision"]
+        )
+
+        # --- Shared video-verified diagnostics (both classic and neural) ---
 
         self.widgets["video_verified_frame_audit"] = QCheckBox()
         self.widgets["video_verified_frame_audit"].setChecked(False)
@@ -2066,11 +2001,14 @@ class SubtitleSyncTab(QWidget):
             "Writes a detailed report to:\n"
             "  .config/sync_checks/\n\n"
             "The report includes:\n"
-            "• How many lines land on correct frames\n"
-            "• Which lines have start/end frame drift\n"
-            "• Duration impact analysis\n"
-            "• Suggested rounding mode for your content\n\n"
+            "  How many lines land on correct frames\n"
+            "  Which lines have start/end frame drift\n"
+            "  Duration impact analysis\n"
+            "  Suggested rounding mode for your content\n\n"
             "This is diagnostic only - no timing is modified."
+        )
+        vv_layout.addRow(
+            "Frame Alignment Audit:", self.widgets["video_verified_frame_audit"]
         )
 
         self.widgets["video_verified_visual_verify"] = QCheckBox()
@@ -2083,15 +2021,19 @@ class SubtitleSyncTab(QWidget):
             "Writes a detailed report to:\n"
             "  .config/sync_checks/\n\n"
             "The report includes:\n"
-            "• Overall accuracy (exact, within ±1, ±2 frames)\n"
-            "• Per-region breakdown (early, main, late, credits)\n"
-            "• Credits region auto-detection\n"
-            "• Drift map showing where frames don't align\n"
-            "• GOOD/FAIR/POOR verdict\n\n"
+            "  Overall accuracy (exact, within +/-1, +/-2 frames)\n"
+            "  Per-region breakdown (early, main, late, credits)\n"
+            "  Credits region auto-detection\n"
+            "  Drift map showing where frames don't align\n"
+            "  GOOD/FAIR/POOR verdict\n\n"
             "This is diagnostic only - no timing is modified."
+        )
+        vv_layout.addRow(
+            "Visual Frame Verify:", self.widgets["video_verified_visual_verify"]
         )
 
         # --- Neural-specific settings ---
+
         self.widgets["neural_window_seconds"] = QSpinBox()
         self.widgets["neural_window_seconds"].setRange(5, 30)
         self.widgets["neural_window_seconds"].setValue(10)
@@ -2102,18 +2044,20 @@ class SubtitleSyncTab(QWidget):
             "• 10 (Default): Good balance of accuracy and speed\n"
             "• 20+: Very thorough, slower extraction"
         )
+        vv_layout.addRow("Window Duration (s):", self.widgets["neural_window_seconds"])
 
         self.widgets["neural_slide_range_seconds"] = QSpinBox()
         self.widgets["neural_slide_range_seconds"].setRange(1, 15)
         self.widgets["neural_slide_range_seconds"].setValue(5)
         self.widgets["neural_slide_range_seconds"].setToolTip(
             "How far to slide target window around expected position (seconds):\n\n"
-            "The target window slides ±N seconds around the audio correlation\n"
+            "The target window slides +/-N seconds around the audio correlation\n"
             "offset to find the best visual match.\n\n"
             "• 2: Tight search (audio correlation is very close)\n"
             "• 5 (Default): Standard range\n"
             "• 10+: Wide search (audio correlation may be far off)"
         )
+        vv_layout.addRow("Slide Range (s):", self.widgets["neural_slide_range_seconds"])
 
         self.widgets["neural_num_positions"] = QSpinBox()
         self.widgets["neural_num_positions"].setRange(3, 15)
@@ -2126,6 +2070,7 @@ class SubtitleSyncTab(QWidget):
             "• 9 (Default): Strong consensus\n"
             "• 13+: Very thorough, diminishing returns"
         )
+        vv_layout.addRow("Num Positions:", self.widgets["neural_num_positions"])
 
         self.widgets["neural_batch_size"] = QSpinBox()
         self.widgets["neural_batch_size"].setRange(1, 128)
@@ -2137,6 +2082,7 @@ class SubtitleSyncTab(QWidget):
             "• 32 (Default): Standard GPUs (6+ GB)\n"
             "• 64+: High VRAM GPUs (12+ GB)"
         )
+        vv_layout.addRow("GPU Batch Size:", self.widgets["neural_batch_size"])
 
         self.widgets["neural_run_in_subprocess"] = QCheckBox()
         self.widgets["neural_run_in_subprocess"].setChecked(True)
@@ -2146,6 +2092,7 @@ class SubtitleSyncTab(QWidget):
             "  Prevents memory conflicts with other GPU operations.\n\n"
             "OFF: Run in the main process (faster startup, shared GPU memory)."
         )
+        vv_layout.addRow("Run in Subprocess:", self.widgets["neural_run_in_subprocess"])
 
         self.widgets["neural_debug_report"] = QCheckBox()
         self.widgets["neural_debug_report"].setChecked(False)
@@ -2156,59 +2103,9 @@ class SubtitleSyncTab(QWidget):
             "to the debug/neural_verify/ directory.\n\n"
             "Useful for diagnosing matching issues or validating results."
         )
+        vv_layout.addRow("Neural Debug Report:", self.widgets["neural_debug_report"])
 
-        # --- Layout: Method selector ---
-        specific_layout.addRow(
-            "Matching Method:", self.widgets["video_verified_method"]
-        )
-
-        # --- Layout: Classic settings ---
-        specific_layout.addRow(
-            "Zero-Check Threshold:", self.widgets["video_verified_zero_check_frames"]
-        )
-        specific_layout.addRow(
-            "Quality Margin:", self.widgets["video_verified_min_quality_advantage"]
-        )
-        specific_layout.addRow(
-            "Checkpoints:", self.widgets["video_verified_num_checkpoints"]
-        )
-        specific_layout.addRow(
-            "Search Range:", self.widgets["video_verified_search_range_frames"]
-        )
-        specific_layout.addRow(
-            "Sequence Length:", self.widgets["video_verified_sequence_length"]
-        )
-        specific_layout.addRow(
-            "Use PTS Precision:", self.widgets["video_verified_use_pts_precision"]
-        )
-        specific_layout.addRow(
-            "Frame Alignment Audit:", self.widgets["video_verified_frame_audit"]
-        )
-        specific_layout.addRow(
-            "Visual Frame Verify:", self.widgets["video_verified_visual_verify"]
-        )
-
-        # --- Layout: Neural settings ---
-        specific_layout.addRow(
-            "Window Duration (s):", self.widgets["neural_window_seconds"]
-        )
-        specific_layout.addRow(
-            "Slide Range (s):", self.widgets["neural_slide_range_seconds"]
-        )
-        specific_layout.addRow(
-            "Num Positions:", self.widgets["neural_num_positions"]
-        )
-        specific_layout.addRow(
-            "GPU Batch Size:", self.widgets["neural_batch_size"]
-        )
-        specific_layout.addRow(
-            "Run in Subprocess:", self.widgets["neural_run_in_subprocess"]
-        )
-        specific_layout.addRow(
-            "Neural Debug Report:", self.widgets["neural_debug_report"]
-        )
-
-        main_layout.addWidget(specific_group)
+        main_layout.addWidget(vv_group)
         main_layout.addStretch(1)
 
         # Connect signals
@@ -2225,46 +2122,29 @@ class SubtitleSyncTab(QWidget):
     def _update_mode_visibility(self, text: str):
         """Show/hide settings based on selected sync mode."""
         is_time_based = text == "time-based"
-        is_frame_locked = text == "timebase-frame-locked-timestamps"
-        is_sub_anchor_snap = text == "subtitle-anchored-frame-snap"
         is_video_verified = text == "video-verified"
-
-        # Frame-based modes need frame matching settings
-        is_frame_based = is_frame_locked or is_sub_anchor_snap or is_video_verified
 
         # Determine which video-verified method is selected
         method = self.widgets["video_verified_method"].currentData() or "classic"
         is_classic = is_video_verified and method == "classic"
         is_neural = is_video_verified and method == "neural"
 
-        # Shared frame matching settings (enabled for all frame-based modes,
-        # but neural mode doesn't use these hash settings)
+        # Time-based specific
+        self.widgets["time_based_use_raw_values"].setEnabled(is_time_based)
+
+        # Video-verified method selector
+        self.widgets["video_verified_method"].setEnabled(is_video_verified)
+
+        # Classic frame matching settings (only used by classic method)
         for key in [
             "frame_hash_algorithm",
             "frame_hash_size",
             "frame_hash_threshold",
             "frame_window_radius",
-            "frame_search_range_ms",
-            "frame_agreement_tolerance_ms",
-            "frame_use_vapoursynth",
+            "frame_comparison_method",
+            "frame_ssim_threshold",
         ]:
-            if key in self.widgets:
-                self.widgets[key].setEnabled(
-                    is_frame_locked or is_sub_anchor_snap or is_classic
-                )
-
-        # Time-based specific
-        self.widgets["time_based_use_raw_values"].setEnabled(is_time_based)
-
-        # Timebase-frame-locked specific
-        self.widgets["frame_lock_submillisecond_precision"].setEnabled(is_frame_locked)
-        self.widgets["videotimestamps_snap_mode"].setEnabled(is_frame_locked)
-
-        # Subtitle-anchored specific
-        self.widgets["sub_anchor_fallback_mode"].setEnabled(is_sub_anchor_snap)
-
-        # Video-verified method selector
-        self.widgets["video_verified_method"].setEnabled(is_video_verified)
+            self.widgets[key].setEnabled(is_classic)
 
         # Video-verified classic-specific settings
         self.widgets["video_verified_zero_check_frames"].setEnabled(is_classic)
@@ -2285,7 +2165,6 @@ class SubtitleSyncTab(QWidget):
         self.widgets["neural_batch_size"].setEnabled(is_neural)
         self.widgets["neural_run_in_subprocess"].setEnabled(is_neural)
         self.widgets["neural_debug_report"].setEnabled(is_neural)
-
 
 
 class ChaptersTab(QWidget):
