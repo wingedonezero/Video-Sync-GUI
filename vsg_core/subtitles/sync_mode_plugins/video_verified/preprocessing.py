@@ -24,6 +24,172 @@ if TYPE_CHECKING:
 from .matcher import calculate_video_verified_offset
 
 
+def _calculate_offset_for_method(
+    source_video: str,
+    target_video: str,
+    total_delay_ms: float,
+    global_shift_ms: float,
+    ctx,
+    runner,
+) -> tuple[float | None, dict]:
+    """Dispatch to classic or neural matcher based on settings.
+
+    For neural mode, optionally runs in a subprocess to isolate GPU usage.
+    """
+    method = getattr(ctx.settings, "video_verified_method", "classic")
+
+    if method == "neural":
+        return _run_neural_matching(
+            source_video=source_video,
+            target_video=target_video,
+            total_delay_ms=total_delay_ms,
+            global_shift_ms=global_shift_ms,
+            ctx=ctx,
+            runner=runner,
+        )
+
+    # Classic method (default)
+    return calculate_video_verified_offset(
+        source_video=source_video,
+        target_video=target_video,
+        total_delay_ms=total_delay_ms,
+        global_shift_ms=global_shift_ms,
+        settings=ctx.settings,
+        runner=runner,
+        temp_dir=ctx.temp_dir,
+    )
+
+
+def _run_neural_matching(
+    source_video: str,
+    target_video: str,
+    total_delay_ms: float,
+    global_shift_ms: float,
+    ctx,
+    runner,
+) -> tuple[float | None, dict]:
+    """Run neural feature matching, optionally in a subprocess."""
+    import json
+
+    use_subprocess = getattr(ctx.settings, "neural_run_in_subprocess", True)
+
+    # Determine debug output dir
+    debug_output_dir = None
+    if getattr(ctx.settings, "neural_debug_report", False):
+        debug_paths = getattr(ctx, "debug_paths", None)
+        if debug_paths and debug_paths.neural_verify_dir:
+            debug_output_dir = debug_paths.neural_verify_dir
+
+    if not use_subprocess:
+        # Run in-process (simpler, but shares GPU memory with main app)
+        from .neural_matcher import calculate_neural_verified_offset
+
+        return calculate_neural_verified_offset(
+            source_video=source_video,
+            target_video=target_video,
+            total_delay_ms=total_delay_ms,
+            global_shift_ms=global_shift_ms,
+            settings=ctx.settings,
+            runner=runner,
+            temp_dir=ctx.temp_dir,
+            debug_output_dir=debug_output_dir,
+        )
+
+    # Subprocess mode — isolate ISC model in separate process
+    import subprocess
+    import sys
+
+    runner._log_message("[NeuralVerified] Running in subprocess (GPU isolation)...")
+
+    # Write config JSON for subprocess
+    config_path = Path(ctx.temp_dir) / "neural_config.json"
+    output_path = Path(ctx.temp_dir) / "neural_result.json"
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(ctx.settings.model_dump(), f, indent=2, ensure_ascii=False)
+
+    # Build subprocess command
+    cmd = [
+        sys.executable,
+        "-m",
+        "vsg_core.subtitles.sync_mode_plugins.video_verified.neural_subprocess",
+        "--source-video", str(source_video),
+        "--target-video", str(target_video),
+        "--total-delay-ms", str(total_delay_ms),
+        "--global-shift-ms", str(global_shift_ms),
+        "--config-json", str(config_path),
+        "--output-json", str(output_path),
+    ]
+
+    if ctx.temp_dir:
+        cmd.extend(["--temp-dir", str(ctx.temp_dir)])
+
+    if debug_output_dir:
+        cmd.extend(["--debug-output-dir", str(debug_output_dir)])
+
+    # Run subprocess
+    json_prefix = "__VSG_NEURAL_JSON__ "
+    json_payload = None
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+
+        # Forward stdout (log messages + JSON result)
+        if process.stdout:
+            for line in process.stdout:
+                line = line.rstrip("\n")
+                if line.startswith(json_prefix):
+                    try:
+                        json_payload = json.loads(line.split(json_prefix, 1)[1])
+                    except json.JSONDecodeError:
+                        json_payload = None
+                elif line:
+                    runner._log_message(line)
+
+        return_code = process.wait()
+
+        # Log any stderr (filter noise from model libraries)
+        if process.stderr:
+            for line in process.stderr:
+                line = line.rstrip("\n")
+                if line and not line.startswith("Downloading:"):
+                    runner._log_message(f"[NeuralVerified] stderr: {line}")
+
+        if return_code != 0:
+            error_detail = None
+            if json_payload and not json_payload.get("success"):
+                error_detail = json_payload.get("error")
+            runner._log_message(
+                f"[NeuralVerified] ERROR: Subprocess failed (code {return_code})"
+            )
+            if error_detail:
+                runner._log_message(f"[NeuralVerified] ERROR: {error_detail}")
+            return None, {
+                "reason": "fallback-subprocess-failed",
+                "error": error_detail or f"Exit code {return_code}",
+            }
+
+        if not json_payload or not json_payload.get("success"):
+            runner._log_message("[NeuralVerified] ERROR: Subprocess returned no result")
+            return None, {"reason": "fallback-subprocess-no-result"}
+
+        # Load result from JSON
+        with open(output_path, encoding="utf-8") as f:
+            result = json.load(f)
+
+        return result["final_offset_ms"], result["details"]
+
+    except Exception as e:
+        runner._log_message(f"[NeuralVerified] ERROR: Subprocess launch failed: {e}")
+        return None, {"reason": "fallback-subprocess-error", "error": str(e)}
+
+
 def run_per_source_preprocessing(
     ctx: Context, runner: CommandRunner, source1_file: Path
 ) -> None:
@@ -95,15 +261,14 @@ def run_per_source_preprocessing(
         original_delay = total_delay_ms
 
         try:
-            # Calculate frame-corrected delay
-            corrected_delay_ms, details = calculate_video_verified_offset(
+            # Calculate frame-corrected delay (dispatches to classic or neural)
+            corrected_delay_ms, details = _calculate_offset_for_method(
                 source_video=str(source_video),
                 target_video=str(source1_file),
                 total_delay_ms=total_delay_ms,
                 global_shift_ms=global_shift_ms,
-                settings=ctx.settings,
+                ctx=ctx,
                 runner=runner,
-                temp_dir=ctx.temp_dir,
             )
 
             if corrected_delay_ms is not None and ctx.delays:
@@ -224,15 +389,14 @@ def apply_for_bitmap_subtitle(
     )
 
     try:
-        # Calculate frame-corrected delay using video matching
-        corrected_delay_ms, details = calculate_video_verified_offset(
+        # Calculate frame-corrected delay (dispatches to classic or neural)
+        corrected_delay_ms, details = _calculate_offset_for_method(
             source_video=str(source_video),
             target_video=str(target_video),
             total_delay_ms=total_delay_ms,
             global_shift_ms=global_shift_ms,
-            settings=ctx.settings,
+            ctx=ctx,
             runner=runner,
-            temp_dir=ctx.temp_dir,
         )
 
         if corrected_delay_ms is not None:

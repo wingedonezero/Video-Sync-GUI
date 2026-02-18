@@ -1970,6 +1970,21 @@ class SubtitleSyncTab(QWidget):
         )
 
         # --- Video-verified options ---
+
+        # Method selection (classic vs neural)
+        self.widgets["video_verified_method"] = QComboBox()
+        self.widgets["video_verified_method"].addItem("Classic (phash/SSIM/MSE)", "classic")
+        self.widgets["video_verified_method"].addItem("Neural (ISC Features)", "neural")
+        self.widgets["video_verified_method"].setToolTip(
+            "Frame matching method:\n\n"
+            "• Classic: Uses perceptual hashing (phash), SSIM, and MSE\n"
+            "  to compare frames. Fast, works well for most content.\n\n"
+            "• Neural: Uses ISC (Image Similarity Challenge) deep features\n"
+            "  for near-duplicate frame detection. More accurate for\n"
+            "  challenging content. Requires GPU and ISC model download."
+        )
+
+        # Classic-specific settings
         self.widgets["video_verified_zero_check_frames"] = QSpinBox()
         self.widgets["video_verified_zero_check_frames"].setRange(1, 10)
         self.widgets["video_verified_zero_check_frames"].setValue(3)
@@ -2076,6 +2091,78 @@ class SubtitleSyncTab(QWidget):
             "This is diagnostic only - no timing is modified."
         )
 
+        # --- Neural-specific settings ---
+        self.widgets["neural_window_seconds"] = QSpinBox()
+        self.widgets["neural_window_seconds"].setRange(5, 30)
+        self.widgets["neural_window_seconds"].setValue(10)
+        self.widgets["neural_window_seconds"].setToolTip(
+            "Duration of frame window to extract at each checkpoint (seconds):\n\n"
+            "Longer windows capture more frames for comparison but take longer.\n\n"
+            "• 5: Fast, fewer frames per position\n"
+            "• 10 (Default): Good balance of accuracy and speed\n"
+            "• 20+: Very thorough, slower extraction"
+        )
+
+        self.widgets["neural_slide_range_seconds"] = QSpinBox()
+        self.widgets["neural_slide_range_seconds"].setRange(1, 15)
+        self.widgets["neural_slide_range_seconds"].setValue(5)
+        self.widgets["neural_slide_range_seconds"].setToolTip(
+            "How far to slide target window around expected position (seconds):\n\n"
+            "The target window slides ±N seconds around the audio correlation\n"
+            "offset to find the best visual match.\n\n"
+            "• 2: Tight search (audio correlation is very close)\n"
+            "• 5 (Default): Standard range\n"
+            "• 10+: Wide search (audio correlation may be far off)"
+        )
+
+        self.widgets["neural_num_positions"] = QSpinBox()
+        self.widgets["neural_num_positions"].setRange(3, 15)
+        self.widgets["neural_num_positions"].setValue(9)
+        self.widgets["neural_num_positions"].setToolTip(
+            "Number of checkpoint positions across the video:\n\n"
+            "Positions are spaced evenly from 10% to 90% of video duration.\n"
+            "Each position extracts and compares frames independently.\n\n"
+            "• 5: Fast, fewer consensus votes\n"
+            "• 9 (Default): Strong consensus\n"
+            "• 13+: Very thorough, diminishing returns"
+        )
+
+        self.widgets["neural_batch_size"] = QSpinBox()
+        self.widgets["neural_batch_size"].setRange(1, 128)
+        self.widgets["neural_batch_size"].setValue(32)
+        self.widgets["neural_batch_size"].setToolTip(
+            "GPU batch size for ISC feature extraction:\n\n"
+            "Higher values use more GPU memory but extract faster.\n\n"
+            "• 8: Low VRAM GPUs (2-4 GB)\n"
+            "• 32 (Default): Standard GPUs (6+ GB)\n"
+            "• 64+: High VRAM GPUs (12+ GB)"
+        )
+
+        self.widgets["neural_run_in_subprocess"] = QCheckBox()
+        self.widgets["neural_run_in_subprocess"].setChecked(True)
+        self.widgets["neural_run_in_subprocess"].setToolTip(
+            "Run ISC model in a separate subprocess:\n\n"
+            "ON (Default): Isolates GPU memory from the main application.\n"
+            "  Prevents memory conflicts with other GPU operations.\n\n"
+            "OFF: Run in the main process (faster startup, shared GPU memory)."
+        )
+
+        self.widgets["neural_debug_report"] = QCheckBox()
+        self.widgets["neural_debug_report"].setChecked(False)
+        self.widgets["neural_debug_report"].setToolTip(
+            "Write detailed neural matching debug report:\n\n"
+            "When enabled, writes a JSON report with full score landscapes,\n"
+            "per-position results, feature statistics, and timing data\n"
+            "to the debug/neural_verify/ directory.\n\n"
+            "Useful for diagnosing matching issues or validating results."
+        )
+
+        # --- Layout: Method selector ---
+        specific_layout.addRow(
+            "Matching Method:", self.widgets["video_verified_method"]
+        )
+
+        # --- Layout: Classic settings ---
         specific_layout.addRow(
             "Zero-Check Threshold:", self.widgets["video_verified_zero_check_frames"]
         )
@@ -2101,12 +2188,37 @@ class SubtitleSyncTab(QWidget):
             "Visual Frame Verify:", self.widgets["video_verified_visual_verify"]
         )
 
+        # --- Layout: Neural settings ---
+        specific_layout.addRow(
+            "Window Duration (s):", self.widgets["neural_window_seconds"]
+        )
+        specific_layout.addRow(
+            "Slide Range (s):", self.widgets["neural_slide_range_seconds"]
+        )
+        specific_layout.addRow(
+            "Num Positions:", self.widgets["neural_num_positions"]
+        )
+        specific_layout.addRow(
+            "GPU Batch Size:", self.widgets["neural_batch_size"]
+        )
+        specific_layout.addRow(
+            "Run in Subprocess:", self.widgets["neural_run_in_subprocess"]
+        )
+        specific_layout.addRow(
+            "Neural Debug Report:", self.widgets["neural_debug_report"]
+        )
+
         main_layout.addWidget(specific_group)
         main_layout.addStretch(1)
 
         # Connect signals
         self.widgets["subtitle_sync_mode"].currentTextChanged.connect(
             self._update_mode_visibility
+        )
+        self.widgets["video_verified_method"].currentIndexChanged.connect(
+            lambda _: self._update_mode_visibility(
+                self.widgets["subtitle_sync_mode"].currentText()
+            )
         )
         self._update_mode_visibility(self.widgets["subtitle_sync_mode"].currentText())
 
@@ -2120,7 +2232,13 @@ class SubtitleSyncTab(QWidget):
         # Frame-based modes need frame matching settings
         is_frame_based = is_frame_locked or is_sub_anchor_snap or is_video_verified
 
-        # Shared frame matching settings (enabled for all frame-based modes)
+        # Determine which video-verified method is selected
+        method = self.widgets["video_verified_method"].currentData() or "classic"
+        is_classic = is_video_verified and method == "classic"
+        is_neural = is_video_verified and method == "neural"
+
+        # Shared frame matching settings (enabled for all frame-based modes,
+        # but neural mode doesn't use these hash settings)
         for key in [
             "frame_hash_algorithm",
             "frame_hash_size",
@@ -2131,7 +2249,9 @@ class SubtitleSyncTab(QWidget):
             "frame_use_vapoursynth",
         ]:
             if key in self.widgets:
-                self.widgets[key].setEnabled(is_frame_based)
+                self.widgets[key].setEnabled(
+                    is_frame_locked or is_sub_anchor_snap or is_classic
+                )
 
         # Time-based specific
         self.widgets["time_based_use_raw_values"].setEnabled(is_time_based)
@@ -2143,17 +2263,26 @@ class SubtitleSyncTab(QWidget):
         # Subtitle-anchored specific
         self.widgets["sub_anchor_fallback_mode"].setEnabled(is_sub_anchor_snap)
 
-        # Video-verified specific
-        self.widgets["video_verified_zero_check_frames"].setEnabled(is_video_verified)
-        self.widgets["video_verified_min_quality_advantage"].setEnabled(
-            is_video_verified
-        )
-        self.widgets["video_verified_num_checkpoints"].setEnabled(is_video_verified)
-        self.widgets["video_verified_search_range_frames"].setEnabled(is_video_verified)
-        self.widgets["video_verified_sequence_length"].setEnabled(is_video_verified)
-        self.widgets["video_verified_use_pts_precision"].setEnabled(is_video_verified)
-        self.widgets["video_verified_frame_audit"].setEnabled(is_video_verified)
-        self.widgets["video_verified_visual_verify"].setEnabled(is_video_verified)
+        # Video-verified method selector
+        self.widgets["video_verified_method"].setEnabled(is_video_verified)
+
+        # Video-verified classic-specific settings
+        self.widgets["video_verified_zero_check_frames"].setEnabled(is_classic)
+        self.widgets["video_verified_min_quality_advantage"].setEnabled(is_classic)
+        self.widgets["video_verified_num_checkpoints"].setEnabled(is_classic)
+        self.widgets["video_verified_search_range_frames"].setEnabled(is_classic)
+        self.widgets["video_verified_sequence_length"].setEnabled(is_classic)
+        self.widgets["video_verified_use_pts_precision"].setEnabled(is_classic)
+        self.widgets["video_verified_frame_audit"].setEnabled(is_classic)
+        self.widgets["video_verified_visual_verify"].setEnabled(is_classic)
+
+        # Video-verified neural-specific settings
+        self.widgets["neural_window_seconds"].setEnabled(is_neural)
+        self.widgets["neural_slide_range_seconds"].setEnabled(is_neural)
+        self.widgets["neural_num_positions"].setEnabled(is_neural)
+        self.widgets["neural_batch_size"].setEnabled(is_neural)
+        self.widgets["neural_run_in_subprocess"].setEnabled(is_neural)
+        self.widgets["neural_debug_report"].setEnabled(is_neural)
 
 
 

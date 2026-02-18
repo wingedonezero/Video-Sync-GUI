@@ -13,7 +13,8 @@ Path Structure:
           └── debug/
               ├── ocr_debug/
               ├── frame_audit/
-              └── visual_verify/
+              ├── visual_verify/
+              └── neural_verify/
 
     Batch Mode:
         output_folder/batch_name/
@@ -25,7 +26,8 @@ Path Structure:
               │   ├── file1_job/
               │   └── file2_job/
               ├── frame_audit/
-              └── visual_verify/
+              ├── visual_verify/
+              └── neural_verify/
 """
 
 from __future__ import annotations
@@ -58,10 +60,14 @@ class DebugOutputPaths:
     ocr_debug_dir: Path | None  # debug/ocr_debug/{job_name}/ (batch) or debug/ocr_debug/ (single)
     frame_audit_dir: Path | None  # debug/frame_audit/
     visual_verify_dir: Path | None  # debug/visual_verify/
+    neural_verify_dir: Path | None  # debug/neural_verify/
 
     def should_create_debug_root(self) -> bool:
         """Check if any debug feature is enabled."""
-        return any([self.ocr_debug_dir, self.frame_audit_dir, self.visual_verify_dir])
+        return any([
+            self.ocr_debug_dir, self.frame_audit_dir,
+            self.visual_verify_dir, self.neural_verify_dir,
+        ])
 
     def get_enabled_features(self) -> list[str]:
         """Get list of enabled debug feature names."""
@@ -72,6 +78,8 @@ class DebugOutputPaths:
             features.append("frame_audit")
         if self.visual_verify_dir:
             features.append("visual_verify")
+        if self.neural_verify_dir:
+            features.append("neural_verify")
         return features
 
 
@@ -106,6 +114,7 @@ class DebugPathResolver:
         ocr_enabled = settings.ocr_debug_output
         frame_audit_enabled = settings.video_verified_frame_audit
         visual_verify_enabled = settings.video_verified_visual_verify
+        neural_verify_enabled = getattr(settings, "neural_debug_report", False)
 
         # Resolve OCR debug path
         ocr_debug_dir = None
@@ -129,6 +138,11 @@ class DebugPathResolver:
             # Same structure for single and batch - files are named uniquely
             visual_verify_dir = debug_root / "visual_verify"
 
+        # Resolve neural verify path
+        neural_verify_dir = None
+        if neural_verify_enabled:
+            neural_verify_dir = debug_root / "neural_verify"
+
         return DebugOutputPaths(
             output_dir=output_dir,
             job_name=job_name,
@@ -137,6 +151,7 @@ class DebugPathResolver:
             ocr_debug_dir=ocr_debug_dir,
             frame_audit_dir=frame_audit_dir,
             visual_verify_dir=visual_verify_dir,
+            neural_verify_dir=neural_verify_dir,
         )
 
     @staticmethod
