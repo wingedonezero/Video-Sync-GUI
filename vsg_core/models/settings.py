@@ -57,6 +57,7 @@ from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     VideoSnapModeStr,
     VideoTimestampsRoundingStr,
     VideoTimestampsSnapModeStr,
+    VideoVerifiedMethodStr,
 )
 
 # Sentinel for path defaults that need runtime resolution
@@ -205,6 +206,17 @@ class AppSettings(BaseModel):
     video_verified_use_pts_precision: bool = False
     video_verified_frame_audit: bool = False
     video_verified_visual_verify: bool = False
+
+    # Video-Verified: Matching Method
+    video_verified_method: VideoVerifiedMethodStr = "classic"
+
+    # Video-Verified: Neural Feature Matching Settings
+    neural_window_seconds: int = 10
+    neural_slide_range_seconds: int = 5
+    neural_num_positions: int = 9
+    neural_batch_size: int = 32
+    neural_run_in_subprocess: bool = True
+    neural_debug_report: bool = False
 
     # =========================================================================
     # Analysis/Correlation Settings

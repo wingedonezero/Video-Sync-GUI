@@ -54,6 +54,9 @@ FrameHashAlgorithmStr = Literal["dhash", "phash", "average_hash", "whash"]
 # Frame comparison method
 FrameComparisonMethodStr = Literal["hash", "ssim", "mse"]
 
+# Video-verified matching method
+VideoVerifiedMethodStr = Literal["classic", "neural"]
+
 # =========================================================================
 # Fallback Modes (what to do when sync mode fails)
 # =========================================================================

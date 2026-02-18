@@ -7,14 +7,17 @@ for subtitle timing, addressing cases where audio correlation differs from
 the actual video alignment.
 
 Public API:
-    - calculate_video_verified_offset(): Core algorithm, usable for any format
+    - calculate_video_verified_offset(): Classic frame matching (phash/SSIM/MSE)
+    - calculate_neural_verified_offset(): Neural feature matching (ISC model)
     - VideoVerifiedSync: SyncPlugin implementation for the subtitle pipeline
 """
 
 from .matcher import calculate_video_verified_offset
+from .neural_matcher import calculate_neural_verified_offset
 from .plugin import VideoVerifiedSync
 
 __all__ = [
     "VideoVerifiedSync",
     "calculate_video_verified_offset",
+    "calculate_neural_verified_offset",
 ]
