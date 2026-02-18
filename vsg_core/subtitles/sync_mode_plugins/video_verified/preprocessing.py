@@ -113,6 +113,8 @@ def _run_neural_matching(
         json.dump(ctx.settings.model_dump(), f, indent=2, ensure_ascii=False)
 
     # Build subprocess command
+    # NOTE: Use --flag=value syntax for numeric args to prevent argparse
+    # from misinterpreting negative numbers (e.g. -3.36e-09) as flags
     cmd = [
         sys.executable,
         "-m",
@@ -121,10 +123,8 @@ def _run_neural_matching(
         str(source_video),
         "--target-video",
         str(target_video),
-        "--total-delay-ms",
-        str(total_delay_ms),
-        "--global-shift-ms",
-        str(global_shift_ms),
+        f"--total-delay-ms={total_delay_ms}",
+        f"--global-shift-ms={global_shift_ms}",
         "--config-json",
         str(config_path),
         "--output-json",
