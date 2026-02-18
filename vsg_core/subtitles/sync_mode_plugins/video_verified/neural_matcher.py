@@ -233,12 +233,10 @@ def calculate_neural_verified_offset(
 
         best_pos = int(np.argmax(scores))
         # Sign convention: source_video=Source2, target_video=Source1
-        # Positive offset = Source 2 needs to shift forward (starts later)
-        # Negative offset = Source 2 needs to shift backward (starts earlier)
-        # We negate because src/tgt naming is reversed vs the sliding math:
-        # sliding finds where src content appears in tgt, but we want
-        # the delay to apply to source_video (Source 2).
-        offset_frames = src_start - (tgt_window_start + best_pos)
+        # Positive = Source 2 subs shift forward, Negative = shift backward
+        # (tgt_pos - src_pos): if Source 2 content is at frame 4917 but matches
+        # Source 1 at frame 4941, offset = +24 = "shift Source 2 forward by 24f"
+        offset_frames = (tgt_window_start + best_pos) - src_start
         offset_ms = offset_frames * src_frame_dur_ms
 
         # Score gradient (how sharp is the peak)
@@ -337,7 +335,7 @@ def calculate_neural_verified_offset(
         bp = land["best_pos"]
         src_start = land["src_start"]
         tgt_ws = land["tgt_window_start"]
-        best_off_f = src_start - (tgt_ws + bp)
+        best_off_f = (tgt_ws + bp) - src_start
         best_off_ms = best_off_f * src_frame_dur_ms
 
         log(f"[NeuralVerified]   Landscape {land['position_pct']:.0f}%: "
@@ -347,7 +345,7 @@ def calculate_neural_verified_offset(
         for delta in range(-5, 6):
             pos = bp + delta
             if 0 <= pos < len(sc):
-                off_f = src_start - (tgt_ws + pos)
+                off_f = (tgt_ws + pos) - src_start
                 off_ms = off_f * src_frame_dur_ms
                 marker = " ★" if delta == 0 else ""
                 log(f"[NeuralVerified]     {off_f:+4d}f ({off_ms:+7.1f}ms): "
@@ -606,7 +604,7 @@ def _write_debug_report(
             bp = land["best_pos"]
             src_start = land["src_start"]
             tgt_ws = land["tgt_window_start"]
-            best_off_f = src_start - (tgt_ws + bp)
+            best_off_f = (tgt_ws + bp) - src_start
             best_off_ms = best_off_f * src_frame_dur_ms
 
             lines.append(f"")
@@ -617,7 +615,7 @@ def _write_debug_report(
             for delta in range(-15, 16):
                 pos = bp + delta
                 if 0 <= pos < len(sc):
-                    off_f = src_start - (tgt_ws + pos)
+                    off_f = (tgt_ws + pos) - src_start
                     off_ms = off_f * src_frame_dur_ms
                     marker = " ★" if delta == 0 else ""
                     bar_val = max(0, (sc[pos] - 0.3) * 60)
