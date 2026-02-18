@@ -41,6 +41,7 @@ def calculate_neural_verified_offset(
     temp_dir: Path | None = None,
     video_duration_ms: float | None = None,
     debug_output_dir: Path | None = None,
+    source_key: str = "",
 ) -> tuple[float | None, dict[str, Any]]:
     """
     Calculate video-verified offset using ISC neural feature sequence sliding.
@@ -385,6 +386,7 @@ def calculate_neural_verified_offset(
             debug_output_dir=debug_output_dir,
             source_video=source_video,
             target_video=target_video,
+            source_key=source_key,
             pure_correlation_ms=pure_correlation_ms,
             consensus_frames=consensus_frames,
             consensus_ms=consensus_ms,
@@ -572,6 +574,7 @@ def _write_debug_report(
     debug_output_dir: Path,
     source_video: str,
     target_video: str,
+    source_key: str,
     pure_correlation_ms: float,
     consensus_frames: int,
     consensus_ms: float,
@@ -590,10 +593,11 @@ def _write_debug_report(
     try:
         debug_output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate filename from source/target
-        src_stem = Path(source_video).stem
+        # Generate filename: {job}_{sourceKey}_neural_verify.txt
+        # Matches frame audit convention: 1_Source3_t2_frame_audit.txt
         tgt_stem = Path(target_video).stem
-        report_name = f"neural_verify_{src_stem}_vs_{tgt_stem}.txt"
+        key_sanitized = source_key.replace(" ", "") if source_key else "unknown"
+        report_name = f"{tgt_stem}_{key_sanitized}_neural_verify.txt"
         report_path = debug_output_dir / report_name
 
         lines = []

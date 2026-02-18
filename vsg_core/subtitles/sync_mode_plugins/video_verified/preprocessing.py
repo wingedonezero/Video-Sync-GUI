@@ -31,6 +31,7 @@ def _calculate_offset_for_method(
     global_shift_ms: float,
     ctx,
     runner,
+    source_key: str = "",
 ) -> tuple[float | None, dict]:
     """Dispatch to classic or neural matcher based on settings.
 
@@ -46,6 +47,7 @@ def _calculate_offset_for_method(
             global_shift_ms=global_shift_ms,
             ctx=ctx,
             runner=runner,
+            source_key=source_key,
         )
 
     # Classic method (default)
@@ -67,6 +69,7 @@ def _run_neural_matching(
     global_shift_ms: float,
     ctx,
     runner,
+    source_key: str = "",
 ) -> tuple[float | None, dict]:
     """Run neural feature matching, optionally in a subprocess."""
     import json
@@ -93,6 +96,7 @@ def _run_neural_matching(
             runner=runner,
             temp_dir=ctx.temp_dir,
             debug_output_dir=debug_output_dir,
+            source_key=source_key,
         )
 
     # Subprocess mode — isolate ISC model in separate process
@@ -113,13 +117,22 @@ def _run_neural_matching(
         sys.executable,
         "-m",
         "vsg_core.subtitles.sync_mode_plugins.video_verified.neural_subprocess",
-        "--source-video", str(source_video),
-        "--target-video", str(target_video),
-        "--total-delay-ms", str(total_delay_ms),
-        "--global-shift-ms", str(global_shift_ms),
-        "--config-json", str(config_path),
-        "--output-json", str(output_path),
+        "--source-video",
+        str(source_video),
+        "--target-video",
+        str(target_video),
+        "--total-delay-ms",
+        str(total_delay_ms),
+        "--global-shift-ms",
+        str(global_shift_ms),
+        "--config-json",
+        str(config_path),
+        "--output-json",
+        str(output_path),
     ]
+
+    if source_key:
+        cmd.extend(["--source-key", source_key])
 
     if ctx.temp_dir:
         cmd.extend(["--temp-dir", str(ctx.temp_dir)])
@@ -267,6 +280,7 @@ def run_per_source_preprocessing(
                 target_video=str(source1_file),
                 total_delay_ms=total_delay_ms,
                 global_shift_ms=global_shift_ms,
+                source_key=source_key,
                 ctx=ctx,
                 runner=runner,
             )
