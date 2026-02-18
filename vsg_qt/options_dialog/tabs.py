@@ -2273,8 +2273,10 @@ class SubtitleSyncTab(QWidget):
         self.widgets["video_verified_search_range_frames"].setEnabled(is_classic)
         self.widgets["video_verified_sequence_length"].setEnabled(is_classic)
         self.widgets["video_verified_use_pts_precision"].setEnabled(is_classic)
-        self.widgets["video_verified_frame_audit"].setEnabled(is_classic)
-        self.widgets["video_verified_visual_verify"].setEnabled(is_classic)
+
+        # Shared video-verified settings (work with both classic and neural)
+        self.widgets["video_verified_frame_audit"].setEnabled(is_video_verified)
+        self.widgets["video_verified_visual_verify"].setEnabled(is_video_verified)
 
         # Video-verified neural-specific settings
         self.widgets["neural_window_seconds"].setEnabled(is_neural)
