@@ -12,6 +12,7 @@ from .drift_correction import DriftCorrectionAuditor
 from .frame_audit import FrameAuditAuditor
 from .global_shift import GlobalShiftAuditor
 from .language_tags import LanguageTagsAuditor
+from .neural_confidence import NeuralConfidenceAuditor
 from .stepping_correction import SteppingCorrectionAuditor
 from .subtitle_clamping import SubtitleClampingAuditor
 from .subtitle_formats import SubtitleFormatsAuditor
@@ -33,6 +34,7 @@ __all__ = [
     "FrameAuditAuditor",
     "GlobalShiftAuditor",
     "LanguageTagsAuditor",
+    "NeuralConfidenceAuditor",
     "SteppingCorrectionAuditor",
     "SubtitleClampingAuditor",
     "SubtitleFormatsAuditor",

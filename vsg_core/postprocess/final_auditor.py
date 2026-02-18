@@ -23,6 +23,7 @@ from .auditors import (
     FrameAuditAuditor,
     GlobalShiftAuditor,
     LanguageTagsAuditor,
+    NeuralConfidenceAuditor,
     SteppingCorrectionAuditor,
     SubtitleClampingAuditor,
     SubtitleFormatsAuditor,
@@ -251,6 +252,14 @@ class FinalAuditor:
 
         self.log("\n--- Auditing Subtitle Formats ---")
         auditor = SubtitleFormatsAuditor(self.ctx, self.runner)
+        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
+        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
+        total_issues += auditor.run(
+            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
+        )
+
+        self.log("\n--- Auditing Neural Verification Confidence ---")
+        auditor = NeuralConfidenceAuditor(self.ctx, self.runner)
         auditor._source_ffprobe_cache = self._shared_ffprobe_cache
         auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
         total_issues += auditor.run(
