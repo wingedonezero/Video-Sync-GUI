@@ -260,12 +260,16 @@ class FilteringTab(BaseTab):
             return
 
         total = len(self._state.events)
-        kept = len(self._state.get_filtered_event_indices())
-        removed = total - kept
+        comment_count = sum(1 for e in self._state.events if e.is_comment)
+        dialogue_total = total - comment_count
+        kept_indices = self._state.get_filtered_event_indices()
+        # kept_indices includes comments (they're not filtered), subtract them for stats
+        kept = len(kept_indices) - comment_count
+        removed = dialogue_total - kept
 
         mode = "included" if self._state.filter_mode == "include" else "kept"
         self._stats_label.setText(
-            f"Result: {kept} events {mode}, {removed} events removed (total: {total})"
+            f"Result: {kept} events {mode}, {removed} events removed (total: {dialogue_total})"
         )
 
     def on_activated(self) -> None:
