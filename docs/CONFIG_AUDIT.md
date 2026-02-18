@@ -3,6 +3,13 @@
 **Baseline (old, known-good):** `4293a41f3cd1b5221c517c425eae41e17bc4e247`
 **Current (post-refactor):** HEAD of main
 
+> **Note:** The following sync modes and their associated settings have been removed:
+> `timebase-frame-locked-timestamps`, `subtitle-anchored-frame-snap`.
+> Related settings removed: `videotimestamps_snap_mode`, `videotimestamps_rounding`,
+> `frame_lock_submillisecond_precision`, `sub_anchor_fallback_mode`,
+> `frame_search_range_ms`, `frame_agreement_tolerance_ms`, `frame_use_vapoursynth`.
+> References to these in the audit below are historical.
+
 ---
 
 ## Section 1 — Regressions vs Old Commit (High-Level)

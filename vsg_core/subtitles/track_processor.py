@@ -228,12 +228,10 @@ def process_subtitle_track(
     # ================================================================
     # STEP 3: Apply Sync Mode
     # ================================================================
-    # For non-frame-locked modes with stepping already applied, skip sync
+    # If stepping already applied timing corrections, skip sync
     sync_result = None
     should_apply_sync = True
-    if item.stepping_adjusted and subtitle_sync_mode not in [
-        "timebase-frame-locked-timestamps"
-    ]:
+    if item.stepping_adjusted:
         should_apply_sync = False
         runner._log_message(
             f"[SubtitleData] Skipping {subtitle_sync_mode} - stepping already applied"

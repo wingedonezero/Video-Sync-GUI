@@ -105,8 +105,6 @@ def _ensure_plugins_loaded():
 
         plugins_to_load = [
             "vsg_core.subtitles.sync_mode_plugins.time_based",
-            "vsg_core.subtitles.sync_mode_plugins.timebase_frame_locked",
-            "vsg_core.subtitles.sync_mode_plugins.subtitle_anchored_frame_snap",
             "vsg_core.subtitles.sync_mode_plugins.video_verified",
         ]
         for module_name in plugins_to_load:
@@ -119,7 +117,7 @@ def get_sync_plugin(name: str) -> SyncPlugin | None:
     Get a sync plugin instance by name.
 
     Args:
-        name: Plugin name (e.g., 'timebase-frame-locked-timestamps')
+        name: Plugin name (e.g., 'time-based', 'video-verified')
 
     Returns:
         Plugin instance, or None if not found

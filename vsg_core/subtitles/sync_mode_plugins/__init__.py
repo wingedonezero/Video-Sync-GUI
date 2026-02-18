@@ -15,18 +15,11 @@ import importlib
 # Module mapping for lazy loading
 _MODULE_MAP = {
     "TimeBasedSync": ("time_based", "TimeBasedSync"),
-    "TimebaseFrameLockedSync": ("timebase_frame_locked", "TimebaseFrameLockedSync"),
-    "SubtitleAnchoredFrameSnapSync": (
-        "subtitle_anchored_frame_snap",
-        "SubtitleAnchoredFrameSnapSync",
-    ),
     "VideoVerifiedSync": ("video_verified", "VideoVerifiedSync"),
 }
 
 _SUBMODULES = [
     "time_based",
-    "timebase_frame_locked",
-    "subtitle_anchored_frame_snap",
     "video_verified",
 ]
 
@@ -55,8 +48,6 @@ def __getattr__(name):
 
 
 __all__ = [
-    "SubtitleAnchoredFrameSnapSync",
     "TimeBasedSync",
-    "TimebaseFrameLockedSync",
     "VideoVerifiedSync",
 ]
