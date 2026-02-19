@@ -1096,13 +1096,12 @@ class SteppingTab(QWidget):
         )
         self.widgets["stepping_quality_mode"].setToolTip(
             "What makes a cluster 'valid' - clusters must pass ALL checks:\n"
-            "  1. Minimum correlation windows per cluster\n"
-            "  2. Minimum percentage of total windows\n"
-            "  3. Minimum duration in seconds\n"
-            "  4. Minimum match quality\n\n"
-            "strict: 15+ windows, 10%+, 30s+, 90%+ (Blu-ray quality)\n"
-            "normal: 10+ windows, 5%+, 20s+, 85%+ (Default)\n"
-            "lenient: 5+ windows, 3%+, 10s+, 75%+ (Edge cases)\n"
+            "  1. Minimum % of total correlation windows\n"
+            "  2. Minimum duration in seconds\n"
+            "  3. Minimum match quality\n\n"
+            "strict: 10%+, 30s+, 90%+ match (Blu-ray quality)\n"
+            "normal: 5%+, 20s+, 85%+ match (Default)\n"
+            "lenient: 3%+, 10s+, 75%+ match (Edge cases)\n"
             "custom: Configure thresholds manually below"
         )
 
@@ -1134,20 +1133,16 @@ class SteppingTab(QWidget):
             QLabel("<i>Custom Quality Thresholds (for 'custom' mode):</i>")
         )
 
-        self.widgets["stepping_min_windows_per_cluster"] = QSpinBox()
-        self.widgets["stepping_min_windows_per_cluster"].setRange(1, 50)
-        self.widgets["stepping_min_windows_per_cluster"].setToolTip(
-            "Minimum correlation windows required per cluster.\n"
-            "With dense correlation (300-600 windows), use 5-15.\n"
-            "Default: 10"
-        )
-
         self.widgets["stepping_min_cluster_percentage"] = QDoubleSpinBox()
-        self.widgets["stepping_min_cluster_percentage"].setRange(0.0, 50.0)
+        self.widgets["stepping_min_cluster_percentage"].setRange(1.0, 50.0)
         self.widgets["stepping_min_cluster_percentage"].setSuffix(" %")
         self.widgets["stepping_min_cluster_percentage"].setDecimals(1)
         self.widgets["stepping_min_cluster_percentage"].setToolTip(
-            "Minimum % of total windows a cluster must represent."
+            "Minimum percentage of total correlation windows a cluster\n"
+            "must represent to be considered valid.\n\n"
+            "Example: 5% of 500 windows = cluster needs at least 25 windows.\n"
+            "Scales automatically with file length and window settings.\n"
+            "Default: 5%"
         )
 
         self.widgets["stepping_min_cluster_duration_s"] = QDoubleSpinBox()
@@ -1173,10 +1168,7 @@ class SteppingTab(QWidget):
         )
 
         segment_layout.addRow(
-            "  Min Windows/Cluster:", self.widgets["stepping_min_windows_per_cluster"]
-        )
-        segment_layout.addRow(
-            "  Min Cluster %:", self.widgets["stepping_min_cluster_percentage"]
+            "  Min Cluster Size:", self.widgets["stepping_min_cluster_percentage"]
         )
         segment_layout.addRow(
             "  Min Cluster Duration:", self.widgets["stepping_min_cluster_duration_s"]

@@ -230,7 +230,6 @@ class AppConfig:
         _stepping_renames = {
             "segmented_enabled": "stepping_enabled",
             "segment_triage_std_dev_ms": "stepping_triage_std_dev_ms",
-            "stepping_min_chunks_per_cluster": "stepping_min_windows_per_cluster",
             "segmented_qa_threshold": "stepping_qa_threshold",
             "min_accepted_windows": "min_accepted_pct",
             "sync_stability_min_chunks": "sync_stability_min_windows",
@@ -256,6 +255,8 @@ class AppConfig:
             "stepping_qa_window_count",
             "segment_qa_min_accepted_chunks",
             "stepping_qa_min_accepted_windows",
+            "stepping_min_windows_per_cluster",
+            "stepping_min_chunks_per_cluster",
         ]:
             if dead_key in loaded_settings:
                 del loaded_settings[dead_key]

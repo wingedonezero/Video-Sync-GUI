@@ -216,21 +216,18 @@ def _get_quality_thresholds(settings: AppSettings) -> QualityThresholds:
     # Preset modes (tuned for dense sliding window: 300-600 windows per file)
     presets: dict[str, QualityThresholds] = {
         "strict": QualityThresholds(
-            min_windows_per_cluster=15,
             min_cluster_percentage=10.0,
             min_cluster_duration_s=30.0,
             min_match_quality_pct=90.0,
             min_total_clusters=2,
         ),
         "normal": QualityThresholds(
-            min_windows_per_cluster=10,
             min_cluster_percentage=5.0,
             min_cluster_duration_s=20.0,
             min_match_quality_pct=85.0,
             min_total_clusters=2,
         ),
         "lenient": QualityThresholds(
-            min_windows_per_cluster=5,
             min_cluster_percentage=3.0,
             min_cluster_duration_s=10.0,
             min_match_quality_pct=75.0,
@@ -241,7 +238,6 @@ def _get_quality_thresholds(settings: AppSettings) -> QualityThresholds:
     # If custom mode, use user-configured values
     if quality_mode == "custom":
         return QualityThresholds(
-            min_windows_per_cluster=settings.stepping_min_windows_per_cluster,
             min_cluster_percentage=settings.stepping_min_cluster_percentage,
             min_cluster_duration_s=settings.stepping_min_cluster_duration_s,
             min_match_quality_pct=settings.stepping_min_match_quality_pct,
@@ -286,17 +282,11 @@ def _validate_cluster(
 
     # Perform validation checks
     checks = {
-        "windows": ValidationCheck(
-            passed=cluster_size >= thresholds.min_windows_per_cluster,
-            value=float(cluster_size),
-            threshold=float(thresholds.min_windows_per_cluster),
-            label="Windows",
-        ),
         "percentage": ValidationCheck(
             passed=cluster_percentage >= thresholds.min_cluster_percentage,
             value=cluster_percentage,
             threshold=thresholds.min_cluster_percentage,
-            label="Percentage",
+            label="Cluster size",
         ),
         "duration": ValidationCheck(
             passed=cluster_duration_s >= thresholds.min_cluster_duration_s,
@@ -474,21 +464,13 @@ def diagnose_audio_issue(
                 threshold = check_data.threshold
                 label_text = check_data.label
 
-                if check_name == "percentage":
-                    log(
-                        f"    {check_symbol} {label_text}: {value:.1f}% (need {threshold:.1f}%+)"
-                    )
-                elif check_name == "duration":
+                if check_name == "duration":
                     log(
                         f"    {check_symbol} {label_text}: {value:.1f}s (need {threshold:.1f}s+)"
                     )
-                elif check_name == "match_quality":
+                else:  # percentage, match_quality
                     log(
                         f"    {check_symbol} {label_text}: {value:.1f}% (need {threshold:.1f}%+)"
-                    )
-                else:  # chunks
-                    log(
-                        f"    {check_symbol} {label_text}: {int(value)} (need {int(threshold)}+)"
                     )
 
             log(
@@ -566,11 +548,16 @@ def diagnose_audio_issue(
             )
 
         else:
-            # Unknown mode - fall back to legacy behavior
-            min_cluster_size = min(cluster_sizes.values()) if cluster_sizes else 0
-            MIN_WINDOWS_PER_CLUSTER = settings.stepping_min_windows_per_cluster
+            # Unknown mode - fall back to legacy behavior using percentage
+            total = len(accepted_chunks)
+            min_pct = settings.stepping_min_cluster_percentage
+            smallest_pct = (
+                min(len(m) for m in cluster_members.values()) / total * 100.0
+                if cluster_members and total > 0
+                else 0.0
+            )
 
-            if min_cluster_size >= MIN_WINDOWS_PER_CLUSTER:
+            if smallest_pct >= min_pct:
                 return SteppingDiagnosis(
                     cluster_count=len(unique_clusters),
                     cluster_details=cluster_details,
