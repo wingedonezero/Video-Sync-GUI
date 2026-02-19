@@ -116,6 +116,7 @@ class SegmentFlagsEntry(TypedDict, total=False):
     correction_mode: str  # "full", "strict", "filtered"
     fallback_mode: str | None  # "nearest", "reject", etc. (filtered mode only)
     subs_only: bool  # True if only subtitle adjustment, no audio correction
+    stepping_data_path: str  # Path to JSON with dense ChunkResult + cluster data
     audit_metadata: list[dict[str, object]] | None  # Added by stepping corrector
 
 
@@ -283,35 +284,3 @@ class VideoVerifiedResult(TypedDict, total=False):
     original_delay_ms: float
     corrected_delay_ms: float
     details: dict[str, object]  # Frame matching details
-
-
-# =============================================================================
-# Correlation Results Types (used in analysis steps)
-# =============================================================================
-
-
-class CorrelationChunkResult(TypedDict, total=False):
-    """Result from correlating a single audio chunk."""
-
-    chunk_index: int
-    start_s: float
-    end_s: float
-    delay_ms: float
-    raw_delay_ms: float
-    match_pct: float
-    accepted: bool
-    rejection_reason: str | None
-
-
-class CorrelationSummary(TypedDict, total=False):
-    """Summary of correlation analysis for a source."""
-
-    source: str
-    final_delay_ms: int
-    raw_delay_ms: float
-    chunk_count: int
-    accepted_count: int
-    confidence: float
-    method: str  # "median", "mode", "weighted", etc.
-    variance_ms: float
-    is_uniform: bool

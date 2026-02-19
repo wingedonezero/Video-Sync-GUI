@@ -774,6 +774,24 @@ class AnalysisStep:
             use_source_separated_settings=use_source_separated_settings,
         )
 
+        # --- Save dense data for stepping correction ---
+        if isinstance(diagnosis, SteppingDiagnosis):
+            analysis_track_key = f"{source_key}_{target_track_id}"
+            if analysis_track_key in ctx.segment_flags:
+                from vsg_core.correction.stepping.data_io import save_stepping_data
+
+                data_path = save_stepping_data(
+                    temp_dir=ctx.temp_dir,
+                    source_key=source_key,
+                    track_id=target_track_id,
+                    chunk_results=results,
+                    diagnosis=diagnosis,
+                )
+                ctx.segment_flags[analysis_track_key]["stepping_data_path"] = str(
+                    data_path
+                )
+                log(f"[Stepping] Dense analysis data saved to {data_path.name}")
+
     def _decode_and_correlate(
         self,
         ctx: Context,

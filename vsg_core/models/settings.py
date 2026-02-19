@@ -40,20 +40,17 @@ from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     OcrOutputFormatStr,
     ResampleEngineStr,
     RubberbandTransientsStr,
-    SilenceDetectionMethodStr,
     SnapModeStr,
     SourceSeparationDeviceStr,
     SourceSeparationModeStr,
     SteppingBoundaryModeStr,
     SteppingCorrectionModeStr,
-    SteppingFillModeStr,
     SteppingFilteredFallbackStr,
     SteppingQualityModeStr,
     SubtitleRoundingStr,
     SubtitleSyncModeStr,
     SyncModeStr,
     SyncStabilityOutlierModeStr,
-    VideoSnapModeStr,
     VideoVerifiedMethodStr,
 )
 
@@ -265,71 +262,29 @@ class AppSettings(BaseModel):
     stepping_first_stable_min_chunks: int = 3
     stepping_first_stable_skip_unstable: bool = True
 
-    # Segment Scan & Correction
+    # Triage (used by subtitle-only EDL path)
     segment_triage_std_dev_ms: int = 50
-    segment_coarse_chunk_s: int = 15
-    segment_coarse_step_s: int = 60
-    segment_search_locality_s: int = 10
-    segment_fine_chunk_s: float = 2.0
-    segment_fine_iterations: int = 10
-    segment_min_confidence_ratio: float = 5.0
 
-    # Segment Drift Detection
-    segment_drift_r2_threshold: float = 0.75
-    segment_drift_slope_threshold: float = 0.7
-    segment_drift_outlier_sensitivity: float = 1.5
-    segment_drift_scan_buffer_pct: float = 2.0
-
-    # Stepping Scan Range
-    stepping_scan_start_percentage: float = 5.0
-    stepping_scan_end_percentage: float = 99.0
-
-    # Silence Snapping
-    stepping_snap_to_silence: bool = True
-    stepping_silence_detection_method: SilenceDetectionMethodStr = "smart_fusion"
+    # Boundary Refinement — Silence Detection
     stepping_silence_search_window_s: float = 5.0
     stepping_silence_threshold_db: float = -40.0
     stepping_silence_min_duration_ms: float = 100.0
-    stepping_ffmpeg_silence_noise: float = -40.0
-    stepping_ffmpeg_silence_duration: float = 0.1
 
-    # VAD (Voice Activity Detection)
+    # Boundary Refinement — VAD (Voice Activity Detection)
     stepping_vad_enabled: bool = True
     stepping_vad_aggressiveness: int = 2
-    stepping_vad_avoid_speech: bool = True
-    stepping_vad_frame_duration_ms: int = 30
 
-    # Transient Detection
-    stepping_transient_detection_enabled: bool = True
-    stepping_transient_threshold: float = 8.0
-    stepping_transient_avoid_window_ms: int = 50
-
-    # Smart Fusion Weights
+    # Boundary Refinement — Scoring Weights
     stepping_fusion_weight_silence: int = 10
-    stepping_fusion_weight_no_speech: int = 8
-    stepping_fusion_weight_scene_align: int = 5
     stepping_fusion_weight_duration: int = 2
-    stepping_fusion_weight_no_transient: int = 3
 
-    # Video-Aware Boundary Snapping
+    # Boundary Refinement — Video Keyframe Snapping
     stepping_snap_to_video_frames: bool = False
-    stepping_video_snap_mode: VideoSnapModeStr = "scenes"
     stepping_video_snap_max_offset_s: float = 2.0
-    stepping_video_scene_threshold: float = 0.4
-
-    # Fill Mode & Content
-    stepping_fill_mode: SteppingFillModeStr = "silence"
-    stepping_content_correlation_threshold: float = 0.5
-    stepping_content_search_window_s: float = 5.0
 
     # Track Naming
     stepping_corrected_track_label: str = ""
     stepping_preserved_track_label: str = ""
-
-    # Quality Audit Thresholds
-    stepping_audit_min_score: float = 12.0
-    stepping_audit_overflow_tolerance: float = 0.8
-    stepping_audit_large_correction_s: float = 3.0
 
     # Filtered Stepping Correction
     stepping_correction_mode: SteppingCorrectionModeStr = "full"
