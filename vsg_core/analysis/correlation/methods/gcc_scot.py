@@ -51,6 +51,6 @@ class GccScot:
         corr = torch.fft.irfft(G_scot, n=n_fft)
 
         delay_ms, peak_idx = extract_peak(corr, n_fft, sr)
-        confidence = scot_confidence(corr, peak_idx, ref.shape[0])
+        confidence = scot_confidence(corr, peak_idx)
 
         return delay_ms, confidence

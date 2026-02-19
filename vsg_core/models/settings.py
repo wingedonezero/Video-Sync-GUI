@@ -352,9 +352,9 @@ class AppSettings(BaseModel):
     # Sync Stability Settings
     # =========================================================================
     sync_stability_enabled: bool = True
-    sync_stability_variance_threshold: float = 1.0
+    sync_stability_variance_threshold: float = 0.0
     sync_stability_min_chunks: int = 3
-    sync_stability_outlier_mode: SyncStabilityOutlierModeStr = "threshold"
+    sync_stability_outlier_mode: SyncStabilityOutlierModeStr = "any"
     sync_stability_outlier_threshold: float = 1.0
 
     # =========================================================================
