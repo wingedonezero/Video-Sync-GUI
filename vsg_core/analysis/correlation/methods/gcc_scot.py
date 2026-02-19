@@ -29,7 +29,7 @@ class GccScot:
         import torch
 
         from ..gpu_backend import get_device, to_torch
-        from ..gpu_correlation import extract_peak, scot_confidence
+        from ..gpu_correlation import extract_peak, psr_confidence
 
         device = get_device()
         ref = to_torch(ref_chunk, device)
@@ -51,6 +51,6 @@ class GccScot:
         corr = torch.fft.irfft(G_scot, n=n_fft)
 
         delay_ms, peak_idx = extract_peak(corr, n_fft, sr)
-        confidence = scot_confidence(corr, peak_idx)
+        confidence = psr_confidence(corr, peak_idx)
 
         return delay_ms, confidence

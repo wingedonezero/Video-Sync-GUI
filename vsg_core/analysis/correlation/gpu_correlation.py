@@ -75,71 +75,66 @@ def scc_confidence(
     return min(100.0, max(0.0, match_pct))
 
 
-def normalize_peak_confidence_torch(
-    correlation: torch.Tensor,
-    peak_idx: int,
-) -> float:
-    """
-    GPU port of normalize_peak_confidence from confidence.py.
-
-    Uses three metrics:
-    1. Prominence: peak / median (over noise floor)
-    2. Uniqueness: peak / second-best peak
-    3. SNR: peak / background stddev
-
-    Combined with empirical weights: (prom*5 + unique*8 + snr*1.5) / 3.
-    Clamped to 0-100.
-    """
-    abs_corr = torch.abs(correlation)
-    peak_value = abs_corr[peak_idx].item()
-
-    # Metric 1: Prominence over noise floor (median)
-    noise_floor = torch.median(abs_corr).item()
-    prominence = peak_value / (noise_floor + 1e-9)
-
-    # Metric 2: Uniqueness vs second-best peak (exclude 1% neighbors)
-    n = len(abs_corr)
-    neighbor = max(1, n // 100)
-    mask = torch.ones(n, dtype=torch.bool, device=abs_corr.device)
-    start = max(0, peak_idx - neighbor)
-    end = min(n, peak_idx + neighbor + 1)
-    mask[start:end] = False
-
-    if mask.any():
-        second_best = abs_corr[mask].max().item()
-    else:
-        second_best = noise_floor
-    uniqueness = peak_value / (second_best + 1e-9)
-
-    # Metric 3: SNR using robust background estimation
-    # Use std of lower 90% of values
-    threshold_90 = torch.quantile(abs_corr, 0.9).item()
-    background = abs_corr[abs_corr < threshold_90]
-    if len(background) > 10:
-        bg_std = torch.std(background).item()
-    else:
-        bg_std = 1e-9
-    snr = peak_value / (bg_std + 1e-9)
-
-    # Combine with empirical weights
-    confidence = (prominence * 5.0 + uniqueness * 8.0 + snr * 1.5) / 3.0
-    return min(100.0, max(0.0, confidence))
-
-
-def scot_confidence(
+def psr_confidence(
     corr: torch.Tensor,
     peak_idx: int,
+    exclude_radius: int = 100,
 ) -> float:
     """
-    GCC-SCOT confidence: peak / mean * 10.
+    Peak-to-Sidelobe Ratio (PSR) confidence for phase-only methods.
 
-    Matches the existing GCC-SCOT confidence formula.
+    Standard metric from radar/sonar/tracking literature for measuring
+    peak reliability in white-noise-like correlation outputs (exactly
+    what GCC-PHAT, GCC-SCOT, and GCC-Whiten produce).
+
+    PSR = (peak - mean_sidelobes) / std_sidelobes
+
+    Empirically measured noise floor for 10s windows at 48kHz
+    (n_fft ~1M): PSR 7.6-9.7 (mean ~8.4).  Real delays produce
+    PSR in the hundreds to thousands.
+
+    Mapped to 0-100 scale:
+      PSR <= 10  → 0%   (noise floor, unreliable)
+      PSR  = 15  → 50%  (borderline)
+      PSR >= 20  → 100% (confident)
+
+    Args:
+        corr: Correlation output from irfft.
+        peak_idx: Index of the peak in the correlation array.
+        exclude_radius: Number of samples around peak to exclude from
+            sidelobe statistics (the "mainlobe exclusion zone").
     """
     abs_corr = torch.abs(corr)
-    peak_val = abs_corr[peak_idx].item()
-    mean_val = torch.mean(abs_corr).item()
-    confidence = peak_val / (mean_val + 1e-9) * 10.0
-    return min(100.0, max(0.0, confidence))
+    peak_value = abs_corr[peak_idx].item()
+    n = len(abs_corr)
+
+    # Exclude mainlobe region around the peak
+    mask = torch.ones(n, dtype=torch.bool, device=abs_corr.device)
+    lo = max(0, peak_idx - exclude_radius)
+    hi = min(n, peak_idx + exclude_radius + 1)
+    mask[lo:hi] = False
+
+    sidelobes = abs_corr[mask]
+    if len(sidelobes) < 10:
+        return 0.0
+
+    mean_sl = sidelobes.mean().item()
+    std_sl = sidelobes.std().item()
+
+    if std_sl < 1e-12:
+        return 0.0
+
+    psr = (peak_value - mean_sl) / std_sl
+
+    # Map PSR to 0-100 confidence scale
+    # Noise floor is PSR ~8-10 for 10s windows at 48kHz.
+    # PSR <= 10: noise (0%), PSR 15: borderline (50%), PSR >= 20: confident (100%)
+    if psr <= 10.0:
+        return 0.0
+    if psr >= 20.0:
+        return 100.0
+    # Linear interpolation between 10 and 20
+    return (psr - 10.0) / 10.0 * 100.0
 
 
 def extract_peak_feature(
