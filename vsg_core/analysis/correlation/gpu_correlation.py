@@ -17,12 +17,11 @@ def extract_peak(
     n_fft: int,
     sr: int,
     peak_fit: bool = False,
-) -> tuple[float, float, int]:
+) -> tuple[float, int]:
     """
-    Extract delay and confidence from a waveform-domain correlation.
+    Extract delay from a waveform-domain correlation.
 
-    Searches the full lag range (no max_delay restriction) for the
-    strongest peak, then computes confidence.
+    Searches the full lag range for the strongest peak.
 
     Args:
         corr: Correlation result from irfft (length n_fft).
@@ -31,8 +30,8 @@ def extract_peak(
         peak_fit: If True, apply parabolic sub-sample interpolation.
 
     Returns:
-        (delay_ms, confidence, peak_index) — delay in ms, confidence 0-100,
-        and the raw peak index in the correlation array.
+        (delay_ms, peak_index) — delay in ms and the raw peak index
+        in the correlation array.
     """
     n = n_fft
     abs_corr = torch.abs(corr)
@@ -75,9 +74,32 @@ def scc_confidence(
     return min(100.0, max(0.0, match_pct))
 
 
+def _valid_lag_region(
+    abs_corr: torch.Tensor,
+    n_fft: int,
+    signal_len: int,
+) -> torch.Tensor:
+    """
+    Extract only the valid lag region from the circular correlation.
+
+    For two signals of length N, the valid cross-correlation lags are
+    -(N-1) to +(N-1).  In the FFT output (length n_fft):
+      - Positive lags: indices 0 .. signal_len-1
+      - Negative lags: indices n_fft-signal_len+1 .. n_fft-1
+
+    Everything outside this range is zero-padding artifacts that can
+    contain spurious peaks (especially with phase-only methods like
+    GCC-PHAT).
+    """
+    pos = abs_corr[:signal_len]
+    neg = abs_corr[n_fft - signal_len + 1:]
+    return torch.cat([neg, pos])
+
+
 def normalize_peak_confidence_torch(
     correlation: torch.Tensor,
     peak_idx: int,
+    signal_len: int = 0,
 ) -> float:
     """
     GPU port of normalize_peak_confidence from confidence.py.
@@ -89,32 +111,53 @@ def normalize_peak_confidence_torch(
 
     Combined with empirical weights: (prom*5 + unique*8 + snr*1.5) / 3.
     Clamped to 0-100.
+
+    Args:
+        correlation: Full correlation output from irfft.
+        peak_idx: Index of the peak in the full correlation array.
+        signal_len: Length of the input signal. When > 0, confidence
+            is computed over only the valid lag region (±signal_len),
+            preventing zero-padding artifacts from diluting the noise
+            floor estimate. Critical for phase-only methods (GCC-PHAT,
+            GCC-Whiten) where artifacts at FFT edges can otherwise
+            appear as confident peaks.
     """
     abs_corr = torch.abs(correlation)
     peak_value = abs_corr[peak_idx].item()
+    n_fft = len(abs_corr)
 
-    # Metric 1: Prominence over noise floor (median)
-    noise_floor = torch.median(abs_corr).item()
+    # Use valid lag region for statistics if signal_len is known
+    if signal_len > 0 and signal_len < n_fft // 2:
+        valid = _valid_lag_region(abs_corr, n_fft, signal_len)
+    else:
+        valid = abs_corr
+
+    # Metric 1: Prominence over noise floor (median of valid region)
+    noise_floor = torch.median(valid).item()
     prominence = peak_value / (noise_floor + 1e-9)
 
-    # Metric 2: Uniqueness vs second-best peak (exclude 1% neighbors)
-    n = len(abs_corr)
+    # Metric 2: Uniqueness vs second-best peak in valid region
+    n = len(valid)
     neighbor = max(1, n // 100)
-    mask = torch.ones(n, dtype=torch.bool, device=abs_corr.device)
-    start = max(0, peak_idx - neighbor)
-    end = min(n, peak_idx + neighbor + 1)
+
+    # Map peak_idx to position in the valid region for neighbor exclusion
+    # The peak is somewhere in valid — find it
+    peak_pos_in_valid = torch.argmax(valid).item()
+    mask = torch.ones(n, dtype=torch.bool, device=valid.device)
+    start = max(0, peak_pos_in_valid - neighbor)
+    end = min(n, peak_pos_in_valid + neighbor + 1)
     mask[start:end] = False
 
     if mask.any():
-        second_best = abs_corr[mask].max().item()
+        second_best = valid[mask].max().item()
     else:
         second_best = noise_floor
     uniqueness = peak_value / (second_best + 1e-9)
 
     # Metric 3: SNR using robust background estimation
-    # Use std of lower 90% of values
-    threshold_90 = torch.quantile(abs_corr, 0.9).item()
-    background = abs_corr[abs_corr < threshold_90]
+    # Use std of lower 90% of valid values
+    threshold_90 = torch.quantile(valid, 0.9).item()
+    background = valid[valid < threshold_90]
     if len(background) > 10:
         bg_std = torch.std(background).item()
     else:
@@ -129,15 +172,29 @@ def normalize_peak_confidence_torch(
 def scot_confidence(
     corr: torch.Tensor,
     peak_idx: int,
+    signal_len: int = 0,
 ) -> float:
     """
     GCC-SCOT confidence: peak / mean * 10.
 
-    Matches the existing GCC-SCOT confidence formula.
+    Args:
+        corr: Full correlation output from irfft.
+        peak_idx: Index of the peak in the full correlation array.
+        signal_len: Length of the input signal. When > 0, mean is
+            computed over only the valid lag region to avoid dilution
+            from zero-padding artifacts.
     """
     abs_corr = torch.abs(corr)
     peak_val = abs_corr[peak_idx].item()
-    mean_val = torch.mean(abs_corr).item()
+    n_fft = len(abs_corr)
+
+    # Use valid lag region for mean if signal_len is known
+    if signal_len > 0 and signal_len < n_fft // 2:
+        valid = _valid_lag_region(abs_corr, n_fft, signal_len)
+        mean_val = torch.mean(valid).item()
+    else:
+        mean_val = torch.mean(abs_corr).item()
+
     confidence = peak_val / (mean_val + 1e-9) * 10.0
     return min(100.0, max(0.0, confidence))
 

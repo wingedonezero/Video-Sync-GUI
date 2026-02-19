@@ -42,6 +42,6 @@ class GccPhat:
         corr = torch.fft.irfft(G_phat, n=n_fft)
 
         delay_ms, peak_idx = extract_peak(corr, n_fft, sr)
-        confidence = normalize_peak_confidence_torch(corr, peak_idx)
+        confidence = normalize_peak_confidence_torch(corr, peak_idx, ref.shape[0])
 
         return delay_ms, confidence
