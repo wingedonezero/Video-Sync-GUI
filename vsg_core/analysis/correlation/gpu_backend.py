@@ -135,17 +135,25 @@ def cleanup_gpu() -> None:
     Release all cached GPU resources.
 
     Call this after each job's correlation finishes to prevent
-    GPU memory accumulation across jobs.
+    GPU memory accumulation across jobs. Works with both CUDA
+    and ROCm (HIP) backends — PyTorch maps cuda API to HIP.
     """
     global _transform_cache
 
+    # Clear cached torchaudio transforms (hold GPU memory)
     _transform_cache.clear()
+
+    # GC first so Python drops tensor references before we free GPU memory
+    gc.collect()
 
     try:
         import torch
 
         if torch.cuda.is_available():
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
+            # Reset peak memory tracking for monitoring
+            torch.cuda.reset_peak_memory_stats()
     except ImportError:
         pass
 
