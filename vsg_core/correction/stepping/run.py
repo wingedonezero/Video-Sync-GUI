@@ -335,7 +335,7 @@ def generate_edl_from_correlation(
                     )
                     return []
 
-    tolerance_ms = settings.segment_triage_std_dev_ms
+    tolerance_ms = settings.stepping_triage_std_dev_ms
     current_delay_ms = accepted[0]["delay"]
     current_delay_raw = accepted[0].get("raw_delay", float(current_delay_ms))
 

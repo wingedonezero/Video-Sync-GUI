@@ -53,7 +53,7 @@ def analyze_sync_stability(
 
     # Get settings
     variance_threshold = settings.sync_stability_variance_threshold
-    min_chunks = settings.sync_stability_min_chunks
+    min_chunks = settings.sync_stability_min_windows
     outlier_mode = settings.sync_stability_outlier_mode
     outlier_threshold = settings.sync_stability_outlier_threshold
 

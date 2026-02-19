@@ -516,11 +516,11 @@ class AnalysisTab(QWidget):
         self.widgets["min_match_pct"].setDecimals(1)
         self.widgets["min_match_pct"].setSingleStep(1.0)
         self.widgets["min_match_pct"].setToolTip(
-            "Minimum correlation confidence (PSR) for a window to be accepted.\n\n"
+            "Minimum correlation confidence (%) for a window to be accepted.\n\n"
             "Windows below this threshold are rejected and excluded from delay selection.\n"
             "Higher values = stricter, fewer accepted windows.\n"
             "Lower values = more permissive, may include noisy results.\n\n"
-            "Default: 5.0%"
+            "Default: 10%"
         )
         self.widgets["delay_selection_mode"] = QComboBox()
         self.widgets["delay_selection_mode"].addItems(
@@ -559,10 +559,10 @@ class AnalysisTab(QWidget):
             "Percentage of accepted windows to examine as the 'early region'.\n\n"
             "The dominant delay in this region becomes the selected delay,\n"
             "provided it has >=60% agreement. Scales automatically with file length:\n"
-            "a 23-min file with 650 windows at 25% examines ~162 windows.\n\n"
+            "a 23-min file with 650 windows at 15% examines ~97 windows.\n\n"
             "Lower values = focus on the very start of the file.\n"
             "Higher values = consider a larger early portion.\n\n"
-            "Default: 25%"
+            "Default: 15%"
         )
         # Early Cluster sub-settings
         self.widgets["early_cluster_early_pct"] = QDoubleSpinBox()
@@ -585,11 +585,11 @@ class AnalysisTab(QWidget):
             "[Early Cluster mode]\n\n"
             "Minimum presence a delay cluster must have in the early region\n"
             "to be considered a real segment (not noise).\n\n"
-            "For example, 3% of 100 early windows = at least 3 windows.\n"
-            "Prevents single noisy windows from being picked as the 'earliest cluster'.\n\n"
+            "For example, 10% of 100 early windows = at least 10 windows.\n"
+            "Prevents noisy windows from being picked as the 'earliest cluster'.\n\n"
             "Lower values = more sensitive to short first segments.\n"
             "Higher values = require stronger evidence.\n\n"
-            "Default: 3%"
+            "Default: 10%"
         )
         self.widgets["delay_selection_mode_source_separated"] = QComboBox()
         self.widgets["delay_selection_mode_source_separated"].addItems(
@@ -958,8 +958,8 @@ class SteppingTab(QWidget):
         segment_layout = QFormLayout(segment_group)
 
         # Enable toggle
-        self.widgets["segmented_enabled"] = QCheckBox("Enable stepping correction")
-        self.widgets["segmented_enabled"].setToolTip(
+        self.widgets["stepping_enabled"] = QCheckBox("Enable stepping correction")
+        self.widgets["stepping_enabled"].setToolTip(
             "Detects and corrects audio with stepped timing changes\n"
             "(e.g., reel changes, commercial breaks, scene edits).\n\n"
             "When enabled, the analysis step uses dense sliding-window\n"
@@ -967,7 +967,7 @@ class SteppingTab(QWidget):
             "The correction step then finds silence zones at each transition\n"
             "and splices the audio to produce a continuous, uniform delay."
         )
-        segment_layout.addRow(self.widgets["segmented_enabled"])
+        segment_layout.addRow(self.widgets["stepping_enabled"])
 
         # ===== SECTION 1: DETECTION SETTINGS =====
         segment_layout.addRow(QLabel(""))
@@ -990,19 +990,20 @@ class SteppingTab(QWidget):
         )
 
         self.widgets["detection_dbscan_min_samples"] = QSpinBox()
-        self.widgets["detection_dbscan_min_samples"].setRange(2, 10)
+        self.widgets["detection_dbscan_min_samples"].setRange(2, 20)
         self.widgets["detection_dbscan_min_samples"].setToolTip(
             "DBSCAN minimum samples - minimum correlation windows\n"
             "needed to form a core cluster.\n"
             "Higher = requires more evidence before creating a cluster\n"
             "Lower = more sensitive to brief timing changes\n"
-            "Default: 3"
+            "With dense correlation (300-600 windows), use 5+.\n"
+            "Default: 5"
         )
 
-        self.widgets["segment_triage_std_dev_ms"] = QSpinBox()
-        self.widgets["segment_triage_std_dev_ms"].setRange(10, 200)
-        self.widgets["segment_triage_std_dev_ms"].setSuffix(" ms")
-        self.widgets["segment_triage_std_dev_ms"].setToolTip(
+        self.widgets["stepping_triage_std_dev_ms"] = QSpinBox()
+        self.widgets["stepping_triage_std_dev_ms"].setRange(10, 200)
+        self.widgets["stepping_triage_std_dev_ms"].setSuffix(" ms")
+        self.widgets["stepping_triage_std_dev_ms"].setToolTip(
             "Triage threshold - minimum delay variation (std dev) to\n"
             "trigger stepping correction. Prevents unnecessary processing\n"
             "on files with stable, uniform delays.\n"
@@ -1017,14 +1018,14 @@ class SteppingTab(QWidget):
             "R-squared threshold for lossy codecs - how linear the\n"
             "delay pattern must be to classify as drift vs stepping.\n"
             "Higher = stricter (requires very linear drift pattern)\n"
-            "Default: 0.95"
+            "Default: 0.90"
         )
 
         self.widgets["drift_detection_r2_threshold_lossless"] = QDoubleSpinBox()
         self.widgets["drift_detection_r2_threshold_lossless"].setRange(0.5, 1.0)
         self.widgets["drift_detection_r2_threshold_lossless"].setDecimals(2)
         self.widgets["drift_detection_r2_threshold_lossless"].setToolTip(
-            "R-squared threshold for lossless codecs.\nDefault: 0.98"
+            "R-squared threshold for lossless codecs.\nDefault: 0.95"
         )
 
         self.widgets["drift_detection_slope_threshold_lossy"] = QDoubleSpinBox()
@@ -1033,14 +1034,14 @@ class SteppingTab(QWidget):
         self.widgets["drift_detection_slope_threshold_lossy"].setToolTip(
             "Minimum drift rate for lossy codecs to trigger\n"
             "drift correction instead of stepping.\n"
-            "Default: 0.5 ms/s"
+            "Default: 0.7 ms/s"
         )
 
         self.widgets["drift_detection_slope_threshold_lossless"] = QDoubleSpinBox()
         self.widgets["drift_detection_slope_threshold_lossless"].setRange(0.1, 5.0)
         self.widgets["drift_detection_slope_threshold_lossless"].setSuffix(" ms/s")
         self.widgets["drift_detection_slope_threshold_lossless"].setToolTip(
-            "Minimum drift rate for lossless codecs.\nDefault: 0.3 ms/s"
+            "Minimum drift rate for lossless codecs.\nDefault: 0.2 ms/s"
         )
 
         segment_layout.addRow(
@@ -1050,7 +1051,7 @@ class SteppingTab(QWidget):
             "DBSCAN Min Samples:", self.widgets["detection_dbscan_min_samples"]
         )
         segment_layout.addRow(
-            "Triage Threshold:", self.widgets["segment_triage_std_dev_ms"]
+            "Triage Threshold:", self.widgets["stepping_triage_std_dev_ms"]
         )
         segment_layout.addRow(
             "Lossy R-squared:", self.widgets["drift_detection_r2_threshold"]
@@ -1095,13 +1096,13 @@ class SteppingTab(QWidget):
         )
         self.widgets["stepping_quality_mode"].setToolTip(
             "What makes a cluster 'valid' - clusters must pass ALL checks:\n"
-            "  1. Minimum chunks (correlation window count)\n"
+            "  1. Minimum correlation windows per cluster\n"
             "  2. Minimum percentage of total windows\n"
             "  3. Minimum duration in seconds\n"
             "  4. Minimum match quality\n\n"
-            "strict: 3+ chunks, 10%+, 30s+, 90%+ (Blu-ray quality)\n"
-            "normal: 3+ chunks, 5%+, 20s+, 85%+ (Default)\n"
-            "lenient: 2+ chunks, 3%+, 10s+, 75%+ (Edge cases)\n"
+            "strict: 15+ windows, 10%+, 30s+, 90%+ (Blu-ray quality)\n"
+            "normal: 10+ windows, 5%+, 20s+, 85%+ (Default)\n"
+            "lenient: 5+ windows, 3%+, 10s+, 75%+ (Edge cases)\n"
             "custom: Configure thresholds manually below"
         )
 
@@ -1133,10 +1134,12 @@ class SteppingTab(QWidget):
             QLabel("<i>Custom Quality Thresholds (for 'custom' mode):</i>")
         )
 
-        self.widgets["stepping_min_chunks_per_cluster"] = QSpinBox()
-        self.widgets["stepping_min_chunks_per_cluster"].setRange(1, 20)
-        self.widgets["stepping_min_chunks_per_cluster"].setToolTip(
-            "Minimum correlation windows required per cluster."
+        self.widgets["stepping_min_windows_per_cluster"] = QSpinBox()
+        self.widgets["stepping_min_windows_per_cluster"].setRange(1, 50)
+        self.widgets["stepping_min_windows_per_cluster"].setToolTip(
+            "Minimum correlation windows required per cluster.\n"
+            "With dense correlation (300-600 windows), use 5-15.\n"
+            "Default: 10"
         )
 
         self.widgets["stepping_min_cluster_percentage"] = QDoubleSpinBox()
@@ -1170,7 +1173,7 @@ class SteppingTab(QWidget):
         )
 
         segment_layout.addRow(
-            "  Min Windows/Cluster:", self.widgets["stepping_min_chunks_per_cluster"]
+            "  Min Windows/Cluster:", self.widgets["stepping_min_windows_per_cluster"]
         )
         segment_layout.addRow(
             "  Min Cluster %:", self.widgets["stepping_min_cluster_percentage"]
@@ -1185,41 +1188,7 @@ class SteppingTab(QWidget):
             "  Min Total Clusters:", self.widgets["stepping_min_total_clusters"]
         )
 
-        # ===== SECTION 3: DELAY SELECTION =====
-        segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>Delay Selection</b>"))
-        segment_layout.addRow(
-            QLabel("<i>How the anchor (base) delay is determined</i>")
-        )
-
-        self.widgets["stepping_first_stable_min_chunks"] = QSpinBox()
-        self.widgets["stepping_first_stable_min_chunks"].setRange(1, 100)
-        self.widgets["stepping_first_stable_min_chunks"].setToolTip(
-            "Minimum consecutive windows for a cluster to be considered\n"
-            "'stable' when determining the anchor delay.\n"
-            "The first stable cluster's delay becomes the anchor that\n"
-            "all other segments get corrected to match.\n"
-            "Default: 3"
-        )
-
-        self.widgets["stepping_first_stable_skip_unstable"] = QCheckBox()
-        self.widgets["stepping_first_stable_skip_unstable"].setToolTip(
-            "Skip clusters below minimum window count when searching\n"
-            "for the anchor delay. Useful for avoiding brief wrong\n"
-            "delays at file start.\n"
-            "Default: Enabled"
-        )
-
-        segment_layout.addRow(
-            "First Stable Min Windows:",
-            self.widgets["stepping_first_stable_min_chunks"],
-        )
-        segment_layout.addRow(
-            "Skip Unstable Start:",
-            self.widgets["stepping_first_stable_skip_unstable"],
-        )
-
-        # ===== SECTION 4: BOUNDARY REFINEMENT =====
+        # ===== SECTION 3: BOUNDARY REFINEMENT =====
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Boundary Refinement</b>"))
         segment_layout.addRow(
@@ -1389,43 +1358,43 @@ class SteppingTab(QWidget):
             "  Max Snap Distance:", self.widgets["stepping_video_snap_max_offset_s"]
         )
 
-        # ===== SECTION 5: QUALITY ASSURANCE =====
+        # ===== SECTION 4: QUALITY ASSURANCE =====
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Quality Assurance</b>"))
         segment_layout.addRow(
-            QLabel("<i>Post-correction verification via fresh correlation</i>")
+            QLabel(
+                "<i>Post-correction verification via fresh dense correlation</i>"
+            )
         )
 
-        self.widgets["segmented_qa_threshold"] = QDoubleSpinBox()
-        self.widgets["segmented_qa_threshold"].setRange(50.0, 99.0)
-        self.widgets["segmented_qa_threshold"].setSuffix("%")
-        self.widgets["segmented_qa_threshold"].setToolTip(
-            "Corrected audio must correlate above this % with reference.\nDefault: 85%"
+        self.widgets["stepping_qa_threshold"] = QDoubleSpinBox()
+        self.widgets["stepping_qa_threshold"].setRange(50.0, 99.0)
+        self.widgets["stepping_qa_threshold"].setSuffix("%")
+        self.widgets["stepping_qa_threshold"].setToolTip(
+            "Corrected audio must correlate above this % with reference.\n"
+            "Dense correlation runs on the full corrected file using\n"
+            "the same window/hop settings as the main analysis.\n"
+            "Default: 85%"
         )
 
-        self.widgets["segment_qa_chunk_count"] = QSpinBox()
-        self.widgets["segment_qa_chunk_count"].setRange(10, 100)
-        self.widgets["segment_qa_chunk_count"].setToolTip(
-            "Number of correlation windows for the QA check.\nDefault: 30"
+        self.widgets["stepping_qa_min_accepted_pct"] = QDoubleSpinBox()
+        self.widgets["stepping_qa_min_accepted_pct"].setRange(50.0, 100.0)
+        self.widgets["stepping_qa_min_accepted_pct"].setSuffix("%")
+        self.widgets["stepping_qa_min_accepted_pct"].setDecimals(1)
+        self.widgets["stepping_qa_min_accepted_pct"].setToolTip(
+            "Minimum percentage of dense correlation windows that must\n"
+            "pass for the correction to be accepted. QA runs the same\n"
+            "dense sliding-window correlation as the main analysis.\n"
+            "90% means 90% of all scanned windows must agree.\n"
+            "Default: 90%"
         )
 
-        self.widgets["segment_qa_min_accepted_chunks"] = QSpinBox()
-        self.widgets["segment_qa_min_accepted_chunks"].setRange(5, 100)
-        self.widgets["segment_qa_min_accepted_chunks"].setToolTip(
-            "Minimum QA windows that must pass for correction\n"
-            "to be accepted.\n"
-            "Default: 28"
-        )
-
-        segment_layout.addRow("QA Threshold:", self.widgets["segmented_qa_threshold"])
+        segment_layout.addRow("QA Threshold:", self.widgets["stepping_qa_threshold"])
         segment_layout.addRow(
-            "QA Window Count:", self.widgets["segment_qa_chunk_count"]
-        )
-        segment_layout.addRow(
-            "QA Min Accepted:", self.widgets["segment_qa_min_accepted_chunks"]
+            "QA Min Accepted:", self.widgets["stepping_qa_min_accepted_pct"]
         )
 
-        # ===== SECTION 6: AUDIO PROCESSING =====
+        # ===== SECTION 5: AUDIO PROCESSING =====
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Audio Processing</b>"))
         segment_layout.addRow(
@@ -1483,7 +1452,7 @@ class SteppingTab(QWidget):
         rb_layout.addRow(self.widgets["segment_rb_pitchq"])
         segment_layout.addRow(self.rb_group)
 
-        # ===== SECTION 7: TRACK NAMING =====
+        # ===== SECTION 6: TRACK NAMING =====
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Track Naming</b>"))
 
@@ -1514,7 +1483,7 @@ class SteppingTab(QWidget):
             "Preserved Track Label:", self.widgets["stepping_preserved_track_label"]
         )
 
-        # ===== SECTION 8: SUBTITLE ADJUSTMENT =====
+        # ===== SECTION 7: SUBTITLE ADJUSTMENT =====
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Subtitle Adjustment</b>"))
 
@@ -1550,7 +1519,7 @@ class SteppingTab(QWidget):
         segment_layout.addRow(self.widgets["stepping_adjust_subtitles_no_audio"])
         segment_layout.addRow("Boundary Mode:", self.widgets["stepping_boundary_mode"])
 
-        # ===== SECTION 9: DIAGNOSTICS =====
+        # ===== SECTION 8: DIAGNOSTICS =====
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Diagnostics</b>"))
 
@@ -2170,16 +2139,18 @@ class LoggingTab(QWidget):
         min_chunks = QSpinBox()
         min_chunks.setRange(2, 30)
         min_chunks.setToolTip(
-            "Minimum number of chunks needed to calculate variance.\nNeeds at least this many chunks to report stability issues."
+            "Minimum number of correlation windows needed to calculate\n"
+            "variance. Below this count, stability check is skipped.\n"
+            "Default: 3"
         )
-        self.widgets["sync_stability_min_chunks"] = min_chunks
-        stability_layout.addRow("Min Chunks:", min_chunks)
+        self.widgets["sync_stability_min_windows"] = min_chunks
+        stability_layout.addRow("Min Windows:", min_chunks)
 
         outlier_mode = QComboBox()
         outlier_mode.addItem("Any Variance", "any")
         outlier_mode.addItem("Custom Threshold", "threshold")
         outlier_mode.setToolTip(
-            "How to detect outliers:\n- Any Variance: flag if ANY chunk differs from others\n- Custom Threshold: only flag if difference exceeds threshold"
+            "How to detect outliers:\n- Any Variance: flag if ANY window differs from others\n- Custom Threshold: only flag if difference exceeds threshold"
         )
         self.widgets["sync_stability_outlier_mode"] = outlier_mode
         stability_layout.addRow("Outlier Mode:", outlier_mode)

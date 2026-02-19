@@ -213,24 +213,24 @@ def _get_quality_thresholds(settings: AppSettings) -> QualityThresholds:
     """
     quality_mode = settings.stepping_quality_mode
 
-    # Preset modes
+    # Preset modes (tuned for dense sliding window: 300-600 windows per file)
     presets: dict[str, QualityThresholds] = {
         "strict": QualityThresholds(
-            min_chunks_per_cluster=3,
+            min_windows_per_cluster=15,
             min_cluster_percentage=10.0,
             min_cluster_duration_s=30.0,
             min_match_quality_pct=90.0,
-            min_total_clusters=3,
+            min_total_clusters=2,
         ),
         "normal": QualityThresholds(
-            min_chunks_per_cluster=3,
+            min_windows_per_cluster=10,
             min_cluster_percentage=5.0,
             min_cluster_duration_s=20.0,
             min_match_quality_pct=85.0,
             min_total_clusters=2,
         ),
         "lenient": QualityThresholds(
-            min_chunks_per_cluster=2,
+            min_windows_per_cluster=5,
             min_cluster_percentage=3.0,
             min_cluster_duration_s=10.0,
             min_match_quality_pct=75.0,
@@ -241,7 +241,7 @@ def _get_quality_thresholds(settings: AppSettings) -> QualityThresholds:
     # If custom mode, use user-configured values
     if quality_mode == "custom":
         return QualityThresholds(
-            min_chunks_per_cluster=settings.stepping_min_chunks_per_cluster,
+            min_windows_per_cluster=settings.stepping_min_windows_per_cluster,
             min_cluster_percentage=settings.stepping_min_cluster_percentage,
             min_cluster_duration_s=settings.stepping_min_cluster_duration_s,
             min_match_quality_pct=settings.stepping_min_match_quality_pct,
@@ -286,11 +286,11 @@ def _validate_cluster(
 
     # Perform validation checks
     checks = {
-        "chunks": ValidationCheck(
-            passed=cluster_size >= thresholds.min_chunks_per_cluster,
+        "windows": ValidationCheck(
+            passed=cluster_size >= thresholds.min_windows_per_cluster,
             value=float(cluster_size),
-            threshold=float(thresholds.min_chunks_per_cluster),
-            label="Chunks",
+            threshold=float(thresholds.min_windows_per_cluster),
+            label="Windows",
         ),
         "percentage": ValidationCheck(
             passed=cluster_percentage >= thresholds.min_cluster_percentage,
@@ -568,9 +568,9 @@ def diagnose_audio_issue(
         else:
             # Unknown mode - fall back to legacy behavior
             min_cluster_size = min(cluster_sizes.values()) if cluster_sizes else 0
-            MIN_CHUNKS_PER_SEGMENT = settings.stepping_min_chunks_per_cluster
+            MIN_WINDOWS_PER_CLUSTER = settings.stepping_min_windows_per_cluster
 
-            if min_cluster_size >= MIN_CHUNKS_PER_SEGMENT:
+            if min_cluster_size >= MIN_WINDOWS_PER_CLUSTER:
                 return SteppingDiagnosis(
                     cluster_count=len(unique_clusters),
                     cluster_details=cluster_details,

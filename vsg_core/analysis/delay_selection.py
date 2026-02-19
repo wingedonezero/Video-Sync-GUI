@@ -228,11 +228,16 @@ def calculate_delay(
         DelayCalculation with both rounded and raw delays, or None if
         insufficient data.
     """
-    min_accepted = settings.min_accepted_windows
-
     accepted = [r for r in results if r.accepted]
+    total_windows = len(results)
+    # Calculate minimum from percentage (floor of 10 for very short files)
+    min_accepted = max(10, int(total_windows * settings.min_accepted_pct / 100.0))
     if len(accepted) < min_accepted:
-        log(f"[ERROR] Analysis failed: Only {len(accepted)} windows were accepted.")
+        actual_pct = len(accepted) / total_windows * 100 if total_windows else 0
+        log(
+            f"[ERROR] Analysis failed: Only {len(accepted)}/{total_windows} "
+            f"windows accepted ({actual_pct:.1f}%, need {settings.min_accepted_pct:.0f}%)."
+        )
         return None
 
     delays = [r.delay_ms for r in accepted]

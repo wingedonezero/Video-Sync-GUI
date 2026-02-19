@@ -226,6 +226,41 @@ class AppConfig:
             loaded_settings["source_separation_model"] = "default"
             changed = True
 
+        # Rename stepping settings (chunk→window, segment→stepping)
+        _stepping_renames = {
+            "segmented_enabled": "stepping_enabled",
+            "segment_triage_std_dev_ms": "stepping_triage_std_dev_ms",
+            "stepping_min_chunks_per_cluster": "stepping_min_windows_per_cluster",
+            "segmented_qa_threshold": "stepping_qa_threshold",
+            "min_accepted_windows": "min_accepted_pct",
+            "sync_stability_min_chunks": "sync_stability_min_windows",
+        }
+        for old_key, new_key in _stepping_renames.items():
+            if old_key in loaded_settings and new_key not in loaded_settings:
+                # Special handling: min_accepted_windows was absolute count,
+                # min_accepted_pct is a percentage. Don't carry the old value.
+                if old_key == "min_accepted_windows":
+                    pass  # Let it use the new default (5.0%)
+                else:
+                    loaded_settings[new_key] = loaded_settings[old_key]
+                changed = True
+            if old_key in loaded_settings:
+                del loaded_settings[old_key]
+                changed = True
+
+        # Remove dead settings (absolute counts replaced by percentages)
+        for dead_key in [
+            "stepping_first_stable_min_chunks",
+            "stepping_first_stable_skip_unstable",
+            "segment_qa_chunk_count",
+            "stepping_qa_window_count",
+            "segment_qa_min_accepted_chunks",
+            "stepping_qa_min_accepted_windows",
+        ]:
+            if dead_key in loaded_settings:
+                del loaded_settings[dead_key]
+                changed = True
+
         return changed
 
     def load(self):
