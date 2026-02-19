@@ -24,7 +24,7 @@ class GccPhat:
         import torch
 
         from ..gpu_backend import get_device, to_torch
-        from ..gpu_correlation import extract_peak, psr_confidence
+        from ..gpu_correlation import bandpass_mask, extract_peak, psr_confidence
 
         device = get_device()
         ref = to_torch(ref_chunk, device)
@@ -37,8 +37,14 @@ class GccPhat:
         T = torch.fft.rfft(tgt, n=n_fft)
         G = R * torch.conj(T)
 
+        # Bandpass 300Hz-6kHz: remove bins with ambiguous phase that
+        # cause false peaks at 0ms and ±10000ms in phase-only methods
+        bp = bandpass_mask(n_fft, sr, device=device)
+        G[~bp] = 0
+
         # PHAT weighting: normalize by magnitude
         G_phat = G / (torch.abs(G) + 1e-9)
+        G_phat[~bp] = 0  # Re-zero filtered bins after normalization
         corr = torch.fft.irfft(G_phat, n=n_fft)
 
         delay_ms, peak_idx = extract_peak(corr, n_fft, sr)
