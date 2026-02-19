@@ -24,7 +24,7 @@ class GccPhat:
         import torch
 
         from ..gpu_backend import get_device, to_torch
-        from ..gpu_correlation import extract_peak, normalize_peak_confidence_torch
+        from ..gpu_correlation import extract_peak, psr_confidence
 
         device = get_device()
         ref = to_torch(ref_chunk, device)
@@ -42,6 +42,6 @@ class GccPhat:
         corr = torch.fft.irfft(G_phat, n=n_fft)
 
         delay_ms, peak_idx = extract_peak(corr, n_fft, sr)
-        confidence = normalize_peak_confidence_torch(corr, peak_idx)
+        confidence = psr_confidence(corr, peak_idx)
 
         return delay_ms, confidence
