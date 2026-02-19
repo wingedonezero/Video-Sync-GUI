@@ -107,17 +107,8 @@ SteppingFilteredFallbackStr = Literal[
     "nearest", "interpolate", "uniform", "skip", "reject"
 ]
 
-# How to fill delay gaps in stepping correction
-SteppingFillModeStr = Literal["silence", "auto", "content"]
-
 # How to handle subs spanning stepping boundaries
 SteppingBoundaryModeStr = Literal["start", "majority", "midpoint"]
-
-# Silence detection method for stepping
-SilenceDetectionMethodStr = Literal["smart_fusion", "ffmpeg_silencedetect", "rms_basic"]
-
-# Video-aware boundary snapping mode
-VideoSnapModeStr = Literal["scenes", "keyframes", "any_frame"]
 
 # =========================================================================
 # Resampling Settings

@@ -953,25 +953,28 @@ class SteppingTab(QWidget):
         main_layout = QVBoxLayout(self)
 
         segment_group = QGroupBox(
-            "🔧 Stepping Correction (Audio with Mid-File Timing Changes)"
+            "Stepping Correction (Audio with Mid-File Timing Changes)"
         )
         segment_layout = QFormLayout(segment_group)
 
         # Enable toggle
         self.widgets["segmented_enabled"] = QCheckBox("Enable stepping correction")
         self.widgets["segmented_enabled"].setToolTip(
-            "Detects and corrects audio with stepped timing changes (e.g., reel changes, commercial breaks).\n"
-            "Only applies when Analysis detects stepping via correlation chunk clustering."
+            "Detects and corrects audio with stepped timing changes\n"
+            "(e.g., reel changes, commercial breaks, scene edits).\n\n"
+            "When enabled, the analysis step uses dense sliding-window\n"
+            "correlation + DBSCAN clustering to detect delay transitions.\n"
+            "The correction step then finds silence zones at each transition\n"
+            "and splices the audio to produce a continuous, uniform delay."
         )
         segment_layout.addRow(self.widgets["segmented_enabled"])
 
         # ===== SECTION 1: DETECTION SETTINGS =====
-        # Controls how timing clusters are detected from correlation data
         segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>═══ Detection Settings ═══</b>"))
+        segment_layout.addRow(QLabel("<b>Detection Settings</b>"))
         segment_layout.addRow(
             QLabel(
-                "<i>Controls how timing changes are detected from correlation data</i>"
+                "<i>How timing clusters are detected from dense correlation data</i>"
             )
         )
 
@@ -979,7 +982,8 @@ class SteppingTab(QWidget):
         self.widgets["detection_dbscan_epsilon_ms"].setRange(5.0, 100.0)
         self.widgets["detection_dbscan_epsilon_ms"].setSuffix(" ms")
         self.widgets["detection_dbscan_epsilon_ms"].setToolTip(
-            "DBSCAN clustering tolerance - maximum delay difference for chunks to be grouped together.\n"
+            "DBSCAN clustering tolerance - maximum delay difference\n"
+            "for correlation windows to be grouped into the same cluster.\n"
             "Smaller = stricter grouping (more distinct clusters)\n"
             "Larger = looser grouping (fewer, larger clusters)\n"
             "Default: 20ms"
@@ -988,7 +992,8 @@ class SteppingTab(QWidget):
         self.widgets["detection_dbscan_min_samples"] = QSpinBox()
         self.widgets["detection_dbscan_min_samples"].setRange(2, 10)
         self.widgets["detection_dbscan_min_samples"].setToolTip(
-            "DBSCAN minimum samples - minimum chunks needed to form a core cluster.\n"
+            "DBSCAN minimum samples - minimum correlation windows\n"
+            "needed to form a core cluster.\n"
             "Higher = requires more evidence before creating a cluster\n"
             "Lower = more sensitive to brief timing changes\n"
             "Default: 3"
@@ -998,8 +1003,9 @@ class SteppingTab(QWidget):
         self.widgets["segment_triage_std_dev_ms"].setRange(10, 200)
         self.widgets["segment_triage_std_dev_ms"].setSuffix(" ms")
         self.widgets["segment_triage_std_dev_ms"].setToolTip(
-            "Early triage threshold - skips stepping correction if delay variation is below this.\n"
-            "Prevents unnecessary processing on files with stable, uniform delays.\n"
+            "Triage threshold - minimum delay variation (std dev) to\n"
+            "trigger stepping correction. Prevents unnecessary processing\n"
+            "on files with stable, uniform delays.\n"
             "Default: 50ms"
         )
 
@@ -1008,7 +1014,8 @@ class SteppingTab(QWidget):
         self.widgets["drift_detection_r2_threshold"].setRange(0.5, 1.0)
         self.widgets["drift_detection_r2_threshold"].setDecimals(2)
         self.widgets["drift_detection_r2_threshold"].setToolTip(
-            "R² threshold for lossy codecs - how linear the drift must be to treat as drift vs stepping.\n"
+            "R-squared threshold for lossy codecs - how linear the\n"
+            "delay pattern must be to classify as drift vs stepping.\n"
             "Higher = stricter (requires very linear drift pattern)\n"
             "Default: 0.95"
         )
@@ -1017,15 +1024,15 @@ class SteppingTab(QWidget):
         self.widgets["drift_detection_r2_threshold_lossless"].setRange(0.5, 1.0)
         self.widgets["drift_detection_r2_threshold_lossless"].setDecimals(2)
         self.widgets["drift_detection_r2_threshold_lossless"].setToolTip(
-            "R² threshold for lossless codecs - how linear the drift must be to treat as drift vs stepping.\n"
-            "Default: 0.98"
+            "R-squared threshold for lossless codecs.\nDefault: 0.98"
         )
 
         self.widgets["drift_detection_slope_threshold_lossy"] = QDoubleSpinBox()
         self.widgets["drift_detection_slope_threshold_lossy"].setRange(0.1, 5.0)
         self.widgets["drift_detection_slope_threshold_lossy"].setSuffix(" ms/s")
         self.widgets["drift_detection_slope_threshold_lossy"].setToolTip(
-            "Minimum drift rate for lossy codecs to trigger drift correction instead of stepping.\n"
+            "Minimum drift rate for lossy codecs to trigger\n"
+            "drift correction instead of stepping.\n"
             "Default: 0.5 ms/s"
         )
 
@@ -1033,8 +1040,7 @@ class SteppingTab(QWidget):
         self.widgets["drift_detection_slope_threshold_lossless"].setRange(0.1, 5.0)
         self.widgets["drift_detection_slope_threshold_lossless"].setSuffix(" ms/s")
         self.widgets["drift_detection_slope_threshold_lossless"].setToolTip(
-            "Minimum drift rate for lossless codecs to trigger drift correction instead of stepping.\n"
-            "Default: 0.3 ms/s"
+            "Minimum drift rate for lossless codecs.\nDefault: 0.3 ms/s"
         )
 
         segment_layout.addRow(
@@ -1047,10 +1053,10 @@ class SteppingTab(QWidget):
             "Triage Threshold:", self.widgets["segment_triage_std_dev_ms"]
         )
         segment_layout.addRow(
-            "Lossy R² Threshold:", self.widgets["drift_detection_r2_threshold"]
+            "Lossy R-squared:", self.widgets["drift_detection_r2_threshold"]
         )
         segment_layout.addRow(
-            "Lossless R² Threshold:",
+            "Lossless R-squared:",
             self.widgets["drift_detection_r2_threshold_lossless"],
         )
         segment_layout.addRow(
@@ -1063,13 +1069,10 @@ class SteppingTab(QWidget):
         )
 
         # ===== SECTION 2: QUALITY VALIDATION =====
-        # Controls which detected clusters are considered valid for correction
         segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>═══ Quality Validation ═══</b>"))
+        segment_layout.addRow(QLabel("<b>Quality Validation</b>"))
         segment_layout.addRow(
-            QLabel(
-                "<i>Controls which detected timing clusters are considered valid</i>"
-            )
+            QLabel("<i>Which detected timing clusters are considered valid</i>")
         )
 
         self.widgets["stepping_correction_mode"] = QComboBox()
@@ -1077,17 +1080,13 @@ class SteppingTab(QWidget):
             ["full", "filtered", "strict", "disabled"]
         )
         self.widgets["stepping_correction_mode"].setToolTip(
-            "CORRECTION STRATEGY: How to handle detected timing clusters\n\n"
-            "• full (Default): All-or-nothing\n"
-            "  - Uses ALL clusters, rejects entire correction if ANY fail validation\n"
-            "  - Use when: All clusters are reliable\n\n"
-            "• filtered (Recommended): Smart filtering\n"
-            "  - Filters out unreliable clusters, uses only stable ones\n"
-            "  - See 'Filtered Fallback' for how filtered regions are handled\n"
-            "  - Use when: Small/brief clusters causing issues\n\n"
-            "• strict: Extra strict all-or-nothing\n"
-            "  - Like 'full' but stricter thresholds\n\n"
-            "• disabled: Skip stepping correction"
+            "How to handle detected timing clusters:\n\n"
+            "full (Default): All-or-nothing - uses ALL clusters,\n"
+            "  rejects entire correction if ANY fail validation.\n\n"
+            "filtered: Smart filtering - filters out unreliable clusters,\n"
+            "  uses only stable ones. See 'Filtered Fallback' below.\n\n"
+            "strict: Extra strict all-or-nothing.\n\n"
+            "disabled: Skip stepping correction entirely."
         )
 
         self.widgets["stepping_quality_mode"] = QComboBox()
@@ -1095,16 +1094,15 @@ class SteppingTab(QWidget):
             ["strict", "normal", "lenient", "custom"]
         )
         self.widgets["stepping_quality_mode"].setToolTip(
-            "QUALITY THRESHOLDS: What makes a cluster 'valid'\n\n"
-            "Clusters must pass ALL checks:\n"
-            "  1. Minimum chunks (correlation chunk count)\n"
-            "  2. Minimum percentage (% of total chunks)\n"
-            "  3. Minimum duration (time span in seconds)\n"
-            "  4. Minimum match quality (average correlation %)\n\n"
-            "• strict: 3+ chunks, 10%+, 30+ sec, 90%+ match (Blu-ray)\n"
-            "• normal: 3+ chunks, 5%+, 20+ sec, 85%+ match (Default)\n"
-            "• lenient: 2+ chunks, 3%+, 10+ sec, 75%+ match (Edge cases)\n"
-            "• custom: Configure thresholds manually below"
+            "What makes a cluster 'valid' - clusters must pass ALL checks:\n"
+            "  1. Minimum chunks (correlation window count)\n"
+            "  2. Minimum percentage of total windows\n"
+            "  3. Minimum duration in seconds\n"
+            "  4. Minimum match quality\n\n"
+            "strict: 3+ chunks, 10%+, 30s+, 90%+ (Blu-ray quality)\n"
+            "normal: 3+ chunks, 5%+, 20s+, 85%+ (Default)\n"
+            "lenient: 2+ chunks, 3%+, 10s+, 75%+ (Edge cases)\n"
+            "custom: Configure thresholds manually below"
         )
 
         self.widgets["stepping_filtered_fallback"] = QComboBox()
@@ -1112,13 +1110,13 @@ class SteppingTab(QWidget):
             ["nearest", "interpolate", "uniform", "skip", "reject"]
         )
         self.widgets["stepping_filtered_fallback"].setToolTip(
-            "FILTERED REGION HANDLING: What to do with invalid cluster regions\n"
-            "(Only applies when Correction Mode = 'filtered')\n\n"
-            "• nearest: Use closest valid cluster's delay (Recommended)\n"
-            "• interpolate: Smooth transition between valid clusters\n"
-            "• uniform: Use median delay of all accepted chunks\n"
-            "• skip: Keep original (possibly wrong) timing ⚠️ May cause timing jumps\n"
-            "• reject: Reject entire correction if any cluster filtered"
+            "How to handle invalid cluster regions\n"
+            "(Only used when Correction Mode = 'filtered'):\n\n"
+            "nearest: Use closest valid cluster's delay (Recommended)\n"
+            "interpolate: Smooth transition between valid clusters\n"
+            "uniform: Use median delay of all accepted windows\n"
+            "skip: Keep original timing (may cause jumps)\n"
+            "reject: Reject entire correction if any cluster filtered"
         )
 
         segment_layout.addRow(
@@ -1129,7 +1127,7 @@ class SteppingTab(QWidget):
             "Filtered Fallback:", self.widgets["stepping_filtered_fallback"]
         )
 
-        # Custom quality thresholds (for 'custom' mode)
+        # Custom quality thresholds
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(
             QLabel("<i>Custom Quality Thresholds (for 'custom' mode):</i>")
@@ -1138,7 +1136,7 @@ class SteppingTab(QWidget):
         self.widgets["stepping_min_chunks_per_cluster"] = QSpinBox()
         self.widgets["stepping_min_chunks_per_cluster"].setRange(1, 20)
         self.widgets["stepping_min_chunks_per_cluster"].setToolTip(
-            "Minimum correlation chunks required per cluster"
+            "Minimum correlation windows required per cluster."
         )
 
         self.widgets["stepping_min_cluster_percentage"] = QDoubleSpinBox()
@@ -1146,7 +1144,7 @@ class SteppingTab(QWidget):
         self.widgets["stepping_min_cluster_percentage"].setSuffix(" %")
         self.widgets["stepping_min_cluster_percentage"].setDecimals(1)
         self.widgets["stepping_min_cluster_percentage"].setToolTip(
-            "Minimum % of total chunks a cluster must represent"
+            "Minimum % of total windows a cluster must represent."
         )
 
         self.widgets["stepping_min_cluster_duration_s"] = QDoubleSpinBox()
@@ -1154,7 +1152,7 @@ class SteppingTab(QWidget):
         self.widgets["stepping_min_cluster_duration_s"].setSuffix(" s")
         self.widgets["stepping_min_cluster_duration_s"].setDecimals(1)
         self.widgets["stepping_min_cluster_duration_s"].setToolTip(
-            "Minimum duration in seconds for a cluster"
+            "Minimum duration in seconds for a cluster to be valid."
         )
 
         self.widgets["stepping_min_match_quality_pct"] = QDoubleSpinBox()
@@ -1162,17 +1160,17 @@ class SteppingTab(QWidget):
         self.widgets["stepping_min_match_quality_pct"].setSuffix(" %")
         self.widgets["stepping_min_match_quality_pct"].setDecimals(1)
         self.widgets["stepping_min_match_quality_pct"].setToolTip(
-            "Minimum average correlation match quality %"
+            "Minimum average correlation match quality %."
         )
 
         self.widgets["stepping_min_total_clusters"] = QSpinBox()
         self.widgets["stepping_min_total_clusters"].setRange(1, 10)
         self.widgets["stepping_min_total_clusters"].setToolTip(
-            "Minimum total number of clusters required"
+            "Minimum total number of valid clusters required."
         )
 
         segment_layout.addRow(
-            "  Min Chunks/Cluster:", self.widgets["stepping_min_chunks_per_cluster"]
+            "  Min Windows/Cluster:", self.widgets["stepping_min_chunks_per_cluster"]
         )
         segment_layout.addRow(
             "  Min Cluster %:", self.widgets["stepping_min_cluster_percentage"]
@@ -1188,178 +1186,63 @@ class SteppingTab(QWidget):
         )
 
         # ===== SECTION 3: DELAY SELECTION =====
-        # Controls how base delay is determined for stepping detection
         segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>═══ Delay Selection ═══</b>"))
+        segment_layout.addRow(QLabel("<b>Delay Selection</b>"))
         segment_layout.addRow(
-            QLabel("<i>Controls base delay determination for stepping detection</i>")
+            QLabel("<i>How the anchor (base) delay is determined</i>")
         )
 
         self.widgets["stepping_first_stable_min_chunks"] = QSpinBox()
         self.widgets["stepping_first_stable_min_chunks"].setRange(1, 100)
         self.widgets["stepping_first_stable_min_chunks"].setToolTip(
-            "Minimum consecutive chunks for a segment to be 'stable' when determining base delay.\n"
-            "Higher = stricter (avoids false positives at file start)\n"
-            "Lower = more lenient (may catch brief stable periods)\n"
-            "Note: Separate from 'First Stable' mode in Analysis tab.\n"
+            "Minimum consecutive windows for a cluster to be considered\n"
+            "'stable' when determining the anchor delay.\n"
+            "The first stable cluster's delay becomes the anchor that\n"
+            "all other segments get corrected to match.\n"
             "Default: 3"
         )
 
         self.widgets["stepping_first_stable_skip_unstable"] = QCheckBox()
         self.widgets["stepping_first_stable_skip_unstable"].setToolTip(
-            "When enabled, skips segments below minimum chunk count and looks for next stable segment.\n"
-            "Useful for avoiding offset beginnings (e.g., 2 wrong chunks before file stabilizes).\n"
-            "When disabled, always uses first segment regardless of size.\n"
+            "Skip clusters below minimum window count when searching\n"
+            "for the anchor delay. Useful for avoiding brief wrong\n"
+            "delays at file start.\n"
             "Default: Enabled"
         )
 
         segment_layout.addRow(
-            "First Stable Min Chunks:", self.widgets["stepping_first_stable_min_chunks"]
+            "First Stable Min Windows:",
+            self.widgets["stepping_first_stable_min_chunks"],
         )
         segment_layout.addRow(
-            "First Stable Skip Unstable:",
+            "Skip Unstable Start:",
             self.widgets["stepping_first_stable_skip_unstable"],
         )
 
-        # ===== SECTION 4: SCAN CONFIGURATION =====
-        # Controls stepping detection scan parameters (coarse, fine, QA)
+        # ===== SECTION 4: BOUNDARY REFINEMENT =====
         segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>═══ Scan Configuration ═══</b>"))
+        segment_layout.addRow(QLabel("<b>Boundary Refinement</b>"))
         segment_layout.addRow(
-            QLabel("<i>Controls stepping detection scan parameters</i>")
-        )
-
-        # Scan position
-        self.widgets["stepping_scan_start_percentage"] = QDoubleSpinBox()
-        self.widgets["stepping_scan_start_percentage"].setRange(0.0, 99.0)
-        self.widgets["stepping_scan_start_percentage"].setSuffix(" %")
-        self.widgets["stepping_scan_start_percentage"].setDecimals(1)
-        self.widgets["stepping_scan_start_percentage"].setToolTip(
-            "Where to begin stepping detection coarse scan (independent from main analysis scan).\n"
-            "Default: 5.0%"
-        )
-
-        self.widgets["stepping_scan_end_percentage"] = QDoubleSpinBox()
-        self.widgets["stepping_scan_end_percentage"].setRange(1.0, 100.0)
-        self.widgets["stepping_scan_end_percentage"].setSuffix(" %")
-        self.widgets["stepping_scan_end_percentage"].setDecimals(1)
-        self.widgets["stepping_scan_end_percentage"].setToolTip(
-            "Where to end stepping detection coarse scan.\n"
-            "Set higher (e.g., 99%) to catch stepping at file end.\n"
-            "Default: 99.0%"
-        )
-
-        # Coarse scan
-        self.widgets["segment_coarse_chunk_s"] = QSpinBox()
-        self.widgets["segment_coarse_chunk_s"].setRange(5, 60)
-        self.widgets["segment_coarse_chunk_s"].setSuffix(" s")
-        self.widgets["segment_coarse_chunk_s"].setToolTip(
-            "Duration of audio chunks for initial broad scan."
-        )
-
-        self.widgets["segment_coarse_step_s"] = QSpinBox()
-        self.widgets["segment_coarse_step_s"].setRange(10, 300)
-        self.widgets["segment_coarse_step_s"].setSuffix(" s")
-        self.widgets["segment_coarse_step_s"].setToolTip(
-            "Time to jump forward between each coarse scan chunk."
-        )
-
-        self.widgets["segment_search_locality_s"] = QSpinBox()
-        self.widgets["segment_search_locality_s"].setRange(2, 30)
-        self.widgets["segment_search_locality_s"].setSuffix(" s")
-        self.widgets["segment_search_locality_s"].setToolTip(
-            "Time window to search for a match in the target audio."
-        )
-
-        self.widgets["segment_min_confidence_ratio"] = QDoubleSpinBox()
-        self.widgets["segment_min_confidence_ratio"].setRange(2.0, 20.0)
-        self.widgets["segment_min_confidence_ratio"].setDecimals(1)
-        self.widgets["segment_min_confidence_ratio"].setToolTip(
-            "Minimum ratio of correlation peak to noise floor for valid match."
-        )
-
-        # Fine scan
-        self.widgets["segment_fine_chunk_s"] = QDoubleSpinBox()
-        self.widgets["segment_fine_chunk_s"].setRange(0.5, 10.0)
-        self.widgets["segment_fine_chunk_s"].setSuffix(" s")
-        self.widgets["segment_fine_chunk_s"].setToolTip(
-            "Duration of audio chunks for high-precision boundary search."
-        )
-
-        self.widgets["segment_fine_iterations"] = QSpinBox()
-        self.widgets["segment_fine_iterations"].setRange(5, 15)
-        self.widgets["segment_fine_iterations"].setToolTip(
-            "Number of binary search iterations to find sync boundary."
-        )
-
-        # QA scan
-        self.widgets["segmented_qa_threshold"] = QDoubleSpinBox()
-        self.widgets["segmented_qa_threshold"].setRange(50.0, 99.0)
-        self.widgets["segmented_qa_threshold"].setSuffix("%")
-        self.widgets["segmented_qa_threshold"].setToolTip(
-            "QA threshold - corrected tracks must correlate above this % with reference."
-        )
-
-        self.widgets["segment_qa_chunk_count"] = QSpinBox()
-        self.widgets["segment_qa_chunk_count"].setRange(10, 100)
-        self.widgets["segment_qa_chunk_count"].setToolTip(
-            "Number of chunks to scan during final QA check."
-        )
-
-        self.widgets["segment_qa_min_accepted_chunks"] = QSpinBox()
-        self.widgets["segment_qa_min_accepted_chunks"].setRange(5, 100)
-        self.widgets["segment_qa_min_accepted_chunks"].setToolTip(
-            "Minimum QA chunks that must pass for correction to be successful."
+            QLabel("<i>How splice points are placed at each transition zone</i>")
         )
 
         segment_layout.addRow(
-            "Scan Start Position:", self.widgets["stepping_scan_start_percentage"]
-        )
-        segment_layout.addRow(
-            "Scan End Position:", self.widgets["stepping_scan_end_percentage"]
-        )
-        segment_layout.addRow(QLabel("<i>Coarse Scan:</i>"))
-        segment_layout.addRow(
-            "  Chunk Duration:", self.widgets["segment_coarse_chunk_s"]
-        )
-        segment_layout.addRow("  Step Size:", self.widgets["segment_coarse_step_s"])
-        segment_layout.addRow(
-            "  Search Window:", self.widgets["segment_search_locality_s"]
-        )
-        segment_layout.addRow(
-            "  Min Confidence Ratio:", self.widgets["segment_min_confidence_ratio"]
-        )
-        segment_layout.addRow(QLabel("<i>Fine Scan:</i>"))
-        segment_layout.addRow("  Chunk Duration:", self.widgets["segment_fine_chunk_s"])
-        segment_layout.addRow("  Iterations:", self.widgets["segment_fine_iterations"])
-
-        # Advanced Silence Detection Methods
-        segment_layout.addRow(QLabel("<b>Advanced Silence Detection:</b>"))
-
-        self.widgets["stepping_silence_detection_method"] = QComboBox()
-        self.widgets["stepping_silence_detection_method"].addItems(
-            ["smart_fusion", "ffmpeg_silencedetect", "rms_basic"]
-        )
-        self.widgets["stepping_silence_detection_method"].setToolTip(
-            "Silence detection algorithm:\n"
-            "• smart_fusion (RECOMMENDED): Combines FFmpeg silencedetect + VAD + transient detection\n"
-            "  Uses multiple signals to find optimal cut points that avoid speech and music\n"
-            "  Provides the most accurate and content-aware boundary placement\n\n"
-            "• ffmpeg_silencedetect: Frame-accurate FFmpeg silence detector\n"
-            "  Fast and precise, but doesn't avoid speech or musical beats\n\n"
-            "• rms_basic: Traditional RMS energy-based detection\n"
-            "  Legacy method, least accurate but fastest\n\n"
-            "Default: smart_fusion"
+            QLabel(
+                "<i>The pipeline decodes Source 2 to PCM in memory, then for each\n"
+                "transition uses combined RMS + VAD to find the best silence zone\n"
+                "and centers the splice point within it.</i>"
+            )
         )
 
+        # VAD settings
         self.widgets["stepping_vad_enabled"] = QCheckBox(
             "Enable speech protection (VAD)"
         )
         self.widgets["stepping_vad_enabled"].setToolTip(
-            "Uses Voice Activity Detection to identify and avoid cutting dialogue.\n"
-            "Prevents boundaries from being placed in the middle of speech.\n"
+            "Uses WebRTC Voice Activity Detection to find non-speech gaps.\n"
+            "Combined with RMS silence detection - the intersection of\n"
+            "both (quiet AND no speech) produces the safest splice points.\n"
             "Requires: pip install webrtcvad-wheels\n"
-            "Recommended: Keep enabled for dialogue-heavy content\n"
             "Default: Enabled"
         )
 
@@ -1367,69 +1250,23 @@ class SteppingTab(QWidget):
         self.widgets["stepping_vad_aggressiveness"].setRange(0, 3)
         self.widgets["stepping_vad_aggressiveness"].setToolTip(
             "VAD aggressiveness level (0-3):\n"
-            "0 = Least aggressive (keeps more audio as speech, safest)\n"
-            "1 = Moderate (balanced)\n"
-            "2 = Aggressive (recommended, good speech detection)\n"
+            "0 = Least aggressive (classifies more audio as speech)\n"
+            "1 = Moderate\n"
+            "2 = Aggressive (recommended)\n"
             "3 = Very aggressive (may miss some speech)\n"
             "Default: 2"
         )
 
-        self.widgets["stepping_transient_detection_enabled"] = QCheckBox(
-            "Enable transient detection (avoid musical beats)"
-        )
-        self.widgets["stepping_transient_detection_enabled"].setToolTip(
-            "Detects sudden amplitude increases (transients) like drum hits, beats, and impacts.\n"
-            "Avoids placing boundaries on musical beats for smoother cuts.\n"
-            "Recommended: Keep enabled for music-heavy content\n"
-            "Default: Enabled"
-        )
-
-        self.widgets["stepping_transient_threshold"] = QDoubleSpinBox()
-        self.widgets["stepping_transient_threshold"].setRange(3.0, 15.0)
-        self.widgets["stepping_transient_threshold"].setSuffix(" dB")
-        self.widgets["stepping_transient_threshold"].setDecimals(1)
-        self.widgets["stepping_transient_threshold"].setToolTip(
-            "dB threshold for detecting transients (sudden amplitude increases).\n"
-            "Lower = more sensitive (detects softer beats)\n"
-            "Higher = less sensitive (only loud impacts)\n"
-            "Default: 8.0 dB"
-        )
-
-        segment_layout.addRow(
-            "Detection Method:", self.widgets["stepping_silence_detection_method"]
-        )
-        segment_layout.addRow(self.widgets["stepping_vad_enabled"])
-        segment_layout.addRow(
-            "    VAD Aggressiveness:", self.widgets["stepping_vad_aggressiveness"]
-        )
-        segment_layout.addRow(self.widgets["stepping_transient_detection_enabled"])
-        segment_layout.addRow(
-            "    Transient Threshold:", self.widgets["stepping_transient_threshold"]
-        )
-
-        # Silence-aware boundary snapping
-        segment_layout.addRow(QLabel("<b>Silence-Aware Boundary Snapping:</b>"))
-
-        self.widgets["stepping_snap_to_silence"] = QCheckBox(
-            "Enable boundary snapping to silence zones"
-        )
-        self.widgets["stepping_snap_to_silence"].setToolTip(
-            "Intelligently adjusts boundary placement to silence zones instead of mid-speech.\n"
-            "When enabled, searches for silence regions near detected boundaries and snaps to them.\n"
-            "Significantly improves audio quality by avoiding cuts in the middle of dialogue/music.\n"
-            "Recommended: Keep enabled unless debugging.\n"
-            "Default: Enabled"
-        )
-
+        # Silence detection settings
         self.widgets["stepping_silence_search_window_s"] = QDoubleSpinBox()
         self.widgets["stepping_silence_search_window_s"].setRange(0.5, 15.0)
         self.widgets["stepping_silence_search_window_s"].setSuffix(" s")
         self.widgets["stepping_silence_search_window_s"].setDecimals(1)
         self.widgets["stepping_silence_search_window_s"].setToolTip(
-            "Search window in seconds (±N seconds from detected boundary).\n"
-            "Larger = more flexibility in finding silence, but may move boundary further\n"
-            "Smaller = keeps boundary closer to original detection\n"
-            "Default: 5.0s (increased from 3.0s for better accuracy)"
+            "Search radius around each transition midpoint (in seconds).\n"
+            "Larger = more flexibility finding silence, but splice moves further\n"
+            "Smaller = keeps splice closer to the detected transition\n"
+            "Default: 5.0s"
         )
 
         self.widgets["stepping_silence_threshold_db"] = QDoubleSpinBox()
@@ -1437,10 +1274,9 @@ class SteppingTab(QWidget):
         self.widgets["stepping_silence_threshold_db"].setSuffix(" dB")
         self.widgets["stepping_silence_threshold_db"].setDecimals(1)
         self.widgets["stepping_silence_threshold_db"].setToolTip(
-            "Audio level threshold in dB to consider as 'silence'.\n"
+            "RMS energy threshold to consider audio as 'silence'.\n"
             "More negative = stricter (quieter required)\n"
-            "Less negative = more lenient (includes quieter dialogue)\n"
-            "Typical values: -50 dB (very quiet), -40 dB (quiet), -30 dB (soft)\n"
+            "Less negative = more lenient\n"
             "Default: -40.0 dB"
         )
 
@@ -1449,57 +1285,92 @@ class SteppingTab(QWidget):
         self.widgets["stepping_silence_min_duration_ms"].setSuffix(" ms")
         self.widgets["stepping_silence_min_duration_ms"].setDecimals(0)
         self.widgets["stepping_silence_min_duration_ms"].setToolTip(
-            "Minimum silence duration to be considered for boundary snapping.\n"
-            "Prevents snapping to very brief quiet moments (like pauses between words).\n"
-            "Larger = requires longer silence zones (more conservative)\n"
-            "Smaller = can use brief pauses (more aggressive)\n"
-            "Default: 100 ms"
+            "Minimum silence duration for a zone to be a splice candidate.\n"
+            "Prevents splicing in brief pauses between words.\n"
+            "Default: 100ms"
         )
 
-        segment_layout.addRow(self.widgets["stepping_snap_to_silence"])
+        # Scoring weights
+        self.widgets["stepping_fusion_weight_silence"] = QSpinBox()
+        self.widgets["stepping_fusion_weight_silence"].setRange(0, 20)
+        self.widgets["stepping_fusion_weight_silence"].setToolTip(
+            "Weight for silence depth when scoring splice candidates.\n"
+            "Higher = prefer quieter zones more strongly.\n"
+            "Default: 10"
+        )
+
+        self.widgets["stepping_fusion_weight_duration"] = QSpinBox()
+        self.widgets["stepping_fusion_weight_duration"].setRange(0, 20)
+        self.widgets["stepping_fusion_weight_duration"].setToolTip(
+            "Weight for zone duration when scoring splice candidates.\n"
+            "Higher = prefer longer silence zones.\n"
+            "Default: 2"
+        )
+
+        segment_layout.addRow(self.widgets["stepping_vad_enabled"])
         segment_layout.addRow(
-            "    Search Window:", self.widgets["stepping_silence_search_window_s"]
+            "  VAD Aggressiveness:", self.widgets["stepping_vad_aggressiveness"]
         )
         segment_layout.addRow(
-            "    Silence Threshold:", self.widgets["stepping_silence_threshold_db"]
+            "Search Window:", self.widgets["stepping_silence_search_window_s"]
         )
         segment_layout.addRow(
-            "    Min Silence Duration:",
+            "Silence Threshold:", self.widgets["stepping_silence_threshold_db"]
+        )
+        segment_layout.addRow(
+            "Min Silence Duration:",
             self.widgets["stepping_silence_min_duration_ms"],
+        )
+        segment_layout.addRow(
+            "Silence Weight:", self.widgets["stepping_fusion_weight_silence"]
+        )
+        segment_layout.addRow(
+            "Duration Weight:", self.widgets["stepping_fusion_weight_duration"]
+        )
+
+        # Transient detection settings
+        segment_layout.addRow(QLabel(""))
+        segment_layout.addRow(QLabel("<i>Transient Detection (click prevention):</i>"))
+
+        self.widgets["stepping_transient_detection_enabled"] = QCheckBox(
+            "Avoid transients when picking splice points"
+        )
+        self.widgets["stepping_transient_detection_enabled"].setToolTip(
+            "Scans the search region for sudden amplitude jumps (drum hits,\n"
+            "impacts, consonant onsets) and penalises silence zones that\n"
+            "contain or border a transient. Splicing on a transient causes\n"
+            "audible clicks even inside a 'quiet' zone.\n"
+            "Default: Enabled"
+        )
+
+        self.widgets["stepping_transient_threshold"] = QDoubleSpinBox()
+        self.widgets["stepping_transient_threshold"].setRange(3.0, 20.0)
+        self.widgets["stepping_transient_threshold"].setSuffix(" dB")
+        self.widgets["stepping_transient_threshold"].setDecimals(1)
+        self.widgets["stepping_transient_threshold"].setToolTip(
+            "Minimum frame-to-frame RMS jump (in dB) to flag as a transient.\n"
+            "Lower = more sensitive (catches more transients)\n"
+            "Higher = less sensitive (only catches large impacts)\n"
+            "Default: 8.0 dB"
+        )
+
+        segment_layout.addRow(self.widgets["stepping_transient_detection_enabled"])
+        segment_layout.addRow(
+            "  Transient Threshold:", self.widgets["stepping_transient_threshold"]
         )
 
         # Video-aware boundary snapping
-        segment_layout.addRow(QLabel("<i>Video-Aware Boundary Snapping:</i>"))
+        segment_layout.addRow(QLabel(""))
+        segment_layout.addRow(QLabel("<i>Video Keyframe Snapping (optional):</i>"))
 
         self.widgets["stepping_snap_to_video_frames"] = QCheckBox(
-            "Enable boundary snapping to video frames/scenes"
+            "Snap boundaries to video keyframes"
         )
         self.widgets["stepping_snap_to_video_frames"].setToolTip(
-            "Aligns boundaries to video structure (scenes, keyframes, or frames).\n"
-            "When enabled, searches for video edit points near detected boundaries.\n"
-            "Ensures perfect audio-video sync at boundary points.\n"
-            "Particularly useful for stepped audio caused by:\n"
-            "  • Commercial breaks\n"
-            "  • Scene changes\n"
-            "  • Film reel changes\n"
-            "  • Chapter markers\n"
-            "Recommended: Enable for video content with visible scene changes.\n"
+            "After finding the best silence zone, optionally snap\n"
+            "the splice point to the nearest video keyframe.\n"
+            "Useful when stepping is caused by scene changes.\n"
             "Default: Disabled"
-        )
-
-        self.widgets["stepping_video_snap_mode"] = QComboBox()
-        self.widgets["stepping_video_snap_mode"].addItems(
-            ["scenes", "keyframes", "any_frame"]
-        )
-        self.widgets["stepping_video_snap_mode"].setToolTip(
-            "Video snap detection mode:\n"
-            "• scenes: Snap to scene changes (recommended for most content)\n"
-            "          Detects visual transitions like cuts, fades, and chapter breaks\n"
-            "• keyframes: Snap to I-frames (fast, good for encoded video)\n"
-            "             I-frames are complete frames, not deltas\n"
-            "• any_frame: Snap to nearest frame (most precise, slowest)\n"
-            "             Frame-perfect alignment\n"
-            "Default: scenes"
         )
 
         self.widgets["stepping_video_snap_max_offset_s"] = QDoubleSpinBox()
@@ -1507,65 +1378,69 @@ class SteppingTab(QWidget):
         self.widgets["stepping_video_snap_max_offset_s"].setSuffix(" s")
         self.widgets["stepping_video_snap_max_offset_s"].setDecimals(1)
         self.widgets["stepping_video_snap_max_offset_s"].setToolTip(
-            "Maximum distance to snap boundary to video position.\n"
-            "If nearest video position is further than this, boundary stays at audio-based position.\n"
-            "Larger = more flexible, but may move boundary further from audio detection\n"
-            "Smaller = keeps boundary closer to audio detection\n"
-            "Typical: 1-3 seconds\n"
+            "Maximum distance to snap to a keyframe.\n"
+            "If no keyframe is within this range, the audio-based\n"
+            "splice point is kept.\n"
             "Default: 2.0s"
-        )
-
-        self.widgets["stepping_video_scene_threshold"] = QDoubleSpinBox()
-        self.widgets["stepping_video_scene_threshold"].setRange(0.1, 1.0)
-        self.widgets["stepping_video_scene_threshold"].setSingleStep(0.05)
-        self.widgets["stepping_video_scene_threshold"].setDecimals(2)
-        self.widgets["stepping_video_scene_threshold"].setToolTip(
-            "Scene detection sensitivity (only used in 'scenes' mode).\n"
-            "Lower = more sensitive (detects subtle transitions)\n"
-            "Higher = less sensitive (only major scene changes)\n"
-            "Range: 0.1 (very sensitive) to 1.0 (very insensitive)\n"
-            "Typical: 0.3-0.5\n"
-            "Default: 0.4"
         )
 
         segment_layout.addRow(self.widgets["stepping_snap_to_video_frames"])
         segment_layout.addRow(
-            "    Video Snap Mode:", self.widgets["stepping_video_snap_mode"]
-        )
-        segment_layout.addRow(
-            "    Max Snap Distance:", self.widgets["stepping_video_snap_max_offset_s"]
-        )
-        segment_layout.addRow(
-            "    Scene Threshold:", self.widgets["stepping_video_scene_threshold"]
+            "  Max Snap Distance:", self.widgets["stepping_video_snap_max_offset_s"]
         )
 
-        segment_layout.addRow(QLabel("<i>Quality Assurance:</i>"))
-        segment_layout.addRow("  QA Threshold:", self.widgets["segmented_qa_threshold"])
-        segment_layout.addRow(
-            "  QA Chunk Count:", self.widgets["segment_qa_chunk_count"]
-        )
-        segment_layout.addRow(
-            "  QA Min Accepted:", self.widgets["segment_qa_min_accepted_chunks"]
-        )
-
-        # ===== SECTION 5: AUDIO PROCESSING =====
-        # Controls resampling, rubberband, gap filling, and internal drift correction
+        # ===== SECTION 5: QUALITY ASSURANCE =====
         segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>═══ Audio Processing ═══</b>"))
+        segment_layout.addRow(QLabel("<b>Quality Assurance</b>"))
         segment_layout.addRow(
-            QLabel("<i>Controls audio correction methods and quality</i>")
+            QLabel("<i>Post-correction verification via fresh correlation</i>")
         )
 
-        # Resampling engine
+        self.widgets["segmented_qa_threshold"] = QDoubleSpinBox()
+        self.widgets["segmented_qa_threshold"].setRange(50.0, 99.0)
+        self.widgets["segmented_qa_threshold"].setSuffix("%")
+        self.widgets["segmented_qa_threshold"].setToolTip(
+            "Corrected audio must correlate above this % with reference.\nDefault: 85%"
+        )
+
+        self.widgets["segment_qa_chunk_count"] = QSpinBox()
+        self.widgets["segment_qa_chunk_count"].setRange(10, 100)
+        self.widgets["segment_qa_chunk_count"].setToolTip(
+            "Number of correlation windows for the QA check.\nDefault: 30"
+        )
+
+        self.widgets["segment_qa_min_accepted_chunks"] = QSpinBox()
+        self.widgets["segment_qa_min_accepted_chunks"].setRange(5, 100)
+        self.widgets["segment_qa_min_accepted_chunks"].setToolTip(
+            "Minimum QA windows that must pass for correction\n"
+            "to be accepted.\n"
+            "Default: 28"
+        )
+
+        segment_layout.addRow("QA Threshold:", self.widgets["segmented_qa_threshold"])
+        segment_layout.addRow(
+            "QA Window Count:", self.widgets["segment_qa_chunk_count"]
+        )
+        segment_layout.addRow(
+            "QA Min Accepted:", self.widgets["segment_qa_min_accepted_chunks"]
+        )
+
+        # ===== SECTION 6: AUDIO PROCESSING =====
+        segment_layout.addRow(QLabel(""))
+        segment_layout.addRow(QLabel("<b>Audio Processing</b>"))
+        segment_layout.addRow(
+            QLabel("<i>Resampling engine for per-segment drift correction</i>")
+        )
+
         self.widgets["segment_resample_engine"] = QComboBox()
         self.widgets["segment_resample_engine"].addItems(
             ["aresample", "atempo", "rubberband"]
         )
         self.widgets["segment_resample_engine"].setToolTip(
-            "Audio resampling engine for drift correction:\n"
-            "• aresample: High quality, no pitch correction (Recommended)\n"
-            "• atempo: Fast, standard quality, no pitch correction\n"
-            "• rubberband: Slowest, highest quality, preserves pitch"
+            "Audio resampling engine (shared with linear drift correction):\n"
+            "aresample: High quality, no pitch correction (Recommended)\n"
+            "atempo: Fast, standard quality\n"
+            "rubberband: Slowest, highest quality, preserves pitch"
         )
         segment_layout.addRow(
             "Resample Engine:", self.widgets["segment_resample_engine"]
@@ -1578,7 +1453,7 @@ class SteppingTab(QWidget):
         self.widgets["segment_rb_pitch_correct"] = QCheckBox("Enable Pitch Correction")
         self.widgets["segment_rb_pitch_correct"].setToolTip(
             "Preserves original audio pitch (slower).\n"
-            "When disabled, acts as high-quality resampler where pitch changes with speed (faster)."
+            "When disabled, pitch changes with speed."
         )
 
         self.widgets["segment_rb_transients"] = QComboBox()
@@ -1592,15 +1467,14 @@ class SteppingTab(QWidget):
             "Enable Phase Smoothing (Higher Quality)"
         )
         self.widgets["segment_rb_smoother"].setToolTip(
-            "Improves quality by smoothing phase shifts between processing windows.\n"
-            "Disabling can be slightly faster."
+            "Smooths phase shifts between processing windows."
         )
 
         self.widgets["segment_rb_pitchq"] = QCheckBox(
             "Enable High-Quality Pitch Algorithm"
         )
         self.widgets["segment_rb_pitchq"].setToolTip(
-            "Uses higher-quality, more CPU-intensive pitch processing algorithm."
+            "Uses higher-quality, more CPU-intensive pitch processing."
         )
 
         rb_layout.addRow(self.widgets["segment_rb_pitch_correct"])
@@ -1609,119 +1483,17 @@ class SteppingTab(QWidget):
         rb_layout.addRow(self.widgets["segment_rb_pitchq"])
         segment_layout.addRow(self.rb_group)
 
-        # Gap filling
-        segment_layout.addRow(QLabel("<i>Gap Filling (when delay increases):</i>"))
-
-        self.widgets["stepping_fill_mode"] = QComboBox()
-        self.widgets["stepping_fill_mode"].addItems(["silence", "auto", "content"])
-        self.widgets["stepping_fill_mode"].setToolTip(
-            "How to fill gaps when delay increases:\n"
-            "• silence: Insert pure silence (RECOMMENDED - safe and professional)\n"
-            "• auto: Intelligently decide between content and silence (experimental)\n"
-            "• content: Always extract content from reference (experimental, may cause artifacts)"
-        )
-
-        self.widgets["stepping_content_correlation_threshold"] = QDoubleSpinBox()
-        self.widgets["stepping_content_correlation_threshold"].setRange(0.1, 1.0)
-        self.widgets["stepping_content_correlation_threshold"].setDecimals(2)
-        self.widgets["stepping_content_correlation_threshold"].setSingleStep(0.05)
-        self.widgets["stepping_content_correlation_threshold"].setToolTip(
-            "In 'auto' mode, correlation threshold for content extraction.\n"
-            "Lower = more aggressive extraction\n"
-            "Higher = more conservative (prefers silence)\n"
-            "Default: 0.5"
-        )
-
-        self.widgets["stepping_content_search_window_s"] = QDoubleSpinBox()
-        self.widgets["stepping_content_search_window_s"].setRange(1.0, 30.0)
-        self.widgets["stepping_content_search_window_s"].setSuffix(" s")
-        self.widgets["stepping_content_search_window_s"].setDecimals(1)
-        self.widgets["stepping_content_search_window_s"].setToolTip(
-            "Time window to search for matching content around stepping boundaries.\n"
-            "Larger = more thorough but slower\n"
-            "Default: 5.0s"
-        )
-
-        segment_layout.addRow("  Fill Mode:", self.widgets["stepping_fill_mode"])
-        segment_layout.addRow(
-            "  Content Threshold:",
-            self.widgets["stepping_content_correlation_threshold"],
-        )
-        segment_layout.addRow(
-            "  Search Window:", self.widgets["stepping_content_search_window_s"]
-        )
-
-        # Internal drift correction
-        segment_layout.addRow(
-            QLabel("<i>Internal Drift Correction (within segments):</i>")
-        )
-
-        self.widgets["segment_drift_r2_threshold"] = QDoubleSpinBox()
-        self.widgets["segment_drift_r2_threshold"].setRange(0.5, 1.0)
-        self.widgets["segment_drift_r2_threshold"].setDecimals(2)
-        self.widgets["segment_drift_r2_threshold"].setToolTip(
-            "Inside a segment, how linear drift must be to correct."
-        )
-
-        self.widgets["segment_drift_slope_threshold"] = QDoubleSpinBox()
-        self.widgets["segment_drift_slope_threshold"].setRange(0.1, 5.0)
-        self.widgets["segment_drift_slope_threshold"].setSuffix(" ms/s")
-        self.widgets["segment_drift_slope_threshold"].setToolTip(
-            "Inside a segment, minimum drift rate to trigger correction."
-        )
-
-        self.widgets["segment_drift_outlier_sensitivity"] = QDoubleSpinBox()
-        self.widgets["segment_drift_outlier_sensitivity"].setRange(1.0, 3.0)
-        self.widgets["segment_drift_outlier_sensitivity"].setDecimals(1)
-        self.widgets["segment_drift_outlier_sensitivity"].setToolTip(
-            "How aggressively to reject inconsistent measurements before calculating drift.\n"
-            "Lower = stricter"
-        )
-
-        self.widgets["segment_drift_scan_buffer_pct"] = QDoubleSpinBox()
-        self.widgets["segment_drift_scan_buffer_pct"].setRange(0.0, 10.0)
-        self.widgets["segment_drift_scan_buffer_pct"].setSuffix(" %")
-        self.widgets["segment_drift_scan_buffer_pct"].setToolTip(
-            "% of segment start/end to ignore during drift scan."
-        )
-
-        segment_layout.addRow(
-            "  R² Threshold:", self.widgets["segment_drift_r2_threshold"]
-        )
-        segment_layout.addRow(
-            "  Slope Threshold:", self.widgets["segment_drift_slope_threshold"]
-        )
-        segment_layout.addRow(
-            "  Outlier Sensitivity:", self.widgets["segment_drift_outlier_sensitivity"]
-        )
-        segment_layout.addRow(
-            "  Scan Buffer %:", self.widgets["segment_drift_scan_buffer_pct"]
-        )
-
-        # ===== SECTION 6: TRACK NAMING =====
-        # Controls track naming in final MKV output
+        # ===== SECTION 7: TRACK NAMING =====
         segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>═══ Track Naming ═══</b>"))
-        segment_layout.addRow(
-            QLabel("<i>Controls track naming in final MKV output</i>")
-        )
+        segment_layout.addRow(QLabel("<b>Track Naming</b>"))
 
         self.widgets["stepping_corrected_track_label"] = QLineEdit()
         self.widgets["stepping_corrected_track_label"].setPlaceholderText(
             "Leave empty for no label"
         )
         self.widgets["stepping_corrected_track_label"].setToolTip(
-            "Label added to corrected audio tracks in final MKV.\n"
-            "If original track has a name, label is added in brackets.\n"
-            "If original track has no name, only the label is used.\n\n"
-            "Examples:\n"
-            "  Label = 'Stepping Corrected':\n"
-            "    'Surround 5.1' → 'Surround 5.1 (Stepping Corrected)'\n"
-            "    (no name) → 'Stepping Corrected'\n\n"
-            "  Label = '' (empty):\n"
-            "    'Surround 5.1' → 'Surround 5.1'\n"
-            "    (no name) → (no name)\n\n"
-            "Temp files still use 'corrected' for tracking.\n"
+            "Label appended to corrected audio track name in the output MKV.\n"
+            "e.g. 'Surround 5.1' becomes 'Surround 5.1 (Stepping Corrected)'\n"
             "Default: Empty (no label)"
         )
 
@@ -1730,16 +1502,8 @@ class SteppingTab(QWidget):
             "Leave empty for no label"
         )
         self.widgets["stepping_preserved_track_label"].setToolTip(
-            "Label added to preserved original tracks in final MKV.\n"
-            "Preserved originals are kept when 'Preserve Original' is enabled.\n"
-            "Follows same naming rules as corrected tracks.\n\n"
-            "Examples:\n"
-            "  Label = 'Original':\n"
-            "    'Surround 5.1' → 'Surround 5.1 (Original)'\n"
-            "    (no name) → 'Original'\n\n"
-            "  Label = '' (empty):\n"
-            "    'Surround 5.1' → 'Surround 5.1'\n"
-            "    (no name) → (no name)\n\n"
+            "Label appended to the preserved original track name.\n"
+            "e.g. 'Surround 5.1' becomes 'Surround 5.1 (Original)'\n"
             "Default: Empty (no label)"
         )
 
@@ -1750,33 +1514,25 @@ class SteppingTab(QWidget):
             "Preserved Track Label:", self.widgets["stepping_preserved_track_label"]
         )
 
-        # ===== SECTION 7: SUBTITLE ADJUSTMENT =====
-        # Controls subtitle timestamp adjustments for stepped sources
+        # ===== SECTION 8: SUBTITLE ADJUSTMENT =====
         segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>═══ Subtitle Adjustment ═══</b>"))
-        segment_layout.addRow(
-            QLabel("<i>Controls subtitle timing adjustments for stepped sources</i>")
-        )
+        segment_layout.addRow(QLabel("<b>Subtitle Adjustment</b>"))
 
         self.widgets["stepping_adjust_subtitles"] = QCheckBox(
             "Adjust subtitle timestamps for stepped sources"
         )
         self.widgets["stepping_adjust_subtitles"].setToolTip(
-            "Automatically adjusts subtitle timestamps to match audio corrections (insertions/removals).\n"
-            "Keeps subtitles in sync with corrected audio.\n"
-            "Recommended: Keep enabled unless troubleshooting subtitle timing.\n"
-            "Only applies when stepping correction is detected."
+            "Adjusts subtitle timestamps to match audio corrections.\n"
+            "Keeps subtitles in sync with the corrected audio."
         )
 
         self.widgets["stepping_adjust_subtitles_no_audio"] = QCheckBox(
             "Apply stepping to subtitles when no audio is merged"
         )
         self.widgets["stepping_adjust_subtitles_no_audio"].setToolTip(
-            "Applies stepping correction to subtitles even when no audio from that source is merged.\n"
-            "Uses correlation results to generate timing adjustment map.\n\n"
-            "Useful for subtitle-only merges from sources with stepped delays.\n"
-            "Less precise than full audio correction but usually sufficient.\n"
-            "Only applies when stepping is detected during correlation analysis."
+            "Applies stepping correction to subtitles even when no\n"
+            "audio from that source is in the merge layout.\n"
+            "Uses the EDL from correlation analysis."
         )
 
         self.widgets["stepping_boundary_mode"] = QComboBox()
@@ -1785,33 +1541,25 @@ class SteppingTab(QWidget):
         )
         self.widgets["stepping_boundary_mode"].setToolTip(
             "How to handle subtitles spanning stepping boundaries:\n\n"
-            "• start: Use subtitle's start timestamp (Default - fast, works for short subs)\n"
-            "• majority: Use region where subtitle spends most time (Best for long subs/songs)\n"
-            "• midpoint: Use middle timestamp (start + end) / 2 (Compromise)\n\n"
-            "Recommended: 'start' for dialogue, 'majority' for songs/karaoke"
+            "start: Use subtitle's start time (Default, good for dialogue)\n"
+            "majority: Use region with most overlap (good for songs)\n"
+            "midpoint: Use (start + end) / 2"
         )
 
         segment_layout.addRow(self.widgets["stepping_adjust_subtitles"])
         segment_layout.addRow(self.widgets["stepping_adjust_subtitles_no_audio"])
-        segment_layout.addRow(
-            "Boundary Spanning Mode:", self.widgets["stepping_boundary_mode"]
-        )
+        segment_layout.addRow("Boundary Mode:", self.widgets["stepping_boundary_mode"])
 
-        # ===== SECTION 8: DIAGNOSTICS =====
-        # Controls diagnostic logging and debugging output
+        # ===== SECTION 9: DIAGNOSTICS =====
         segment_layout.addRow(QLabel(""))
-        segment_layout.addRow(QLabel("<b>═══ Diagnostics ═══</b>"))
-        segment_layout.addRow(
-            QLabel("<i>Controls diagnostic logging for debugging</i>")
-        )
+        segment_layout.addRow(QLabel("<b>Diagnostics</b>"))
 
         self.widgets["stepping_diagnostics_verbose"] = QCheckBox(
             "Enable detailed cluster diagnostics"
         )
         self.widgets["stepping_diagnostics_verbose"].setToolTip(
-            "Logs detailed cluster composition, transition patterns, and likely causes.\n"
-            "Helps understand stepping origins: reel changes, commercials, scene edits, etc.\n"
-            "Recommended: Keep enabled for debugging stepping issues."
+            "Logs cluster composition, transition patterns, and likely causes.\n"
+            "Useful for understanding stepping origins."
         )
 
         segment_layout.addRow(self.widgets["stepping_diagnostics_verbose"])

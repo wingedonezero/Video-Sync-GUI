@@ -10,18 +10,11 @@ if TYPE_CHECKING:
     from .context_types import (
         FilterConfig,
         FontReplacements,
-        ManualLayoutItem,
         SteppingQualityIssue,
         StylePatch,
         SyncStabilityIssue,
     )
     from .media import Track
-
-
-@dataclass(frozen=True, slots=True)
-class JobSpec:
-    sources: dict[str, Path]
-    manual_layout: list[ManualLayoutItem] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,17 +99,6 @@ class MergePlan:
     subtitle_delays_ms: dict[str, float] = field(
         default_factory=dict
     )  # Subtitle-specific delays (e.g., from video-verified mode)
-
-
-@dataclass(frozen=True, slots=True)
-class JobResult:
-    """Simplified job result for public API."""
-
-    status: Literal["Merged", "Analyzed", "Failed"]
-    name: str
-    output: str | None = None
-    delays: dict[str, int] | None = None
-    error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
