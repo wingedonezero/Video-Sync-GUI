@@ -6,7 +6,7 @@ Replaces the old chunk-based approach (30 fixed chunks) with a dense
 sliding window that processes the entire file at high resolution.
 Produces thousands of delay estimates instead of ~30, enabling:
   - Precise stepping transition detection (within hop_s precision)
-  - Robust outlier rejection (>50ms from median)
+  - Robust outlier rejection (configurable threshold from median)
   - Detailed confidence and cluster statistics
 
 All GPU work happens here. Results are returned as list[ChunkResult]
@@ -53,6 +53,7 @@ def run_dense_correlation(
     hop_s: float,
     min_match: float,
     silence_threshold_db: float = -60.0,
+    outlier_threshold_ms: float = 50.0,
     start_pct: float = 5.0,
     end_pct: float = 95.0,
     log: Callable[[str], None] | None = None,
@@ -69,6 +70,8 @@ def run_dense_correlation(
         hop_s: Hop (step) between windows in seconds.
         min_match: Minimum confidence threshold for acceptance (0-100).
         silence_threshold_db: RMS threshold below which a window is silence.
+        outlier_threshold_ms: Distance from median (ms) beyond which a window
+            is considered an outlier. Used in summary logging.
         start_pct: Start of scan range as percentage of duration (0-100).
         end_pct: End of scan range as percentage of duration (0-100).
         log: Logging callback.
@@ -164,7 +167,7 @@ def run_dense_correlation(
     )
 
     # ── Summary ──
-    _log_dense_summary(results, silence_count, method.name, log)
+    _log_dense_summary(results, silence_count, method.name, outlier_threshold_ms, log)
 
     return results
 
@@ -176,6 +179,7 @@ def _log_dense_summary(
     results: list[ChunkResult],
     silence_count: int,
     method_name: str,
+    outlier_threshold_ms: float,
     log: Callable[[str], None],
 ) -> None:
     """
@@ -202,8 +206,8 @@ def _log_dense_summary(
     min_delay = float(np.min(delays))
     max_delay = float(np.max(delays))
 
-    # Outlier detection (>50ms from median)
-    outlier_mask = np.abs(delays - median_delay) > 50.0
+    # Outlier detection
+    outlier_mask = np.abs(delays - median_delay) > outlier_threshold_ms
     outlier_count = int(np.sum(outlier_mask))
     outlier_pct = outlier_count / len(accepted) * 100
 
@@ -231,7 +235,7 @@ def _log_dense_summary(
     # Outlier analysis
     log(
         f"  Outliers:    {outlier_count}/{len(accepted)} "
-        f"({outlier_pct:.1f}%) windows >50ms from median"
+        f"({outlier_pct:.1f}%) windows >{outlier_threshold_ms:.0f}ms from median"
     )
     if outlier_count > 0 and len(inlier_delays) > 1:
         log(f"  Inlier std:  {inlier_std:.3f} ms ({len(inlier_delays)} windows)")

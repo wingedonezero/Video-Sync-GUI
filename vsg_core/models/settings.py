@@ -111,6 +111,7 @@ class AppSettings(BaseModel):
     dense_window_s: float = 10.0
     dense_hop_s: float = 2.0
     dense_silence_threshold_db: float = -60.0
+    dense_outlier_threshold_ms: float = 50.0
     videodiff_error_min: float = 0.0
     videodiff_error_max: float = 100.0
     videodiff_sample_fps: float = 0
