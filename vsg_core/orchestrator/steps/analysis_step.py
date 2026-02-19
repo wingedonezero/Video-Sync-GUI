@@ -426,7 +426,8 @@ class AnalysisStep:
             f"Global Shift: +{shift.shift_ms}ms) ==="
         )
         for source_key, delay_ms in sorted(source_delays.items()):
-            log(f"  - {source_key}: {delay_ms:+d}ms")
+            raw_ms = raw_source_delays[source_key]
+            log(f"  - {source_key}: {delay_ms:+d}ms (raw: {raw_ms:+.6f}ms)")
 
         if sync_mode == "allow_negative" and shift.shift_ms == 0:
             log(

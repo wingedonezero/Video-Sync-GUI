@@ -222,6 +222,9 @@ def _log_dense_summary(
     std_delay = float(np.std(delays))
     min_delay = float(np.min(delays))
     max_delay = float(np.max(delays))
+    # NOTE: raw delay values are full Python floats internally.
+    # Logged here at 3 decimal places for readability; delay_selection
+    # uses full precision for final calculations.
 
     # Outlier detection
     outlier_mask = np.abs(delays - median_delay) > outlier_threshold_ms

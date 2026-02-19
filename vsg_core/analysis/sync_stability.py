@@ -64,7 +64,7 @@ def analyze_sync_stability(
         if log:
             log(
                 f"[Sync Stability] {source_key}: Skipped - only "
-                f"{len(accepted)} chunks (need {min_chunks})"
+                f"{len(accepted)} windows (need {min_chunks})"
             )
         return None
 
@@ -190,7 +190,7 @@ def _analyze_uniform(
             log(f"  - Std dev: {std_delay:.4f}ms")
             log(f"  - Range: {min_delay:.4f}ms to {max_delay:.4f}ms")
             if outliers:
-                log(f"  - Outliers: {len(outliers)} chunk(s)")
+                log(f"  - Outliers: {len(outliers)} window(s)")
                 for o in outliers[:3]:
                     log(
                         f"    * Chunk {o['chunk_index']} (@{o['time_s']:.1f}s): {o['delay_ms']:.4f}ms (deviation: {o['deviation_ms']:+.4f}ms)"

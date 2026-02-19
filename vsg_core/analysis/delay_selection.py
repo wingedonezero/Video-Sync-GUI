@@ -2,7 +2,7 @@
 """
 Delay selection logic for audio correlation analysis.
 
-Pure functions that calculate final delay from correlation chunk results.
+Pure functions that calculate final delay from dense correlation window results.
 All business logic for delay selection modes (Mode, Average, First Stable, etc.).
 """
 
@@ -29,11 +29,15 @@ def find_first_stable_segment_delay(
     override_skip_unstable: bool | None = None,
 ) -> int | float | None:
     """
-    Find the delay from the first stable segment of chunks.
+    Find the delay that dominates the early portion of the file.
 
-    Identifies consecutive accepted chunks that share the same delay value
-    and returns the delay from the first such stable group that meets
-    stability criteria.
+    Looks at the first 25% of accepted windows and finds the most common
+    delay in that region. If it has sufficient agreement (≥60%), uses it.
+    Then averages ALL matching raw values across the whole file for
+    sub-millisecond precision.
+
+    For stepping files, this gives you the first segment's delay even if
+    later segments have different delays.
 
     Args:
         results: List of ChunkResult from correlation.
@@ -41,91 +45,64 @@ def find_first_stable_segment_delay(
         return_raw: If True, return the raw (unrounded) delay value.
         log: Logging function for messages.
         override_min_chunks: Override first_stable_min_chunks (for stepping mode).
-        override_skip_unstable: Override first_stable_skip_unstable (for stepping mode).
+        override_skip_unstable: Override first_stable_skip_unstable (unused, kept for API compat).
 
     Returns:
-        The delay value from the first stable segment, or None if not found.
+        The delay value from the first stable region, or None if not found.
     """
     min_chunks = (
         override_min_chunks
         if override_min_chunks is not None
         else settings.first_stable_min_chunks
     )
-    skip_unstable = (
-        override_skip_unstable
-        if override_skip_unstable is not None
-        else settings.first_stable_skip_unstable
-    )
 
     accepted = [r for r in results if r.accepted]
     if len(accepted) < min_chunks:
         return None
 
-    # Group consecutive chunks with the same delay (within 1ms tolerance)
-    segments: list[dict] = []
-    current_segment = {
-        "delay": accepted[0].delay_ms,
-        "raw_delays": [accepted[0].raw_delay_ms],
-        "count": 1,
-        "start_time": accepted[0].start_s,
-    }
+    # Look at the first 25% of accepted windows
+    early_count = max(min_chunks, len(accepted) // 4)
+    early_windows = accepted[:early_count]
 
-    for i in range(1, len(accepted)):
-        if abs(accepted[i].delay_ms - current_segment["delay"]) <= 1:
-            current_segment["count"] += 1
-            current_segment["raw_delays"].append(accepted[i].raw_delay_ms)
-        else:
-            segments.append(current_segment)
-            current_segment = {
-                "delay": accepted[i].delay_ms,
-                "raw_delays": [accepted[i].raw_delay_ms],
-                "count": 1,
-                "start_time": accepted[i].start_s,
-            }
+    # Find the dominant delay in the early region
+    early_delays = [r.delay_ms for r in early_windows]
+    early_counts = Counter(early_delays)
+    top_delay, top_count = early_counts.most_common(1)[0]
 
-    segments.append(current_segment)
+    # Check agreement: the top delay must represent ≥60% of early windows
+    early_agreement = top_count / len(early_windows) * 100
 
-    def _get_segment_raw(segment: dict) -> float:
-        return sum(segment["raw_delays"]) / len(segment["raw_delays"])
-
-    if skip_unstable:
-        for segment in segments:
-            if segment["count"] >= min_chunks:
-                raw_avg = _get_segment_raw(segment)
-                # CRITICAL: Round the raw average, not first chunk's delay
-                rounded_avg = round(raw_avg)
-                log(
-                    f"[First Stable] Found stable segment: {segment['count']} chunks "
-                    f"at {rounded_avg:+d}ms (raw avg: {raw_avg:.3f}ms, "
-                    f"starting at {segment['start_time']:.1f}s)"
-                )
-                return raw_avg if return_raw else rounded_avg
-
-        log(
-            f"[First Stable] No segment found with minimum {min_chunks} chunks. "
-            f"Largest segment: {max((s['count'] for s in segments), default=0)} chunks"
+    if early_agreement < 60.0:
+        # Try ±1ms cluster (handles sub-ms rounding splits)
+        cluster_count = sum(
+            c for d, c in early_counts.items() if abs(d - top_delay) <= 1
         )
-        return None
+        early_agreement = cluster_count / len(early_windows) * 100
 
-    elif segments:
-        first_segment = segments[0]
-        raw_avg = _get_segment_raw(first_segment)
-        # CRITICAL: Round the raw average, not first chunk's delay
-        rounded_avg = round(raw_avg)
-        if first_segment["count"] < min_chunks:
+        if early_agreement < 60.0:
             log(
-                f"[First Stable] Warning: First segment has only "
-                f"{first_segment['count']} chunks (minimum: {min_chunks}), "
-                f"but using it anyway (skip_unstable=False)"
+                f"[First Stable] No dominant delay in first {len(early_windows)} "
+                f"windows (best: {top_delay:+d}ms at {early_agreement:.0f}% agreement)"
             )
-        log(
-            f"[First Stable] Using first segment: {first_segment['count']} chunks "
-            f"at {rounded_avg:+d}ms (raw avg: {raw_avg:.3f}ms, "
-            f"starting at {first_segment['start_time']:.1f}s)"
-        )
-        return raw_avg if return_raw else rounded_avg
+            return None
 
-    return None
+    # Collect ALL raw values matching this delay (±1ms) across the full file
+    # for maximum precision
+    matching_raw = [
+        r.raw_delay_ms for r in accepted if abs(r.delay_ms - top_delay) <= 1
+    ]
+
+    raw_avg = sum(matching_raw) / len(matching_raw)
+    rounded_avg = round(raw_avg)
+
+    log(
+        f"[First Stable] Dominant delay in first {len(early_windows)} windows: "
+        f"{top_delay:+d}ms ({early_agreement:.0f}% agreement), "
+        f"averaged {len(matching_raw)} matching windows -> "
+        f"{rounded_avg:+d}ms (raw: {raw_avg:+.6f}ms)"
+    )
+
+    return raw_avg if return_raw else rounded_avg
 
 
 def calculate_delay(
@@ -149,10 +126,10 @@ def calculate_delay(
         DelayCalculation with both rounded and raw delays, or None if
         insufficient data.
     """
-    min_accepted_chunks = settings.min_accepted_chunks
+    min_accepted = settings.min_accepted_chunks
 
     accepted = [r for r in results if r.accepted]
-    if len(accepted) < min_accepted_chunks:
+    if len(accepted) < min_accepted:
         log(f"[ERROR] Analysis failed: Only {len(accepted)} windows were accepted.")
         return None
 
@@ -170,15 +147,52 @@ def calculate_delay(
             results, settings, return_raw=True, log=log
         )
         if stable_rounded is None:
-            log("[WARNING] No stable segment found, falling back to mode.")
+            log("[WARNING] No stable early region found, falling back to mode (clustered).")
+            # Fall back to Mode (Clustered) logic
             counts = Counter(delays)
-            winner = counts.most_common(1)[0][0]
-            winner_raw = float(winner)
-            method_label = "mode (fallback)"
+            mode_winner = counts.most_common(1)[0][0]
+            cluster_raw = [
+                r.raw_delay_ms for r in accepted if abs(r.delay_ms - mode_winner) <= 1
+            ]
+            if cluster_raw:
+                winner_raw = sum(cluster_raw) / len(cluster_raw)
+                winner = round(winner_raw)
+            else:
+                winner = mode_winner
+                winner_raw = float(mode_winner)
+            method_label = "mode clustered (first stable fallback)"
         else:
             winner = int(stable_rounded)
             winner_raw = float(stable_raw) if stable_raw is not None else float(winner)
             method_label = "first stable"
+
+    elif delay_mode == "Mode (Early Cluster)":
+        # Early Cluster is an alias for First Stable — same intent,
+        # find the delay from the beginning of the file
+        stable_rounded = find_first_stable_segment_delay(
+            results, settings, return_raw=False, log=log
+        )
+        stable_raw = find_first_stable_segment_delay(
+            results, settings, return_raw=True, log=log
+        )
+        if stable_rounded is None:
+            log("[WARNING] No stable early region found, falling back to mode (clustered).")
+            counts = Counter(delays)
+            mode_winner = counts.most_common(1)[0][0]
+            cluster_raw = [
+                r.raw_delay_ms for r in accepted if abs(r.delay_ms - mode_winner) <= 1
+            ]
+            if cluster_raw:
+                winner_raw = sum(cluster_raw) / len(cluster_raw)
+                winner = round(winner_raw)
+            else:
+                winner = mode_winner
+                winner_raw = float(mode_winner)
+            method_label = "mode clustered (early cluster fallback)"
+        else:
+            winner = int(stable_rounded)
+            winner_raw = float(stable_raw) if stable_raw is not None else float(winner)
+            method_label = "first stable (early cluster)"
 
     elif delay_mode == "Average":
         raw_avg = sum(raw_delays) / len(raw_delays)
@@ -186,7 +200,7 @@ def calculate_delay(
         winner_raw = raw_avg
         log(
             f"[Delay Selection] Average of {len(raw_delays)} raw values: "
-            f"{raw_avg:.3f}ms -> rounded to {winner}ms"
+            f"{raw_avg:+.6f}ms -> rounded to {winner:+d}ms"
         )
         method_label = "average"
 
@@ -207,11 +221,11 @@ def calculate_delay(
             winner_raw = raw_avg
             cluster_counts = Counter(cluster_delays)
             log(
-                f"[Delay Selection] Mode (Clustered): most common = {mode_winner}ms, "
+                f"[Delay Selection] Mode (Clustered): most common = {mode_winner:+d}ms, "
                 f"cluster [{mode_winner - 1} to {mode_winner + 1}] contains "
-                f"{len(cluster_raw_values)}/{len(accepted)} chunks "
+                f"{len(cluster_raw_values)}/{len(accepted)} windows "
                 f"(breakdown: {dict(cluster_counts)}), "
-                f"raw avg: {raw_avg:.3f}ms -> rounded to {winner}ms"
+                f"raw avg: {raw_avg:+.6f}ms -> rounded to {winner:+d}ms"
             )
             method_label = "mode (clustered)"
         else:
@@ -219,86 +233,9 @@ def calculate_delay(
             winner_raw = float(mode_winner)
             log(
                 f"[Delay Selection] Mode (Clustered): fallback to simple "
-                f"mode = {winner}ms"
+                f"mode = {winner:+d}ms"
             )
             method_label = "mode (clustered fallback)"
-
-    elif delay_mode == "Mode (Early Cluster)":
-        early_window = settings.early_cluster_window
-        early_threshold = settings.early_cluster_threshold
-
-        counts = Counter(delays)
-        cluster_info: dict[int, dict] = {}
-
-        for delay_val in counts:
-            cluster_raw_vals: list[float] = []
-            early_count = 0
-            first_chunk_idx: int | None = None
-
-            for idx, r in enumerate(accepted):
-                if abs(r.delay_ms - delay_val) <= 1:
-                    cluster_raw_vals.append(r.raw_delay_ms)
-                    if idx < early_window:
-                        early_count += 1
-                    if first_chunk_idx is None:
-                        first_chunk_idx = idx
-
-            cluster_info[delay_val] = {
-                "raw_values": cluster_raw_vals,
-                "early_count": early_count,
-                "first_chunk_idx": first_chunk_idx,
-                "total_count": len(cluster_raw_vals),
-            }
-
-        early_stable_clusters = [
-            (delay_val, info)
-            for delay_val, info in cluster_info.items()
-            if info["early_count"] >= early_threshold
-        ]
-
-        if early_stable_clusters:
-            early_stable_clusters.sort(key=lambda x: x[1]["first_chunk_idx"])
-            _winner_delay, winner_info = early_stable_clusters[0]
-
-            raw_avg = sum(winner_info["raw_values"]) / len(winner_info["raw_values"])
-            winner = round(raw_avg)
-            winner_raw = raw_avg
-
-            log(
-                f"[Delay Selection] Mode (Early Cluster): found "
-                f"{len(early_stable_clusters)} early stable cluster(s), "
-                f"selected cluster at {winner}ms with "
-                f"{winner_info['early_count']}/{early_window} early chunks, "
-                f"total {winner_info['total_count']} chunks, "
-                f"first appears at chunk {winner_info['first_chunk_idx'] + 1}, "
-                f"raw avg: {raw_avg:.3f}ms -> rounded to {winner}ms"
-            )
-            method_label = "mode (early cluster)"
-        else:
-            mode_winner = counts.most_common(1)[0][0]
-            fb_raw_values = [
-                r.raw_delay_ms for r in accepted if abs(r.delay_ms - mode_winner) <= 1
-            ]
-
-            if fb_raw_values:
-                raw_avg = sum(fb_raw_values) / len(fb_raw_values)
-                winner = round(raw_avg)
-                winner_raw = raw_avg
-                log(
-                    f"[Delay Selection] Mode (Early Cluster): no cluster met "
-                    f"early threshold ({early_threshold} in first "
-                    f"{early_window}), falling back to Mode (Clustered): "
-                    f"{winner}ms (raw avg: {raw_avg:.3f}ms)"
-                )
-                method_label = "mode (early cluster - clustered fallback)"
-            else:
-                winner = mode_winner
-                winner_raw = float(mode_winner)
-                log(
-                    f"[Delay Selection] Mode (Early Cluster): fallback to "
-                    f"simple mode = {winner}ms"
-                )
-                method_label = "mode (early cluster - simple fallback)"
 
     else:  # Mode (Most Common) - default
         counts = Counter(delays)
@@ -308,9 +245,17 @@ def calculate_delay(
             winner_raw = sum(matching_raw_values) / len(matching_raw_values)
         else:
             winner_raw = float(winner)
+        log(
+            f"[Delay Selection] Mode (Most Common): {winner:+d}ms "
+            f"({counts[winner]}/{len(accepted)} windows), "
+            f"raw avg: {winner_raw:+.6f}ms"
+        )
         method_label = "mode"
 
-    log(f"{role_tag.capitalize()} delay determined: {winner:+d} ms ({method_label}).")
+    log(
+        f"{role_tag.capitalize()} delay determined: "
+        f"{winner:+d}ms (raw: {winner_raw:+.6f}ms) [{method_label}]"
+    )
 
     return DelayCalculation(
         rounded_ms=winner,

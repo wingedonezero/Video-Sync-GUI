@@ -115,12 +115,12 @@ def calculate_delay_chain(
     # Log the delay calculation chain for transparency
     log(f"[Delay Calculation] {source_key} delay chain:")
     log(
-        f"[Delay Calculation]   Correlation delay: {correlation_delay_raw:+.3f}ms (raw) → {correlation_delay_ms:+d}ms (rounded)"
+        f"[Delay Calculation]   Correlation delay: {correlation_delay_raw:+.6f}ms (raw) → {correlation_delay_ms:+d}ms (rounded)"
     )
     if container_delay_ms != 0:
-        log(f"[Delay Calculation]   + Container delay:  {container_delay_ms:+.3f}ms")
+        log(f"[Delay Calculation]   + Container delay:  {container_delay_ms:+.6f}ms")
         log(
-            f"[Delay Calculation]   = Final delay:      {final_delay_raw:+.3f}ms (raw) → {final_delay_ms:+d}ms (rounded)"
+            f"[Delay Calculation]   = Final delay:      {final_delay_raw:+.6f}ms (raw) → {final_delay_ms:+d}ms (rounded)"
         )
 
     return final_delay_ms, final_delay_raw
