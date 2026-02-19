@@ -222,11 +222,10 @@ class AppSettings(BaseModel):
     # Delay Selection Settings
     delay_selection_mode: DelaySelectionModeStr = "Mode (Most Common)"
     delay_selection_mode_source_separated: DelaySelectionModeStr = "Mode (Clustered)"
-    min_accepted_chunks: int = 3
-    first_stable_min_chunks: int = 3
-    first_stable_skip_unstable: bool = True
-    early_cluster_window: int = 10
-    early_cluster_threshold: int = 5
+    min_accepted_windows: int = 3
+    first_stable_early_pct: float = 25.0
+    early_cluster_early_pct: float = 15.0
+    early_cluster_min_presence_pct: float = 3.0
 
     # Multi-Correlation Comparison
     multi_correlation_enabled: bool = False

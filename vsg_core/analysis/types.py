@@ -42,8 +42,8 @@ class DelayCalculation:
     rounded_ms: int  # Rounded delay for mkvmerge (integer milliseconds)
     raw_ms: float  # Unrounded delay for subtitle precision (float milliseconds)
     selection_method: str  # "mode", "average", "first stable", etc.
-    accepted_chunks: int  # Number of chunks that passed quality threshold
-    total_chunks: int  # Total number of chunks analyzed
+    accepted_windows: int  # Number of windows that passed quality threshold
+    total_windows: int  # Total number of windows analyzed
 
 
 @dataclass(frozen=True, slots=True)

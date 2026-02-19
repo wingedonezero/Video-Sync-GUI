@@ -507,8 +507,8 @@ class AnalysisStep:
                 final_raw_ms=final_delay_raw,
                 final_rounded_ms=final_delay_ms,
                 selection_method="VideoDiff",
-                accepted_chunks=vd_result.inlier_count,
-                total_chunks=vd_result.matched_frames,
+                accepted_windows=vd_result.inlier_count,
+                total_windows=vd_result.matched_frames,
             )
 
     def _run_audio_analysis(
@@ -680,7 +680,7 @@ class AnalysisStep:
 
             if delay_calc is None:
                 accepted_count = len([r for r in results if r.accepted])
-                min_required = settings.min_accepted_chunks
+                min_required = settings.min_accepted_windows
                 total_windows = len(results)
 
                 raise RuntimeError(
@@ -759,8 +759,8 @@ class AnalysisStep:
                 final_raw_ms=final_delay_raw,
                 final_rounded_ms=final_delay_ms,
                 selection_method=effective_delay_mode,
-                accepted_chunks=accepted_count,
-                total_chunks=len(results),
+                accepted_windows=accepted_count,
+                total_windows=len(results),
             )
 
         # --- Handle drift detection flags ---
@@ -1065,16 +1065,12 @@ class AnalysisStep:
                     settings,
                     return_raw=False,
                     log=log,
-                    override_min_chunks=settings.stepping_first_stable_min_chunks,
-                    override_skip_unstable=settings.stepping_first_stable_skip_unstable,
                 )
                 first_segment_delay_raw = find_first_stable_segment_delay(
                     results,
                     settings,
                     return_raw=True,
                     log=log,
-                    override_min_chunks=settings.stepping_first_stable_min_chunks,
-                    override_skip_unstable=settings.stepping_first_stable_skip_unstable,
                 )
                 if first_segment_delay is not None:
                     log(f"[Stepping Detected] Found stepping in {source_key}")

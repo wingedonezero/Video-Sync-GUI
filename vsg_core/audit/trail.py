@@ -255,8 +255,8 @@ class AuditTrail:
         final_raw_ms: float,
         final_rounded_ms: int,
         selection_method: str,
-        accepted_chunks: int,
-        total_chunks: int,
+        accepted_windows: int,
+        total_windows: int,
     ) -> None:
         """
         Record the delay calculation chain for a source.
@@ -270,8 +270,8 @@ class AuditTrail:
                     "raw_ms": round(correlation_raw_ms, 6),
                     "rounded_ms": correlation_rounded_ms,
                     "selection_method": selection_method,
-                    "accepted_chunks": accepted_chunks,
-                    "total_chunks": total_chunks,
+                    "accepted_windows": accepted_windows,
+                    "total_windows": total_windows,
                 },
                 "container_delay_ms": round(container_delay_ms, 6),
                 "before_global_shift": {

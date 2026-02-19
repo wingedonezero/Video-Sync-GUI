@@ -428,19 +428,22 @@ class AnalysisTab(QWidget):
                 "Phase Correlation (GCC-PHAT)",
                 "Onset Detection",
                 "GCC-SCOT",
+                "Whitened Cross-Correlation",
                 "Spectrogram Correlation",
                 "VideoDiff",
             ]
         )
         self.widgets["correlation_method"].setToolTip(
-            "The core algorithm used to find the time offset.\n\n"
+            "The correlation algorithm used to find the time offset between audio sources.\n"
+            "Applied to each sliding window independently.\n\n"
             "• SCC - Standard cross-correlation. Precise for identical audio sources.\n"
-            "• GCC-PHAT - Phase correlation. More robust to noise and different mixes.\n"
+            "• GCC-PHAT - Phase correlation. Most robust to noise and different mixes.\n"
             "• Onset Detection - Matches audio transients (hits, speech onsets). Best for\n"
             "  different releases/mixes where waveforms differ but events align.\n"
             "• GCC-SCOT - Smoothed Coherence Transform. Better when one signal is noisier.\n"
+            "• Whitened - GCC with spectral whitening. Similar to PHAT but less aggressive.\n"
             "• Spectrogram - Correlates mel spectrograms. Captures frequency+time structure.\n"
-            "• VideoDiff - External tool for video-based sync."
+            "• VideoDiff - External tool for video-based sync (not GPU-accelerated)."
         )
         self.widgets["correlation_method_source_separated"] = QComboBox()
         self.widgets["correlation_method_source_separated"].addItems(
@@ -449,11 +452,19 @@ class AnalysisTab(QWidget):
                 "Phase Correlation (GCC-PHAT)",
                 "Onset Detection",
                 "GCC-SCOT",
+                "Whitened Cross-Correlation",
                 "Spectrogram Correlation",
             ]
         )
         self.widgets["correlation_method_source_separated"].setToolTip(
-            "Correlation method used ONLY for sources that undergo source separation.\n\nThis method is automatically applied when:\n• Source Separation is enabled (Instrumental or Vocals)\n• AND the comparison matches 'Apply To' setting\n\nRecommended: Phase Correlation (GCC-PHAT)\n• More robust to noise and artifacts from stem separation\n• Works well with Demucs/RoFormer separated audio\n• Less sensitive to spectral differences between stems\n\nNote: All other settings (peak fitting, SOXR, filtering, etc.) remain unchanged.\nNote: Ignored when Multi-Correlation Comparison is enabled (uses checkboxes instead)."
+            "Correlation method used ONLY for sources that undergo source separation.\n\n"
+            "This method is automatically applied when:\n"
+            "• Source Separation is enabled (Instrumental or Vocals)\n"
+            "• AND the comparison matches 'Apply To' setting\n\n"
+            "Recommended: Phase Correlation (GCC-PHAT)\n"
+            "• More robust to noise and artifacts from stem separation\n"
+            "• Works well with Demucs/RoFormer separated audio\n\n"
+            "Note: Ignored when Multi-Correlation Comparison is enabled."
         )
         # Dense sliding window settings
         self.widgets["dense_window_s"] = QDoubleSpinBox()
@@ -461,8 +472,10 @@ class AnalysisTab(QWidget):
         self.widgets["dense_window_s"].setDecimals(1)
         self.widgets["dense_window_s"].setSuffix(" s")
         self.widgets["dense_window_s"].setToolTip(
-            "Duration of each analysis window in seconds.\n"
-            "Larger windows are more robust but slower and less precise for stepping detection.\n"
+            "Duration of each analysis window in seconds.\n\n"
+            "The full file is analyzed using overlapping windows of this size.\n"
+            "Larger windows = more robust per-window results but coarser time resolution.\n"
+            "Smaller windows = finer resolution but may be less reliable individually.\n\n"
             "Must be larger than the expected delay between sources.\n"
             "Default: 10s"
         )
@@ -471,8 +484,10 @@ class AnalysisTab(QWidget):
         self.widgets["dense_hop_s"].setDecimals(1)
         self.widgets["dense_hop_s"].setSuffix(" s")
         self.widgets["dense_hop_s"].setToolTip(
-            "Step size between consecutive windows in seconds.\n"
-            "Smaller hops give finer resolution but process more windows.\n"
+            "Step size between consecutive analysis windows in seconds.\n\n"
+            "Controls how densely the file is sampled. A 23-minute file with 2s hop\n"
+            "produces ~650 windows. Smaller hops = more windows = finer resolution\n"
+            "but slower processing.\n\n"
             "Default: 2s"
         )
         self.widgets["dense_silence_threshold_db"] = QDoubleSpinBox()
@@ -480,8 +495,10 @@ class AnalysisTab(QWidget):
         self.widgets["dense_silence_threshold_db"].setDecimals(1)
         self.widgets["dense_silence_threshold_db"].setSuffix(" dB")
         self.widgets["dense_silence_threshold_db"].setToolTip(
-            "RMS energy threshold below which a window is considered silent and skipped.\n"
-            "Prevents correlation on quiet sections that produce unreliable results.\n"
+            "RMS energy threshold below which a window is considered silent and skipped.\n\n"
+            "Silent windows produce unreliable correlation results.\n"
+            "Lower values = only skip near-total silence.\n"
+            "Higher values = also skip quiet passages.\n\n"
             "Default: -60 dB"
         )
         self.widgets["dense_outlier_threshold_ms"] = QDoubleSpinBox()
@@ -489,8 +506,9 @@ class AnalysisTab(QWidget):
         self.widgets["dense_outlier_threshold_ms"].setDecimals(1)
         self.widgets["dense_outlier_threshold_ms"].setSuffix(" ms")
         self.widgets["dense_outlier_threshold_ms"].setToolTip(
-            "Distance from median delay beyond which a window is considered an outlier.\n"
-            "Used in summary statistics. Smaller values flag more outliers.\n"
+            "Distance from median delay beyond which a window is flagged as an outlier.\n\n"
+            "Used in summary statistics and logging. Does not remove outliers from\n"
+            "delay selection — it only reports them.\n\n"
             "Default: 50ms"
         )
         self.widgets["min_match_pct"] = QDoubleSpinBox()
@@ -498,7 +516,11 @@ class AnalysisTab(QWidget):
         self.widgets["min_match_pct"].setDecimals(1)
         self.widgets["min_match_pct"].setSingleStep(1.0)
         self.widgets["min_match_pct"].setToolTip(
-            "The minimum correlation confidence for a window to be considered a valid match."
+            "Minimum correlation confidence (PSR) for a window to be accepted.\n\n"
+            "Windows below this threshold are rejected and excluded from delay selection.\n"
+            "Higher values = stricter, fewer accepted windows.\n"
+            "Lower values = more permissive, may include noisy results.\n\n"
+            "Default: 5.0%"
         )
         self.widgets["delay_selection_mode"] = QComboBox()
         self.widgets["delay_selection_mode"].addItems(
@@ -511,26 +533,63 @@ class AnalysisTab(QWidget):
             ]
         )
         self.widgets["delay_selection_mode"].setToolTip(
-            "How to choose the final delay from multiple chunk measurements:\n\n• Mode (Most Common) - Picks the delay that appears most frequently (Default)\n  Best for: Files with stable sync throughout most of the duration\n\n• Mode (Clustered) - Finds most common delay, then averages all chunks within ±1ms\n  Best for: Source-separated audio with sporadic outliers (Demucs, RoFormer)\n  Handles vote-splitting and excludes extreme outliers\n\n• Mode (Early Cluster) - Prioritizes clusters stable in the first N chunks\n  Best for: Files with edits/cuts mid-file where beginning sync is most reliable\n  Uses ±1ms clustering but prefers delays appearing early and stable\n\n• First Stable - Uses the delay from the first stable segment\n  Best for: Files where sync changes mid-file due to authoring issues\n  (Note: For stepping correction, use the Segmented Audio settings instead)\n\n• Average - Calculates the mean of all delay measurements\n  Best for: Files with small variations around a central value"
+            "How to choose the final delay from hundreds of window measurements:\n\n"
+            "• Mode (Most Common) - Picks the delay that appears most frequently. (Default)\n"
+            "  Best for: Files with stable sync throughout.\n\n"
+            "• Mode (Clustered) - Most common delay, then averages all windows within ±1ms.\n"
+            "  Best for: Source-separated audio where rounding splits votes across\n"
+            "  adjacent millisecond values.\n\n"
+            "• Mode (Early Cluster) - Finds the EARLIEST delay cluster with enough\n"
+            "  presence in the early portion of the file.\n"
+            "  Best for: Stepping files where the first segment's delay is the correct one,\n"
+            "  even if later segments have a different (more common) delay.\n\n"
+            "• First Stable - Picks the DOMINANT delay in the early portion of the file.\n"
+            "  Best for: Files where sync changes mid-file. Picks whichever delay\n"
+            "  has the most agreement early on (may not be the very first segment).\n\n"
+            "• Average - Mean of all delay measurements.\n"
+            "  Best for: Files with small jitter around a central value."
         )
-        self.widgets["first_stable_min_chunks"] = QSpinBox()
-        self.widgets["first_stable_min_chunks"].setRange(1, 100)
-        self.widgets["first_stable_min_chunks"].setToolTip(
-            "[First Stable mode only]\n\nMinimum number of consecutive chunks with the same delay required\nfor a segment to be considered 'stable'.\n\nHigher values = more strict (avoids false positives at file start)\nLower values = more lenient (may catch brief stable periods)\n\nRecommended: 3-5 chunks"
+        # First Stable sub-settings
+        self.widgets["first_stable_early_pct"] = QDoubleSpinBox()
+        self.widgets["first_stable_early_pct"].setRange(5.0, 75.0)
+        self.widgets["first_stable_early_pct"].setDecimals(1)
+        self.widgets["first_stable_early_pct"].setSuffix(" %")
+        self.widgets["first_stable_early_pct"].setToolTip(
+            "[First Stable mode]\n\n"
+            "Percentage of accepted windows to examine as the 'early region'.\n\n"
+            "The dominant delay in this region becomes the selected delay,\n"
+            "provided it has >=60% agreement. Scales automatically with file length:\n"
+            "a 23-min file with 650 windows at 25% examines ~162 windows.\n\n"
+            "Lower values = focus on the very start of the file.\n"
+            "Higher values = consider a larger early portion.\n\n"
+            "Default: 25%"
         )
-        self.widgets["first_stable_skip_unstable"] = QCheckBox()
-        self.widgets["first_stable_skip_unstable"].setToolTip(
-            "[First Stable mode only]\n\nWhen enabled, skips segments that don't meet the minimum chunk count\nand looks for the next stable segment.\n\nUseful for avoiding offset beginnings (e.g., 2 chunks at wrong delay\nbefore the rest of the file stabilizes).\n\nWhen disabled, always uses the very first segment regardless of size."
+        # Early Cluster sub-settings
+        self.widgets["early_cluster_early_pct"] = QDoubleSpinBox()
+        self.widgets["early_cluster_early_pct"].setRange(5.0, 75.0)
+        self.widgets["early_cluster_early_pct"].setDecimals(1)
+        self.widgets["early_cluster_early_pct"].setSuffix(" %")
+        self.widgets["early_cluster_early_pct"].setToolTip(
+            "[Early Cluster mode]\n\n"
+            "Percentage of accepted windows to examine as the 'early region'.\n\n"
+            "All delay clusters present in this region are evaluated.\n"
+            "The cluster that appears FIRST in time (with enough presence)\n"
+            "is selected — even if it's not the most common.\n\n"
+            "Default: 15%"
         )
-        self.widgets["early_cluster_window"] = QSpinBox()
-        self.widgets["early_cluster_window"].setRange(1, 100)
-        self.widgets["early_cluster_window"].setToolTip(
-            "[Mode (Early Cluster) only]\n\nNumber of chunks at the beginning of the file to check for early stability.\n\nThe algorithm prioritizes clusters that appear frequently in this window.\n\nRecommended: 10 chunks (checks roughly first 15% of file with default settings)"
-        )
-        self.widgets["early_cluster_threshold"] = QSpinBox()
-        self.widgets["early_cluster_threshold"].setRange(1, 100)
-        self.widgets["early_cluster_threshold"].setToolTip(
-            "[Mode (Early Cluster) only]\n\nMinimum number of chunks a cluster must have within the early window\nto be considered 'early stable'.\n\nLower values = more lenient (may pick transient early delays)\nHigher values = more strict (requires strong early presence)\n\nRecommended: 5 chunks (50% of default window)"
+        self.widgets["early_cluster_min_presence_pct"] = QDoubleSpinBox()
+        self.widgets["early_cluster_min_presence_pct"].setRange(1.0, 50.0)
+        self.widgets["early_cluster_min_presence_pct"].setDecimals(1)
+        self.widgets["early_cluster_min_presence_pct"].setSuffix(" %")
+        self.widgets["early_cluster_min_presence_pct"].setToolTip(
+            "[Early Cluster mode]\n\n"
+            "Minimum presence a delay cluster must have in the early region\n"
+            "to be considered a real segment (not noise).\n\n"
+            "For example, 3% of 100 early windows = at least 3 windows.\n"
+            "Prevents single noisy windows from being picked as the 'earliest cluster'.\n\n"
+            "Lower values = more sensitive to short first segments.\n"
+            "Higher values = require stronger evidence.\n\n"
+            "Default: 3%"
         )
         self.widgets["delay_selection_mode_source_separated"] = QComboBox()
         self.widgets["delay_selection_mode_source_separated"].addItems(
@@ -543,7 +602,12 @@ class AnalysisTab(QWidget):
             ]
         )
         self.widgets["delay_selection_mode_source_separated"].setToolTip(
-            "Delay selection mode used ONLY for sources that undergo source separation.\n\nThis mode is automatically applied when:\n• Source Separation is enabled (Instrumental or Vocals)\n• AND the comparison matches 'Apply To' setting\n\nRecommended: Mode (Clustered)\n• Handles sporadic outliers from stem separation (Demucs, RoFormer)\n• Clusters delays within ±1ms tolerance\n• Excludes extreme outliers that poison averages\n\nNote: Sources without separation still use the normal 'Delay Selection Method'"
+            "Delay selection mode used ONLY for sources that undergo source separation.\n\n"
+            "Recommended: Mode (Clustered)\n"
+            "• Handles sporadic outliers from stem separation (Demucs, RoFormer)\n"
+            "• Clusters delays within ±1ms tolerance\n"
+            "• Excludes extreme outliers that poison averages\n\n"
+            "Note: Sources without separation use the normal 'Delay Selection Method'."
         )
         core_layout.addRow("Correlation Method:", self.widgets["correlation_method"])
         core_layout.addRow(
@@ -569,16 +633,13 @@ class AnalysisTab(QWidget):
             self.widgets["delay_selection_mode_source_separated"],
         )
         core_layout.addRow(
-            "  ↳ Min Chunks for Stability:", self.widgets["first_stable_min_chunks"]
+            "  ↳ Early Region %:", self.widgets["first_stable_early_pct"]
         )
         core_layout.addRow(
-            "  ↳ Skip Unstable Segments:", self.widgets["first_stable_skip_unstable"]
+            "  ↳ Early Region %:", self.widgets["early_cluster_early_pct"]
         )
         core_layout.addRow(
-            "  ↳ Early Cluster Window:", self.widgets["early_cluster_window"]
-        )
-        core_layout.addRow(
-            "  ↳ Early Cluster Threshold:", self.widgets["early_cluster_threshold"]
+            "  ↳ Min Presence %:", self.widgets["early_cluster_min_presence_pct"]
         )
         main_layout.addWidget(core_group)
 
@@ -590,9 +651,9 @@ class AnalysisTab(QWidget):
         )
         self.widgets["multi_correlation_enabled"].setToolTip(
             "When enabled in Analyze Only mode, runs multiple correlation methods on the same\n"
-            "audio chunks and outputs results for each. Useful for comparing method accuracy.\n\n"
+            "audio windows and outputs results for each. Useful for comparing method accuracy.\n\n"
             "• Only affects Analyze Only mode - real jobs use the Correlation Method dropdown\n"
-            "• Audio is decoded once, chunks extracted once, then each method runs on same data\n"
+            "• Audio is decoded once, windows extracted once, then each method runs on same data\n"
             "• Results are labeled by method for easy comparison"
         )
         multi_corr_layout.addWidget(self.widgets["multi_correlation_enabled"])
@@ -746,23 +807,22 @@ class AnalysisTab(QWidget):
             self._update_filter_options
         )
         self.widgets["delay_selection_mode"].currentTextChanged.connect(
-            self._update_first_stable_options
+            self._update_delay_mode_options
         )
         self._update_filter_options(self.widgets["filtering_method"].currentText())
-        self._update_first_stable_options(
+        self._update_delay_mode_options(
             self.widgets["delay_selection_mode"].currentText()
         )
 
     def _update_filter_options(self, text: str):
         self.cutoff_container.setVisible(text == "Low-Pass Filter")
 
-    def _update_first_stable_options(self, text: str):
+    def _update_delay_mode_options(self, text: str):
         is_first_stable = text == "First Stable"
         is_early_cluster = text == "Mode (Early Cluster)"
-        self.widgets["first_stable_min_chunks"].setEnabled(is_first_stable)
-        self.widgets["first_stable_skip_unstable"].setEnabled(is_first_stable)
-        self.widgets["early_cluster_window"].setEnabled(is_early_cluster)
-        self.widgets["early_cluster_threshold"].setEnabled(is_early_cluster)
+        self.widgets["first_stable_early_pct"].setVisible(is_first_stable)
+        self.widgets["early_cluster_early_pct"].setVisible(is_early_cluster)
+        self.widgets["early_cluster_min_presence_pct"].setVisible(is_early_cluster)
 
     def _update_multi_corr_visibility(self, enabled: bool):
         self.multi_corr_methods_container.setVisible(enabled)
