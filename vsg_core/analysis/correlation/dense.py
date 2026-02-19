@@ -57,6 +57,8 @@ def run_dense_correlation(
     start_pct: float = 5.0,
     end_pct: float = 95.0,
     log: Callable[[str], None] | None = None,
+    dbscan_epsilon_ms: float = 20.0,
+    dbscan_min_samples_pct: float = 1.5,
 ) -> list[ChunkResult]:
     """
     Run dense sliding window correlation over the full file.
@@ -75,6 +77,8 @@ def run_dense_correlation(
         start_pct: Start of scan range as percentage of duration (0-100).
         end_pct: End of scan range as percentage of duration (0-100).
         log: Logging callback.
+        dbscan_epsilon_ms: DBSCAN clustering tolerance for summary log.
+        dbscan_min_samples_pct: DBSCAN min samples as % of windows for summary log.
 
     Returns:
         list[ChunkResult] — one per non-silence window, compatible with
@@ -168,7 +172,8 @@ def run_dense_correlation(
 
     # ── Summary ──
     _log_dense_summary(results, silence_count, method.name, outlier_threshold_ms,
-                       duration_s, scan_start / sr, scan_end / sr, log)
+                       duration_s, scan_start / sr, scan_end / sr, log,
+                       dbscan_epsilon_ms, dbscan_min_samples_pct)
 
     return results
 
@@ -196,6 +201,8 @@ def _log_dense_summary(
     scan_start_s: float,
     scan_end_s: float,
     log: Callable[[str], None],
+    dbscan_epsilon_ms: float = 20.0,
+    dbscan_min_samples_pct: float = 1.5,
 ) -> None:
     """
     Log a detailed summary of the dense correlation results.
@@ -325,7 +332,7 @@ def _log_dense_summary(
         log(f"    {int(delay_val):+6d}ms: {count:5d} ({pct:5.1f}%) {bar}")
 
     # Cluster analysis for stepping detection
-    _log_cluster_analysis(accepted, delays, log)
+    _log_cluster_analysis(accepted, delays, log, dbscan_epsilon_ms, dbscan_min_samples_pct)
 
     log(f"{'─' * 70}")
 
@@ -373,6 +380,8 @@ def _log_cluster_analysis(
     accepted: list[ChunkResult],
     delays: np.ndarray,
     log: Callable[[str], None],
+    dbscan_epsilon_ms: float = 20.0,
+    dbscan_min_samples_pct: float = 1.5,
 ) -> None:
     """
     Analyze and log delay clusters for stepping detection.
@@ -380,6 +389,9 @@ def _log_cluster_analysis(
     Uses DBSCAN clustering to identify distinct delay groups and
     their time ranges. This is informational — the actual stepping
     decision is made by diagnose_audio_issue().
+
+    Uses the same DBSCAN parameters as drift_detection to keep
+    the summary log consistent with the actual detection result.
     """
     from sklearn.cluster import DBSCAN
 
@@ -391,8 +403,9 @@ def _log_cluster_analysis(
     if np.std(delays) < 10.0:
         return
 
-    # DBSCAN clustering
-    db = DBSCAN(eps=30.0, min_samples=5).fit(delays.reshape(-1, 1))
+    # DBSCAN clustering — same params as drift_detection.diagnose_audio_issue()
+    min_samples = max(2, int(len(accepted) * dbscan_min_samples_pct / 100.0))
+    db = DBSCAN(eps=dbscan_epsilon_ms, min_samples=min_samples).fit(delays.reshape(-1, 1))
     labels = db.labels_
     unique_labels = sorted(set(labels) - {-1})
 

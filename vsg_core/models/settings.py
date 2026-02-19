@@ -247,7 +247,7 @@ class AppSettings(BaseModel):
 
     # Drift Detection Settings
     detection_dbscan_epsilon_ms: float = 20.0
-    detection_dbscan_min_samples: int = 5
+    detection_dbscan_min_samples_pct: float = 1.5
     drift_detection_r2_threshold: float = 0.90
     drift_detection_r2_threshold_lossless: float = 0.95
     drift_detection_slope_threshold_lossy: float = 0.7
