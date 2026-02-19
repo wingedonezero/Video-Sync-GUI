@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from .run import (
     apply_plan_to_file,
-    generate_edl_from_correlation,
     run_stepping_correction,
 )
 from .types import AudioSegment
@@ -25,6 +24,5 @@ from .types import AudioSegment
 __all__ = [
     "AudioSegment",
     "apply_plan_to_file",
-    "generate_edl_from_correlation",
     "run_stepping_correction",
 ]

@@ -930,6 +930,8 @@ class AnalysisStep:
                 start_pct=settings.scan_start_percentage,
                 end_pct=settings.scan_end_percentage,
                 log=log,
+                dbscan_epsilon_ms=settings.detection_dbscan_epsilon_ms,
+                dbscan_min_samples_pct=settings.detection_dbscan_min_samples_pct,
             )
 
         # Release audio arrays and GPU resources
@@ -984,6 +986,8 @@ class AnalysisStep:
                 start_pct=settings.scan_start_percentage,
                 end_pct=settings.scan_end_percentage,
                 log=log,
+                dbscan_epsilon_ms=settings.detection_dbscan_epsilon_ms,
+                dbscan_min_samples_pct=settings.detection_dbscan_min_samples_pct,
             )
 
         log(
@@ -1011,6 +1015,8 @@ class AnalysisStep:
                 start_pct=settings.scan_start_percentage,
                 end_pct=settings.scan_end_percentage,
                 log=log,
+                dbscan_epsilon_ms=settings.detection_dbscan_epsilon_ms,
+                dbscan_min_samples_pct=settings.detection_dbscan_min_samples_pct,
             )
             all_results[method.name] = results
 

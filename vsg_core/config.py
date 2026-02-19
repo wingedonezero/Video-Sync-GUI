@@ -257,6 +257,7 @@ class AppConfig:
             "stepping_qa_min_accepted_windows",
             "stepping_min_windows_per_cluster",
             "stepping_min_chunks_per_cluster",
+            "detection_dbscan_min_samples",
         ]:
             if dead_key in loaded_settings:
                 del loaded_settings[dead_key]

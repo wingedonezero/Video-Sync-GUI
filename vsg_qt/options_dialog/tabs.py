@@ -989,15 +989,18 @@ class SteppingTab(QWidget):
             "Default: 20ms"
         )
 
-        self.widgets["detection_dbscan_min_samples"] = QSpinBox()
-        self.widgets["detection_dbscan_min_samples"].setRange(2, 20)
-        self.widgets["detection_dbscan_min_samples"].setToolTip(
-            "DBSCAN minimum samples - minimum correlation windows\n"
+        self.widgets["detection_dbscan_min_samples_pct"] = QDoubleSpinBox()
+        self.widgets["detection_dbscan_min_samples_pct"].setRange(0.5, 10.0)
+        self.widgets["detection_dbscan_min_samples_pct"].setDecimals(1)
+        self.widgets["detection_dbscan_min_samples_pct"].setSuffix("%")
+        self.widgets["detection_dbscan_min_samples_pct"].setToolTip(
+            "DBSCAN minimum samples — percentage of correlation windows\n"
             "needed to form a core cluster.\n"
+            "Scales with file length (more windows = higher absolute threshold).\n"
             "Higher = requires more evidence before creating a cluster\n"
             "Lower = more sensitive to brief timing changes\n"
-            "With dense correlation (300-600 windows), use 5+.\n"
-            "Default: 5"
+            "Example: 1.5% of 600 windows = cluster needs at least 9 windows\n"
+            "Default: 1.5%"
         )
 
         self.widgets["stepping_triage_std_dev_ms"] = QSpinBox()
@@ -1048,7 +1051,7 @@ class SteppingTab(QWidget):
             "DBSCAN Epsilon:", self.widgets["detection_dbscan_epsilon_ms"]
         )
         segment_layout.addRow(
-            "DBSCAN Min Samples:", self.widgets["detection_dbscan_min_samples"]
+            "DBSCAN Min Samples:", self.widgets["detection_dbscan_min_samples_pct"]
         )
         segment_layout.addRow(
             "Triage Threshold:", self.widgets["stepping_triage_std_dev_ms"]

@@ -119,6 +119,8 @@ def verify_correction(
             silence_threshold_db=settings.dense_silence_threshold_db,
             outlier_threshold_ms=settings.dense_outlier_threshold_ms,
             log=log,
+            dbscan_epsilon_ms=settings.detection_dbscan_epsilon_ms,
+            dbscan_min_samples_pct=settings.detection_dbscan_min_samples_pct,
         )
 
         # Release GPU resources

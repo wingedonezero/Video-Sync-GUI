@@ -394,9 +394,14 @@ def diagnose_audio_issue(
     # --- Test 2: Check for Stepping (Clustered) ---
     # Use DBSCAN (Density-Based Spatial Clustering) to detect delay clustering
     # eps: Maximum distance (ms) between delays to be in same cluster
-    # min_samples: Minimum delays required to form a cluster (reject noise)
+    # min_samples: Percentage of windows required to form a cluster (reject noise)
     epsilon_ms = settings.detection_dbscan_epsilon_ms
-    min_samples = settings.detection_dbscan_min_samples
+    min_samples_pct = settings.detection_dbscan_min_samples_pct
+    min_samples = max(2, int(len(delays) * min_samples_pct / 100.0))
+    log(
+        f"[DBSCAN] eps={epsilon_ms:.0f}ms, "
+        f"min_samples={min_samples} ({min_samples_pct:.1f}% of {len(delays)} windows)"
+    )
     delays_reshaped = delays.reshape(-1, 1)
     db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_reshaped)
     unique_clusters = {label for label in db.labels_ if label != -1}
