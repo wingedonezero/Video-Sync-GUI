@@ -95,7 +95,7 @@ class DriftDiagnosis:
 class QualityThresholds:
     """Quality validation thresholds for stepping cluster acceptance."""
 
-    min_chunks_per_cluster: int
+    min_windows_per_cluster: int
     min_cluster_percentage: float
     min_cluster_duration_s: float
     min_match_quality_pct: float

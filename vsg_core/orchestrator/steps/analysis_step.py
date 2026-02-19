@@ -641,7 +641,7 @@ class AnalysisStep:
 
         stepping_override_delay: int | None = None
         stepping_override_delay_raw: float | None = None
-        stepping_enabled = settings.segmented_enabled
+        stepping_enabled = settings.stepping_enabled
 
         if isinstance(diagnosis, SteppingDiagnosis):
             stepping_override_delay, stepping_override_delay_raw = (
@@ -680,14 +680,16 @@ class AnalysisStep:
 
             if delay_calc is None:
                 accepted_count = len([r for r in results if r.accepted])
-                min_required = settings.min_accepted_windows
                 total_windows = len(results)
+                min_required = max(
+                    10, int(total_windows * settings.min_accepted_pct / 100.0)
+                )
 
                 raise RuntimeError(
                     f"Analysis failed for {source_key}: Could not determine "
                     f"a reliable delay.\n"
                     f"  - Accepted windows: {accepted_count}\n"
-                    f"  - Minimum required: {min_required}\n"
+                    f"  - Minimum required: {min_required} ({settings.min_accepted_pct:.0f}% of {total_windows})\n"
                     f"  - Total windows scanned: {total_windows}\n"
                     f"  - Match threshold: {settings.min_match_pct}%\n"
                     f"\n"

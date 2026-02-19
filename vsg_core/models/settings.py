@@ -101,7 +101,7 @@ class AppSettings(BaseModel):
     analysis_lang_others: str = ""
     scan_chunk_count: int = 10
     scan_chunk_duration: int = 15
-    min_match_pct: float = 5.0
+    min_match_pct: float = 10.0
 
     # Dense sliding window correlation (GPU)
     dense_window_s: float = 10.0
@@ -159,7 +159,7 @@ class AppSettings(BaseModel):
     # =========================================================================
     # Segmented Audio Correction
     # =========================================================================
-    segmented_enabled: bool = False
+    stepping_enabled: bool = False
 
     # =========================================================================
     # Subtitle Sync Settings
@@ -219,10 +219,10 @@ class AppSettings(BaseModel):
     # Delay Selection Settings
     delay_selection_mode: DelaySelectionModeStr = "Mode (Most Common)"
     delay_selection_mode_source_separated: DelaySelectionModeStr = "Mode (Clustered)"
-    min_accepted_windows: int = 3
-    first_stable_early_pct: float = 25.0
+    min_accepted_pct: float = 5.0
+    first_stable_early_pct: float = 15.0
     early_cluster_early_pct: float = 15.0
-    early_cluster_min_presence_pct: float = 3.0
+    early_cluster_min_presence_pct: float = 10.0
 
     # Multi-Correlation Comparison
     multi_correlation_enabled: bool = False
@@ -247,7 +247,7 @@ class AppSettings(BaseModel):
 
     # Drift Detection Settings
     detection_dbscan_epsilon_ms: float = 20.0
-    detection_dbscan_min_samples: int = 2
+    detection_dbscan_min_samples: int = 5
     drift_detection_r2_threshold: float = 0.90
     drift_detection_r2_threshold_lossless: float = 0.95
     drift_detection_slope_threshold_lossy: float = 0.7
@@ -259,11 +259,9 @@ class AppSettings(BaseModel):
     stepping_adjust_subtitles: bool = True
     stepping_adjust_subtitles_no_audio: bool = True
     stepping_boundary_mode: SteppingBoundaryModeStr = "start"
-    stepping_first_stable_min_chunks: int = 3
-    stepping_first_stable_skip_unstable: bool = True
 
     # Triage (used by subtitle-only EDL path)
-    segment_triage_std_dev_ms: int = 50
+    stepping_triage_std_dev_ms: int = 50
 
     # Boundary Refinement — Silence Detection
     stepping_silence_search_window_s: float = 5.0
@@ -293,7 +291,7 @@ class AppSettings(BaseModel):
     # Filtered Stepping Correction
     stepping_correction_mode: SteppingCorrectionModeStr = "full"
     stepping_quality_mode: SteppingQualityModeStr = "normal"
-    stepping_min_chunks_per_cluster: int = 3
+    stepping_min_windows_per_cluster: int = 10
     stepping_min_cluster_percentage: float = 5.0
     stepping_min_cluster_duration_s: float = 20.0
     stepping_min_match_quality_pct: float = 85.0
@@ -301,17 +299,16 @@ class AppSettings(BaseModel):
     stepping_filtered_fallback: SteppingFilteredFallbackStr = "nearest"
     stepping_diagnostics_verbose: bool = True
 
-    # Segmented Audio QA
-    segmented_qa_threshold: float = 85.0
-    segment_qa_chunk_count: int = 30
-    segment_qa_min_accepted_chunks: int = 28
+    # Stepping QA (post-correction verification)
+    stepping_qa_threshold: float = 85.0
+    stepping_qa_min_accepted_pct: float = 90.0
 
     # =========================================================================
     # Sync Stability Settings
     # =========================================================================
     sync_stability_enabled: bool = True
     sync_stability_variance_threshold: float = 1.0
-    sync_stability_min_chunks: int = 3
+    sync_stability_min_windows: int = 3
     sync_stability_outlier_mode: SyncStabilityOutlierModeStr = "threshold"
     sync_stability_outlier_threshold: float = 1.0
 

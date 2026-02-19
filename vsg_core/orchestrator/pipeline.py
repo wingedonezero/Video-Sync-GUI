@@ -139,7 +139,7 @@ class Orchestrator:
             log(f"[FATAL] Extraction phase failed: {e}")
             raise RuntimeError(f"Extraction phase failed: {e}") from e
 
-        if ctx.settings.segmented_enabled and (
+        if ctx.settings.stepping_enabled and (
             ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags
         ):
             log("--- Advanced Audio Correction Phase ---")
