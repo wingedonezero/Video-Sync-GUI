@@ -1,0 +1,95 @@
+SESSION HANDOFF — GPU Dense Correlation Overhaul
+=================================================
+
+WHAT WE DID
+-----------
+
+1. PORTED ALL CORRELATION METHODS TO GPU (torch/torchaudio)
+   - SCC, GCC-PHAT, GCC-SCOT, GCC-Whiten, Onset Detection, Spectrogram
+   - DTW removed entirely (deleted from registry, method file still exists as orphan)
+   - numpy→torch conversion happens inside each method's find_delay()
+   - torchaudio transforms cached in gpu_backend._transform_cache
+   - Lazy imports of torch/torchaudio inside find_delay() methods
+   - GPU cleanup (cleanup_gpu()) called after each job
+
+2. REPLACED 30-CHUNK WITH DENSE SLIDING WINDOW
+   - Old: 30 evenly spaced chunks → correlate each → pick delay
+   - New: sliding window (10s window, 2s hop) across entire file → 600+ results
+   - dense.py is the ONLY correlation mode now (legacy chunk path deleted)
+   - Settings: dense_window_s=10.0, dense_hop_s=2.0, dense_silence_threshold_db=-60.0
+   - Silence windows auto-skipped
+
+3. REWORKED DELAY SELECTION FOR DENSE DATA
+   - Modes: Mode (Most Common), Mode (Clustered), First Stable, Average
+   - First Stable: finds dominant delay in first 25% of windows
+   - Mode (Clustered): clusters within ±1ms tolerance
+   - All modes work on full dense result set (not 30 chunks)
+
+4. FIXED GCC-PHAT FALSE PEAKS (bandpass filter)
+   - Problem: PHAT/SCOT/Whiten produced false peaks at 0ms and ±10000ms
+   - Root cause: out-of-band frequency bins (<300Hz, >6kHz) have ambiguous phase;
+     PHAT normalizes all bins to unit magnitude, giving these noise bins equal weight
+   - SCC doesn't have this because it preserves energy weighting
+   - Fix: bandpass_mask() in gpu_correlation.py — zeros out bins outside 300Hz-6kHz
+     in frequency domain BEFORE PHAT weighting, then re-zeros after normalization
+   - Applied to all 3 phase-only methods (gcc_phat.py, gcc_scot.py, gcc_whiten.py)
+   - SCC untouched — doesn't need it
+   - Tested: 16 false peaks → 0 on stepping file, real delays unchanged
+   - This is what NGCC-PHAT's SincNet layer does — learns a bandpass filter
+
+5. PSR CONFIDENCE (replaced broken confidence scoring)
+   - Old: normalize_peak_confidence_torch and scot_confidence — gave 100% to everything
+   - New: psr_confidence() — Peak-to-Sidelobe Ratio from radar/sonar literature
+   - PSR = (peak - mean_sidelobes) / std_sidelobes
+   - Thresholds: PSR ≤ 10 → 0%, PSR ≥ 20 → 100% (noise floor ~8-10 at 48kHz)
+   - Note: PSR alone doesn't fix PHAT false peaks (they have PSR ~950 because
+     phase cancellation produces sharp peaks, not noise). Bandpass is the real fix.
+
+6. SYNC STABILITY DEFAULTS FOR DENSE DATA
+   - Old: variance_threshold=0.0, outlier_mode="any" → flagged 0.0005ms as unstable
+   - New: variance_threshold=1.0, outlier_mode="threshold"
+   - Dense produces tiny natural variance across 600+ windows; old settings were
+     calibrated for 30 chunks
+
+FAILED APPROACHES (don't repeat these)
+---------------------------------------
+- max_lag_samples restriction on extract_peak() — clips real delays >10s
+- Valid lag region confidence scoring — PHAT correlation is uniform in valid region
+- PSR alone for false peak rejection — false peaks have PSR ~950 on real audio
+
+FILES CHANGED
+-------------
+- vsg_core/analysis/correlation/gpu_correlation.py — bandpass_mask(), psr_confidence(), extract_peak()
+- vsg_core/analysis/correlation/methods/gcc_phat.py — bandpass + PSR confidence
+- vsg_core/analysis/correlation/methods/gcc_scot.py — bandpass + PSR confidence
+- vsg_core/analysis/correlation/methods/gcc_whiten.py — bandpass + PSR confidence
+- vsg_core/analysis/correlation/methods/scc.py — GPU port only, NOT modified this session
+- vsg_core/analysis/correlation/methods/onset.py — GPU port only
+- vsg_core/analysis/correlation/methods/spectrogram.py — GPU port only
+- vsg_core/analysis/correlation/dense.py — dense sliding window runner
+- vsg_core/analysis/delay_selection.py — reworked for dense data
+- vsg_core/models/settings.py — dense settings, sync stability defaults
+
+DATA FLOW (verified clean)
+--------------------------
+dense.py → list[ChunkResult] (hundreds of windows)
+  → analysis_step.py: diagnosis + delay selection + stability analysis
+    → delays stored in context (raw float + rounded int)
+      → mux_step.py → options_builder.py → --sync 0:{delay_ms:+d}
+        → mkvmerge (integer milliseconds)
+
+Subtitle path uses raw_source_delays_ms (float precision).
+Stepping QA runner (run.py) still uses old chunking — intentionally separate.
+
+STILL TODO
+----------
+- Delete orphaned methods/dtw.py (removed from registry but file still exists)
+- Stepping correction rework (DBSCAN clustering, ruptures for changepoint detection)
+- run.py stepping QA runner still uses old chunk path (separate concern)
+- Investigate whether DBSCAN eps/min_samples need tuning for dense data
+- Consider ruptures library for stepping boundary detection vs current DBSCAN
+
+TEST FILES
+----------
+- Dungeon People: uniform, +145.5ms delay (Source 1/2 in Correlation test files/)
+- Hunter x Hunter: stepping, -956ms/-2057ms/-2658ms/-3259ms (Interlaced/)
