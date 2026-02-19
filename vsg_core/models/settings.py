@@ -291,7 +291,6 @@ class AppSettings(BaseModel):
     # Filtered Stepping Correction
     stepping_correction_mode: SteppingCorrectionModeStr = "full"
     stepping_quality_mode: SteppingQualityModeStr = "normal"
-    stepping_min_windows_per_cluster: int = 10
     stepping_min_cluster_percentage: float = 5.0
     stepping_min_cluster_duration_s: float = 20.0
     stepping_min_match_quality_pct: float = 85.0
