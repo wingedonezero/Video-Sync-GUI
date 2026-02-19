@@ -160,4 +160,9 @@ def run_audio_correlation(
             )
         )
 
+    # Release GPU resources after correlation
+    from .gpu_backend import cleanup_gpu
+
+    cleanup_gpu()
+
     return results

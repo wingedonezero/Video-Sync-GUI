@@ -1,13 +1,11 @@
 # vsg_core/analysis/correlation/methods/onset.py
-"""Onset Detection Envelope Correlation."""
+"""Onset Detection Envelope Correlation — GPU-accelerated via torchaudio."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import numpy as np
-
-from ..confidence import normalize_peak_confidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,8 +17,9 @@ class OnsetDetection:
     then correlates those rather than raw waveforms. More robust to
     different audio mixes since it matches *when things happen*.
 
-    Uses GCC-PHAT on the onset envelopes for the actual correlation.
-    Requires librosa.
+    Uses spectral flux (torchaudio Spectrogram) for onset detection,
+    then GCC-PHAT on the onset envelopes for correlation.
+    Runs entirely on GPU — no librosa dependency.
     """
 
     name: str = "Onset Detection"
@@ -32,41 +31,50 @@ class OnsetDetection:
         tgt_chunk: np.ndarray,
         sr: int,
     ) -> tuple[float, float]:
-        try:
-            import librosa
-        except ImportError:
-            raise ImportError(
-                "Onset Detection requires librosa. Install with: pip install librosa"
-            )
+        import torch
+
+        from ..gpu_backend import get_device, get_spectrogram_transform, to_torch
+        from ..gpu_correlation import extract_peak_feature
 
         hop_length = 512
 
-        # Compute onset strength envelopes
-        ref_env = librosa.onset.onset_strength(
-            y=ref_chunk, sr=sr, hop_length=hop_length
+        device = get_device()
+        ref = to_torch(ref_chunk, device)
+        tgt = to_torch(tgt_chunk, device)
+
+        # Compute magnitude spectrograms using cached torchaudio transform
+        spec_transform = get_spectrogram_transform(
+            n_fft=2048, hop_length=hop_length, power=1.0,
         )
-        tgt_env = librosa.onset.onset_strength(
-            y=tgt_chunk, sr=sr, hop_length=hop_length
+
+        ref_spec = spec_transform(ref)  # shape: (n_freq, n_frames)
+        tgt_spec = spec_transform(tgt)
+
+        # Onset strength via spectral flux: diff along time → ReLU → mean over freq
+        ref_flux = torch.clamp(torch.diff(ref_spec, dim=-1), min=0).mean(dim=0)
+        tgt_flux = torch.clamp(torch.diff(tgt_spec, dim=-1), min=0).mean(dim=0)
+
+        # Normalize envelopes (zero-mean, unit-variance)
+        ref_env = (ref_flux - torch.mean(ref_flux)) / (torch.std(ref_flux) + 1e-9)
+        tgt_env = (tgt_flux - torch.mean(tgt_flux)) / (torch.std(tgt_flux) + 1e-9)
+
+        # Feature-domain parameters
+        frame_sr = sr / hop_length  # ~93.75 Hz
+        # No max_delay restriction for chunked mode — search the full range
+        n_frames = min(len(ref_env), len(tgt_env))
+        max_delay_frames = n_frames // 2
+
+        # GCC-PHAT on onset envelopes
+        n = ref_env.shape[0] + tgt_env.shape[0] - 1
+        n_fft = 1 << (n - 1).bit_length()
+
+        R = torch.fft.rfft(ref_env, n=n_fft)
+        T = torch.fft.rfft(tgt_env, n=n_fft)
+        G = R * torch.conj(T)
+        G_phat = G / (torch.abs(G) + 1e-9)
+        corr = torch.fft.irfft(G_phat, n=n_fft)
+
+        delay_ms, confidence = extract_peak_feature(
+            corr, n_fft, max_delay_frames, frame_sr,
         )
-
-        # Normalize envelopes
-        ref_env = (ref_env - np.mean(ref_env)) / (np.std(ref_env) + 1e-9)
-        tgt_env = (tgt_env - np.mean(tgt_env)) / (np.std(tgt_env) + 1e-9)
-
-        # Cross-correlate using GCC-PHAT
-        envelope_sr = sr / hop_length  # ~93.75 Hz at 48kHz with hop=512
-
-        n = len(ref_env) + len(tgt_env) - 1
-        R = np.fft.fft(ref_env, n)
-        T = np.fft.fft(tgt_env, n)
-        G = R * np.conj(T)
-        G_phat = G / (np.abs(G) + 1e-9)
-        r_phat = np.fft.ifft(G_phat)
-
-        k = np.argmax(np.abs(r_phat))
-        lag_frames = k - n if k > n / 2 else k
-
-        delay_ms = float(lag_frames / envelope_sr * 1000.0)
-        match_confidence = normalize_peak_confidence(r_phat, k)
-
-        return delay_ms, match_confidence
+        return delay_ms, confidence

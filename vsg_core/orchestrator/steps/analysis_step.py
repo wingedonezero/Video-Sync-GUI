@@ -917,44 +917,84 @@ class AnalysisStep:
         # --- 3. Filtering ---
         ref_pcm, tgt_pcm = _apply_filtering(ref_pcm, tgt_pcm, DEFAULT_SR, settings, log)
 
-        # --- 4. Extract chunks ---
-        chunks = extract_chunks(
-            ref_pcm=ref_pcm,
-            tgt_pcm=tgt_pcm,
-            sr=DEFAULT_SR,
-            chunk_count=settings.scan_chunk_count,
-            chunk_duration_s=float(settings.scan_chunk_duration),
-            start_pct=settings.scan_start_percentage,
-            end_pct=settings.scan_end_percentage,
-        )
-
-        # --- 5. Correlate ---
+        # --- 4 & 5. Correlate ---
         min_match = float(settings.min_match_pct)
-        chunk_count = settings.scan_chunk_count
 
-        multi_corr_enabled = settings.multi_correlation_enabled and (not ctx.and_merge)
+        if settings.dense_correlation_enabled:
+            # Dense sliding window correlation (GPU)
+            from vsg_core.analysis.correlation.dense import run_dense_correlation
 
-        if multi_corr_enabled:
-            results = self._run_multi_correlation(
-                chunks=chunks,
-                settings=settings,
-                use_source_separated=use_source_separated_settings,
-                min_match=min_match,
-                chunk_count=chunk_count,
-                log=log,
+            multi_corr_enabled = settings.multi_correlation_enabled and (
+                not ctx.and_merge
             )
+
+            if multi_corr_enabled:
+                results = self._run_dense_multi_correlation(
+                    ref_pcm=ref_pcm,
+                    tgt_pcm=tgt_pcm,
+                    sr=DEFAULT_SR,
+                    settings=settings,
+                    use_source_separated=use_source_separated_settings,
+                    min_match=min_match,
+                    log=log,
+                )
+            else:
+                method = _resolve_method(
+                    settings, source_separated=use_source_separated_settings
+                )
+                results = run_dense_correlation(
+                    ref_pcm=ref_pcm,
+                    tgt_pcm=tgt_pcm,
+                    sr=DEFAULT_SR,
+                    method=method,
+                    window_s=settings.dense_window_s,
+                    hop_s=settings.dense_hop_s,
+                    min_match=min_match,
+                    silence_threshold_db=settings.dense_silence_threshold_db,
+                    start_pct=settings.scan_start_percentage,
+                    end_pct=settings.scan_end_percentage,
+                    log=log,
+                )
         else:
-            method = _resolve_method(
-                settings, source_separated=use_source_separated_settings
+            # Legacy chunk-based correlation
+            chunks = extract_chunks(
+                ref_pcm=ref_pcm,
+                tgt_pcm=tgt_pcm,
+                sr=DEFAULT_SR,
+                chunk_count=settings.scan_chunk_count,
+                chunk_duration_s=float(settings.scan_chunk_duration),
+                start_pct=settings.scan_start_percentage,
+                end_pct=settings.scan_end_percentage,
             )
-            results = _correlate_chunks(
-                chunks, method, DEFAULT_SR, min_match, log, chunk_count
+            chunk_count = settings.scan_chunk_count
+
+            multi_corr_enabled = settings.multi_correlation_enabled and (
+                not ctx.and_merge
             )
 
-        # Release audio arrays immediately
+            if multi_corr_enabled:
+                results = self._run_multi_correlation(
+                    chunks=chunks,
+                    settings=settings,
+                    use_source_separated=use_source_separated_settings,
+                    min_match=min_match,
+                    chunk_count=chunk_count,
+                    log=log,
+                )
+            else:
+                method = _resolve_method(
+                    settings, source_separated=use_source_separated_settings
+                )
+                results = _correlate_chunks(
+                    chunks, method, DEFAULT_SR, min_match, log, chunk_count
+                )
+
+        # Release audio arrays and GPU resources
         del ref_pcm
         del tgt_pcm
-        gc.collect()
+        from vsg_core.analysis.correlation.gpu_backend import cleanup_gpu
+
+        cleanup_gpu()
 
         return results
 
@@ -1026,6 +1066,112 @@ class AnalysisStep:
                 )
             else:
                 log(f"  {method_name}: NO ACCEPTED CHUNKS")
+
+        log(f"{'=' * 70}\n")
+
+        # Use first method's results for actual processing
+        first_method_name = next(iter(all_results.keys()))
+        log(
+            f"[MULTI-CORRELATION] Using '{first_method_name}' results "
+            f"for delay calculation"
+        )
+        return all_results[first_method_name]
+
+    def _run_dense_multi_correlation(
+        self,
+        ref_pcm: np.ndarray,
+        tgt_pcm: np.ndarray,
+        sr: int,
+        settings: AppSettings,
+        use_source_separated: bool,
+        min_match: float,
+        log: Callable[[str], None],
+    ) -> list[ChunkResult]:
+        """
+        Run multiple correlation methods using dense sliding window.
+
+        Each enabled method gets its own dense correlation pass with
+        full summary logging. Returns the primary method's results
+        for actual delay calculation.
+        """
+        from vsg_core.analysis.correlation.dense import run_dense_correlation
+
+        # Find enabled methods
+        enabled_methods: list[CorrelationMethod] = []
+        for method in list_methods():
+            if getattr(settings, method.config_key, False):
+                if isinstance(method, Scc):
+                    method = Scc(peak_fit=settings.audio_peak_fit)
+                enabled_methods.append(method)
+
+        if not enabled_methods:
+            log("[MULTI-CORRELATION] No methods enabled, falling back to single method")
+            method = _resolve_method(settings, source_separated=use_source_separated)
+            return run_dense_correlation(
+                ref_pcm=ref_pcm,
+                tgt_pcm=tgt_pcm,
+                sr=sr,
+                method=method,
+                window_s=settings.dense_window_s,
+                hop_s=settings.dense_hop_s,
+                min_match=min_match,
+                silence_threshold_db=settings.dense_silence_threshold_db,
+                start_pct=settings.scan_start_percentage,
+                end_pct=settings.scan_end_percentage,
+                log=log,
+            )
+
+        log(
+            f"\n[MULTI-CORRELATION] Running {len(enabled_methods)} methods "
+            f"(dense sliding window)"
+        )
+
+        all_results: dict[str, list[ChunkResult]] = {}
+
+        for method in enabled_methods:
+            log(f"\n{'=' * 70}")
+            log(f"  MULTI-CORRELATION: {method.name}")
+            log(f"{'=' * 70}")
+
+            results = run_dense_correlation(
+                ref_pcm=ref_pcm,
+                tgt_pcm=tgt_pcm,
+                sr=sr,
+                method=method,
+                window_s=settings.dense_window_s,
+                hop_s=settings.dense_hop_s,
+                min_match=min_match,
+                silence_threshold_db=settings.dense_silence_threshold_db,
+                start_pct=settings.scan_start_percentage,
+                end_pct=settings.scan_end_percentage,
+                log=log,
+            )
+            all_results[method.name] = results
+
+        # Log comparison summary
+        log(f"\n{'=' * 70}")
+        log("  MULTI-CORRELATION SUMMARY (Dense)")
+        log(f"{'=' * 70}")
+
+        for method_name, method_results in all_results.items():
+            accepted = [r for r in method_results if r.accepted]
+            if accepted:
+                import numpy as _np
+
+                delays = _np.array([r.raw_delay_ms for r in accepted])
+                median_d = float(_np.median(delays))
+                std_d = float(_np.std(delays))
+                avg_match = sum(r.match_pct for r in accepted) / len(accepted)
+                outliers = int(_np.sum(_np.abs(delays - median_d) > 50.0))
+                log(
+                    f"  {method_name}: {median_d:+.3f}ms median | "
+                    f"std={std_d:.3f}ms | "
+                    f"conf={avg_match:.1f}% | "
+                    f"accepted={len(accepted)}/{len(method_results)} | "
+                    f"outliers={outliers}"
+                )
+            else:
+                log(f"  {method_name}: NO ACCEPTED WINDOWS")
 
         log(f"{'=' * 70}\n")
 

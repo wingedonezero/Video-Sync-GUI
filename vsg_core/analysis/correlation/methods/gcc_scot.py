@@ -1,5 +1,5 @@
 # vsg_core/analysis/correlation/methods/gcc_scot.py
-"""GCC-SCOT (Smoothed Coherence Transform)."""
+"""GCC-SCOT (Smoothed Coherence Transform) — GPU-accelerated."""
 
 from __future__ import annotations
 
@@ -26,29 +26,31 @@ class GccScot:
         tgt_chunk: np.ndarray,
         sr: int,
     ) -> tuple[float, float]:
-        n = len(ref_chunk) + len(tgt_chunk) - 1
-        R = np.fft.fft(ref_chunk, n)
-        T = np.fft.fft(tgt_chunk, n)
+        import torch
 
-        # Cross-power spectrum
-        G = R * np.conj(T)
+        from ..gpu_backend import get_device, to_torch
+        from ..gpu_correlation import extract_peak, scot_confidence
+
+        device = get_device()
+        ref = to_torch(ref_chunk, device)
+        tgt = to_torch(tgt_chunk, device)
+
+        n = ref.shape[0] + tgt.shape[0] - 1
+        n_fft = 1 << (n - 1).bit_length()
+
+        R = torch.fft.rfft(ref, n=n_fft)
+        T = torch.fft.rfft(tgt, n=n_fft)
+        G = R * torch.conj(T)
 
         # SCOT weighting: normalize by geometric mean of auto-spectra
-        R_power = np.abs(R) ** 2
-        T_power = np.abs(T) ** 2
-        scot_weight = np.sqrt(R_power * T_power) + 1e-9
+        R_power = torch.abs(R) ** 2
+        T_power = torch.abs(T) ** 2
+        scot_weight = torch.sqrt(R_power * T_power) + 1e-9
 
         G_scot = G / scot_weight
-        r_scot = np.fft.ifft(G_scot)
+        corr = torch.fft.irfft(G_scot, n=n_fft)
 
-        k = np.argmax(np.abs(r_scot))
-        lag_samples = k - n if k > n / 2 else k
-        delay_ms = float(lag_samples / float(sr) * 1000.0)
+        delay_ms, peak_idx = extract_peak(corr, n_fft, sr)
+        confidence = scot_confidence(corr, peak_idx)
 
-        # Match confidence based on peak prominence
-        match_confidence = float(
-            np.abs(r_scot[k]) / (np.mean(np.abs(r_scot)) + 1e-9) * 10
-        )
-        match_confidence = min(100.0, match_confidence)
-
-        return delay_ms, match_confidence
+        return delay_ms, confidence

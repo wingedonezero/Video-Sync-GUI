@@ -1,12 +1,11 @@
 # vsg_core/analysis/correlation/methods/scc.py
-"""Standard Cross-Correlation (SCC) method."""
+"""Standard Cross-Correlation (SCC) method — GPU-accelerated."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.signal import correlate
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,20 +22,31 @@ class Scc:
         tgt_chunk: np.ndarray,
         sr: int,
     ) -> tuple[float, float]:
-        r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
-        t = (tgt_chunk - np.mean(tgt_chunk)) / (np.std(tgt_chunk) + 1e-9)
-        c = correlate(r, t, mode="full", method="fft")
-        k = np.argmax(np.abs(c))
-        lag_samples = float(k - (len(t) - 1))
+        import torch
 
-        if self.peak_fit and 0 < k < len(c) - 1:
-            y1, y2, y3 = np.abs(c[k - 1 : k + 2])
-            delta = 0.5 * (y1 - y3) / (y1 - 2 * y2 + y3)
-            if -1 < delta < 1:
-                lag_samples += delta
+        from ..gpu_backend import get_device, to_torch
+        from ..gpu_correlation import extract_peak, scc_confidence
 
-        raw_delay_s = lag_samples / float(sr)
-        match_pct = (
-            np.abs(c[k]) / (np.sqrt(np.sum(r**2) * np.sum(t**2)) + 1e-9)
-        ) * 100.0
-        return raw_delay_s * 1000.0, match_pct
+        device = get_device()
+        ref = to_torch(ref_chunk, device)
+        tgt = to_torch(tgt_chunk, device)
+
+        # Normalize (zero-mean, unit-variance)
+        ref_n = (ref - torch.mean(ref)) / (torch.std(ref) + 1e-9)
+        tgt_n = (tgt - torch.mean(tgt)) / (torch.std(tgt) + 1e-9)
+
+        # Cross-correlation via FFT
+        n = ref_n.shape[0] + tgt_n.shape[0] - 1
+        n_fft = 1 << (n - 1).bit_length()
+
+        R = torch.fft.rfft(ref_n, n=n_fft)
+        T = torch.fft.rfft(tgt_n, n=n_fft)
+        G = R * torch.conj(T)
+        corr = torch.fft.irfft(G, n=n_fft)
+
+        delay_ms, peak_idx = extract_peak(
+            corr, n_fft, sr, peak_fit=self.peak_fit,
+        )
+        confidence = scc_confidence(corr, peak_idx, ref_n, tgt_n)
+
+        return delay_ms, confidence

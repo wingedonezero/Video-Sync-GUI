@@ -19,6 +19,7 @@ from .registry import (
     list_methods,
     register,
 )
+from .gpu_backend import cleanup_gpu
 from .run import run_audio_correlation
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "CorrelationMethod",
     "apply_bandpass",
     "apply_lowpass",
+    "cleanup_gpu",
     "decode_audio",
     "extract_chunks",
     "get_audio_stream_info",

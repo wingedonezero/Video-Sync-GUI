@@ -105,6 +105,12 @@ class AppSettings(BaseModel):
     scan_chunk_count: int = 10
     scan_chunk_duration: int = 15
     min_match_pct: float = 5.0
+
+    # Dense sliding window correlation (GPU)
+    dense_correlation_enabled: bool = True
+    dense_window_s: float = 10.0
+    dense_hop_s: float = 2.0
+    dense_silence_threshold_db: float = -60.0
     videodiff_error_min: float = 0.0
     videodiff_error_max: float = 100.0
     videodiff_sample_fps: float = 0
