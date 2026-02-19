@@ -29,7 +29,7 @@ class GccScot:
         import torch
 
         from ..gpu_backend import get_device, to_torch
-        from ..gpu_correlation import extract_peak, psr_confidence
+        from ..gpu_correlation import bandpass_mask, extract_peak, psr_confidence
 
         device = get_device()
         ref = to_torch(ref_chunk, device)
@@ -42,12 +42,17 @@ class GccScot:
         T = torch.fft.rfft(tgt, n=n_fft)
         G = R * torch.conj(T)
 
+        # Bandpass 300Hz-6kHz: remove bins with ambiguous phase
+        bp = bandpass_mask(n_fft, sr, device=device)
+        G[~bp] = 0
+
         # SCOT weighting: normalize by geometric mean of auto-spectra
         R_power = torch.abs(R) ** 2
         T_power = torch.abs(T) ** 2
         scot_weight = torch.sqrt(R_power * T_power) + 1e-9
 
         G_scot = G / scot_weight
+        G_scot[~bp] = 0  # Re-zero filtered bins after normalization
         corr = torch.fft.irfft(G_scot, n=n_fft)
 
         delay_ms, peak_idx = extract_peak(corr, n_fft, sr)

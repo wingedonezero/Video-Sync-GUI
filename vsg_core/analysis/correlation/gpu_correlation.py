@@ -12,6 +12,34 @@ from __future__ import annotations
 import torch
 
 
+def bandpass_mask(
+    n_fft: int,
+    sr: int,
+    lo_hz: float = 300.0,
+    hi_hz: float = 6000.0,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """
+    Create a frequency-domain bandpass mask for rfft output.
+
+    Zeroes out bins below lo_hz and above hi_hz to remove frequencies
+    with ambiguous phase that cause false peaks in phase-only methods
+    (GCC-PHAT, GCC-SCOT, GCC-Whiten).
+
+    Args:
+        n_fft: FFT size.
+        sr: Sample rate in Hz.
+        lo_hz: Lower cutoff frequency (default 300 Hz).
+        hi_hz: Upper cutoff frequency (default 6000 Hz).
+        device: Torch device for the output tensor.
+
+    Returns:
+        Boolean tensor of shape (n_fft // 2 + 1,) — True for bins to keep.
+    """
+    freqs = torch.fft.rfftfreq(n_fft, 1.0 / sr, device=device)
+    return (freqs >= lo_hz) & (freqs <= hi_hz)
+
+
 def extract_peak(
     corr: torch.Tensor,
     n_fft: int,
