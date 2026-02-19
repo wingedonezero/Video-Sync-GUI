@@ -69,7 +69,6 @@ CorrelationMethodStr = Literal[
     "Onset Detection",
     "GCC-SCOT",
     "Whitened Cross-Correlation",
-    "DTW (Dynamic Time Warping)",
     "Spectrogram Correlation",
     "VideoDiff",
 ]
@@ -81,7 +80,6 @@ CorrelationMethodSourceSepStr = Literal[
     "Onset Detection",
     "GCC-SCOT",
     "Whitened Cross-Correlation",
-    "DTW (Dynamic Time Warping)",
     "Spectrogram Correlation",
 ]
 

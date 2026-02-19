@@ -107,7 +107,6 @@ class AppSettings(BaseModel):
     min_match_pct: float = 5.0
 
     # Dense sliding window correlation (GPU)
-    dense_correlation_enabled: bool = True
     dense_window_s: float = 10.0
     dense_hop_s: float = 2.0
     dense_silence_threshold_db: float = -60.0
@@ -236,7 +235,6 @@ class AppSettings(BaseModel):
     multi_corr_onset: bool = False
     multi_corr_gcc_scot: bool = False
     multi_corr_gcc_whiten: bool = False
-    multi_corr_dtw: bool = False
     multi_corr_spectrogram: bool = False
 
     # DSP & Filtering
@@ -244,8 +242,8 @@ class AppSettings(BaseModel):
     filter_bandpass_highcut_hz: float = 3400.0
     filter_bandpass_order: int = 5
     filter_lowpass_taps: int = 101
-    scan_start_percentage: float = 5.0
-    scan_end_percentage: float = 95.0
+    scan_start_percentage: float = 0.0
+    scan_end_percentage: float = 100.0
     use_soxr: bool = False
     audio_decode_native: bool = False
     audio_peak_fit: bool = False

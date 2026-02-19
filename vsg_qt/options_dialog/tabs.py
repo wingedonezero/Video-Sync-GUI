@@ -428,13 +428,19 @@ class AnalysisTab(QWidget):
                 "Phase Correlation (GCC-PHAT)",
                 "Onset Detection",
                 "GCC-SCOT",
-                "DTW (Dynamic Time Warping)",
                 "Spectrogram Correlation",
                 "VideoDiff",
             ]
         )
         self.widgets["correlation_method"].setToolTip(
-            "The core algorithm used to find the time offset.\n\n• SCC - Standard cross-correlation. Precise for identical audio sources.\n• GCC-PHAT - Phase correlation. More robust to noise and different mixes.\n• Onset Detection - Matches audio transients (hits, speech onsets). Best for\n  different releases/mixes where waveforms differ but events align.\n• GCC-SCOT - Smoothed Coherence Transform. Better when one signal is noisier.\n• DTW - Dynamic Time Warping on MFCC features. Handles tempo variations.\n• Spectrogram - Correlates mel spectrograms. Captures frequency+time structure.\n• VideoDiff - External tool for video-based sync."
+            "The core algorithm used to find the time offset.\n\n"
+            "• SCC - Standard cross-correlation. Precise for identical audio sources.\n"
+            "• GCC-PHAT - Phase correlation. More robust to noise and different mixes.\n"
+            "• Onset Detection - Matches audio transients (hits, speech onsets). Best for\n"
+            "  different releases/mixes where waveforms differ but events align.\n"
+            "• GCC-SCOT - Smoothed Coherence Transform. Better when one signal is noisier.\n"
+            "• Spectrogram - Correlates mel spectrograms. Captures frequency+time structure.\n"
+            "• VideoDiff - External tool for video-based sync."
         )
         self.widgets["correlation_method_source_separated"] = QComboBox()
         self.widgets["correlation_method_source_separated"].addItems(
@@ -443,34 +449,56 @@ class AnalysisTab(QWidget):
                 "Phase Correlation (GCC-PHAT)",
                 "Onset Detection",
                 "GCC-SCOT",
-                "DTW (Dynamic Time Warping)",
                 "Spectrogram Correlation",
             ]
         )
         self.widgets["correlation_method_source_separated"].setToolTip(
             "Correlation method used ONLY for sources that undergo source separation.\n\nThis method is automatically applied when:\n• Source Separation is enabled (Instrumental or Vocals)\n• AND the comparison matches 'Apply To' setting\n\nRecommended: Phase Correlation (GCC-PHAT)\n• More robust to noise and artifacts from stem separation\n• Works well with Demucs/RoFormer separated audio\n• Less sensitive to spectral differences between stems\n\nNote: All other settings (peak fitting, SOXR, filtering, etc.) remain unchanged.\nNote: Ignored when Multi-Correlation Comparison is enabled (uses checkboxes instead)."
         )
-        self.widgets["scan_chunk_count"] = QSpinBox()
-        self.widgets["scan_chunk_count"].setRange(1, 100)
-        self.widgets["scan_chunk_count"].setToolTip(
-            "The number of separate audio segments to analyze across the file's duration."
+        # Dense sliding window settings
+        self.widgets["dense_window_s"] = QDoubleSpinBox()
+        self.widgets["dense_window_s"].setRange(2.0, 60.0)
+        self.widgets["dense_window_s"].setDecimals(1)
+        self.widgets["dense_window_s"].setSuffix(" s")
+        self.widgets["dense_window_s"].setToolTip(
+            "Duration of each analysis window in seconds.\n"
+            "Larger windows are more robust but slower and less precise for stepping detection.\n"
+            "Must be larger than the expected delay between sources.\n"
+            "Default: 10s"
         )
-        self.widgets["scan_chunk_duration"] = QSpinBox()
-        self.widgets["scan_chunk_duration"].setRange(1, 120)
-        self.widgets["scan_chunk_duration"].setToolTip(
-            "The length (in seconds) of each individual audio segment to be analyzed."
+        self.widgets["dense_hop_s"] = QDoubleSpinBox()
+        self.widgets["dense_hop_s"].setRange(0.5, 30.0)
+        self.widgets["dense_hop_s"].setDecimals(1)
+        self.widgets["dense_hop_s"].setSuffix(" s")
+        self.widgets["dense_hop_s"].setToolTip(
+            "Step size between consecutive windows in seconds.\n"
+            "Smaller hops give finer resolution but process more windows.\n"
+            "Default: 2s"
+        )
+        self.widgets["dense_silence_threshold_db"] = QDoubleSpinBox()
+        self.widgets["dense_silence_threshold_db"].setRange(-120.0, 0.0)
+        self.widgets["dense_silence_threshold_db"].setDecimals(1)
+        self.widgets["dense_silence_threshold_db"].setSuffix(" dB")
+        self.widgets["dense_silence_threshold_db"].setToolTip(
+            "RMS energy threshold below which a window is considered silent and skipped.\n"
+            "Prevents correlation on quiet sections that produce unreliable results.\n"
+            "Default: -60 dB"
+        )
+        self.widgets["dense_outlier_threshold_ms"] = QDoubleSpinBox()
+        self.widgets["dense_outlier_threshold_ms"].setRange(5.0, 500.0)
+        self.widgets["dense_outlier_threshold_ms"].setDecimals(1)
+        self.widgets["dense_outlier_threshold_ms"].setSuffix(" ms")
+        self.widgets["dense_outlier_threshold_ms"].setToolTip(
+            "Distance from median delay beyond which a window is considered an outlier.\n"
+            "Used in summary statistics. Smaller values flag more outliers.\n"
+            "Default: 50ms"
         )
         self.widgets["min_match_pct"] = QDoubleSpinBox()
         self.widgets["min_match_pct"].setRange(0.1, 100.0)
         self.widgets["min_match_pct"].setDecimals(1)
         self.widgets["min_match_pct"].setSingleStep(1.0)
         self.widgets["min_match_pct"].setToolTip(
-            "The minimum correlation score for an audio chunk to be considered a valid match."
-        )
-        self.widgets["min_accepted_chunks"] = QSpinBox()
-        self.widgets["min_accepted_chunks"].setRange(1, 100)
-        self.widgets["min_accepted_chunks"].setToolTip(
-            "The minimum number of valid chunks required for the analysis to be considered successful."
+            "The minimum correlation confidence for a window to be considered a valid match."
         )
         self.widgets["delay_selection_mode"] = QComboBox()
         self.widgets["delay_selection_mode"].addItems(
@@ -522,15 +550,16 @@ class AnalysisTab(QWidget):
             "Correlation (Source-Separated):",
             self.widgets["correlation_method_source_separated"],
         )
-        core_layout.addRow("Number of Chunks:", self.widgets["scan_chunk_count"])
+        core_layout.addRow("Window Duration:", self.widgets["dense_window_s"])
+        core_layout.addRow("Hop (Step) Size:", self.widgets["dense_hop_s"])
         core_layout.addRow(
-            "Duration of Chunks (s):", self.widgets["scan_chunk_duration"]
+            "Silence Threshold:", self.widgets["dense_silence_threshold_db"]
+        )
+        core_layout.addRow(
+            "Outlier Threshold:", self.widgets["dense_outlier_threshold_ms"]
         )
         core_layout.addRow(
             "Minimum Match Confidence (%):", self.widgets["min_match_pct"]
-        )
-        core_layout.addRow(
-            "Minimum Accepted Chunks:", self.widgets["min_accepted_chunks"]
         )
         core_layout.addRow(
             "Delay Selection Method:", self.widgets["delay_selection_mode"]
@@ -577,14 +606,12 @@ class AnalysisTab(QWidget):
         self.widgets["multi_corr_onset"] = QCheckBox("Onset Detection")
         self.widgets["multi_corr_gcc_scot"] = QCheckBox("GCC-SCOT")
         self.widgets["multi_corr_gcc_whiten"] = QCheckBox("Whitened Cross-Correlation")
-        self.widgets["multi_corr_dtw"] = QCheckBox("DTW (Dynamic Time Warping)")
         self.widgets["multi_corr_spectrogram"] = QCheckBox("Spectrogram Correlation")
         methods_layout.addWidget(self.widgets["multi_corr_scc"])
         methods_layout.addWidget(self.widgets["multi_corr_gcc_phat"])
         methods_layout.addWidget(self.widgets["multi_corr_onset"])
         methods_layout.addWidget(self.widgets["multi_corr_gcc_scot"])
         methods_layout.addWidget(self.widgets["multi_corr_gcc_whiten"])
-        methods_layout.addWidget(self.widgets["multi_corr_dtw"])
         methods_layout.addWidget(self.widgets["multi_corr_spectrogram"])
         multi_corr_layout.addWidget(self.multi_corr_methods_container)
         main_layout.addWidget(multi_corr_group)

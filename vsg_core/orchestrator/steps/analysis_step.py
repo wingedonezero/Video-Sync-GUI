@@ -15,8 +15,6 @@ NO business logic - delegates to vsg_core/analysis/ modules.
 
 from __future__ import annotations
 
-import gc
-from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,7 +28,6 @@ from vsg_core.analysis.correlation import (
     apply_bandpass,
     apply_lowpass,
     decode_audio,
-    extract_chunks,
     get_audio_stream_info,
     get_method,
     list_methods,
@@ -60,7 +57,6 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from vsg_core.analysis.correlation.chunking import AudioChunk
     from vsg_core.analysis.correlation.registry import CorrelationMethod
     from vsg_core.analysis.types import DiagnosisResult
     from vsg_core.io.runner import CommandRunner
@@ -178,46 +174,6 @@ def _apply_filtering(
             tgt_pcm = apply_lowpass(tgt_pcm, sr, cutoff, taps, log)
 
     return ref_pcm, tgt_pcm
-
-
-def _correlate_chunks(
-    chunks: list[AudioChunk],
-    method: CorrelationMethod,
-    sr: int,
-    min_match: float,
-    log: Callable[[str], None],
-    chunk_count: int,
-) -> list[ChunkResult]:
-    """
-    Run a correlation method on all chunks and return typed results.
-
-    This is the inner loop that was duplicated in both run_audio_correlation
-    and run_multi_correlation. Now exists once, used by both paths.
-    """
-    results: list[ChunkResult] = []
-
-    for chunk in chunks:
-        raw_ms, match = method.find_delay(chunk.ref, chunk.tgt, sr)
-
-        accepted = match >= min_match
-        status_str = "ACCEPTED" if accepted else f"REJECTED (below {min_match:.1f})"
-        log(
-            f"  Chunk {chunk.index}/{chunk_count} (@{chunk.start_s:.1f}s): "
-            f"delay = {int(round(raw_ms)):+d} ms "
-            f"(raw={raw_ms:+.3f}, match={match:.2f}) "
-            f"— {status_str}"
-        )
-        results.append(
-            ChunkResult(
-                delay_ms=int(round(raw_ms)),
-                raw_delay_ms=raw_ms,
-                match_pct=match,
-                start_s=chunk.start_s,
-                accepted=accepted,
-            )
-        )
-
-    return results
 
 
 class AnalysisStep:
@@ -724,14 +680,14 @@ class AnalysisStep:
             if delay_calc is None:
                 accepted_count = len([r for r in results if r.accepted])
                 min_required = settings.min_accepted_chunks
-                total_chunks = len(results)
+                total_windows = len(results)
 
                 raise RuntimeError(
                     f"Analysis failed for {source_key}: Could not determine "
                     f"a reliable delay.\n"
-                    f"  - Accepted chunks: {accepted_count}\n"
+                    f"  - Accepted windows: {accepted_count}\n"
                     f"  - Minimum required: {min_required}\n"
-                    f"  - Total chunks scanned: {total_chunks}\n"
+                    f"  - Total windows scanned: {total_windows}\n"
                     f"  - Match threshold: {settings.min_match_pct}%\n"
                     f"\n"
                     f"Possible causes:\n"
@@ -742,7 +698,7 @@ class AnalysisStep:
                     f"\n"
                     f"Solutions:\n"
                     f'  - Try lowering the "Minimum Match %" threshold\n'
-                    f'  - Increase "Chunk Count" for more sample points\n'
+                    f"  - Try a smaller window size or hop size\n"
                     f"  - Try selecting different audio tracks\n"
                     f"  - Use VideoDiff mode instead of Audio Correlation\n"
                     f"  - Check that both files are from the same video source"
@@ -830,8 +786,8 @@ class AnalysisStep:
         use_source_separated_settings: bool,
     ) -> list[ChunkResult]:
         """
-        Decode audio, apply separation/filtering, extract chunks, and
-        run correlation. Handles both single-method and multi-method paths.
+        Decode audio, apply separation/filtering, and run dense sliding
+        window correlation. Handles both single-method and multi-method paths.
         """
         log = runner._log_message
         settings = ctx.settings
@@ -917,78 +873,43 @@ class AnalysisStep:
         # --- 3. Filtering ---
         ref_pcm, tgt_pcm = _apply_filtering(ref_pcm, tgt_pcm, DEFAULT_SR, settings, log)
 
-        # --- 4 & 5. Correlate ---
+        # --- 4 & 5. Correlate (dense sliding window) ---
         min_match = float(settings.min_match_pct)
 
-        if settings.dense_correlation_enabled:
-            # Dense sliding window correlation (GPU)
-            from vsg_core.analysis.correlation.dense import run_dense_correlation
+        from vsg_core.analysis.correlation.dense import run_dense_correlation
 
-            multi_corr_enabled = settings.multi_correlation_enabled and (
-                not ctx.and_merge
-            )
+        multi_corr_enabled = settings.multi_correlation_enabled and (
+            not ctx.and_merge
+        )
 
-            if multi_corr_enabled:
-                results = self._run_dense_multi_correlation(
-                    ref_pcm=ref_pcm,
-                    tgt_pcm=tgt_pcm,
-                    sr=DEFAULT_SR,
-                    settings=settings,
-                    use_source_separated=use_source_separated_settings,
-                    min_match=min_match,
-                    log=log,
-                )
-            else:
-                method = _resolve_method(
-                    settings, source_separated=use_source_separated_settings
-                )
-                results = run_dense_correlation(
-                    ref_pcm=ref_pcm,
-                    tgt_pcm=tgt_pcm,
-                    sr=DEFAULT_SR,
-                    method=method,
-                    window_s=settings.dense_window_s,
-                    hop_s=settings.dense_hop_s,
-                    min_match=min_match,
-                    silence_threshold_db=settings.dense_silence_threshold_db,
-                    outlier_threshold_ms=settings.dense_outlier_threshold_ms,
-                    start_pct=settings.scan_start_percentage,
-                    end_pct=settings.scan_end_percentage,
-                    log=log,
-                )
-        else:
-            # Legacy chunk-based correlation
-            chunks = extract_chunks(
+        if multi_corr_enabled:
+            results = self._run_dense_multi_correlation(
                 ref_pcm=ref_pcm,
                 tgt_pcm=tgt_pcm,
                 sr=DEFAULT_SR,
-                chunk_count=settings.scan_chunk_count,
-                chunk_duration_s=float(settings.scan_chunk_duration),
+                settings=settings,
+                use_source_separated=use_source_separated_settings,
+                min_match=min_match,
+                log=log,
+            )
+        else:
+            method = _resolve_method(
+                settings, source_separated=use_source_separated_settings
+            )
+            results = run_dense_correlation(
+                ref_pcm=ref_pcm,
+                tgt_pcm=tgt_pcm,
+                sr=DEFAULT_SR,
+                method=method,
+                window_s=settings.dense_window_s,
+                hop_s=settings.dense_hop_s,
+                min_match=min_match,
+                silence_threshold_db=settings.dense_silence_threshold_db,
+                outlier_threshold_ms=settings.dense_outlier_threshold_ms,
                 start_pct=settings.scan_start_percentage,
                 end_pct=settings.scan_end_percentage,
+                log=log,
             )
-            chunk_count = settings.scan_chunk_count
-
-            multi_corr_enabled = settings.multi_correlation_enabled and (
-                not ctx.and_merge
-            )
-
-            if multi_corr_enabled:
-                results = self._run_multi_correlation(
-                    chunks=chunks,
-                    settings=settings,
-                    use_source_separated=use_source_separated_settings,
-                    min_match=min_match,
-                    chunk_count=chunk_count,
-                    log=log,
-                )
-            else:
-                method = _resolve_method(
-                    settings, source_separated=use_source_separated_settings
-                )
-                results = _correlate_chunks(
-                    chunks, method, DEFAULT_SR, min_match, log, chunk_count
-                )
 
         # Release audio arrays and GPU resources
         del ref_pcm
@@ -998,90 +919,6 @@ class AnalysisStep:
         cleanup_gpu()
 
         return results
-
-    def _run_multi_correlation(
-        self,
-        chunks: list[AudioChunk],
-        settings: AppSettings,
-        use_source_separated: bool,
-        min_match: float,
-        chunk_count: int,
-        log: Callable[[str], None],
-    ) -> list[ChunkResult]:
-        """
-        Run multiple correlation methods on the same chunks for comparison.
-
-        Returns the first method's results for actual delay calculation.
-        """
-        # Find enabled methods
-        enabled_methods: list[CorrelationMethod] = []
-        for method in list_methods():
-            if getattr(settings, method.config_key, False):
-                # Handle SCC's peak_fit setting
-                if isinstance(method, Scc):
-                    method = Scc(peak_fit=settings.audio_peak_fit)
-                enabled_methods.append(method)
-
-        if not enabled_methods:
-            log("[MULTI-CORRELATION] No methods enabled, falling back to single method")
-            method = _resolve_method(settings, source_separated=use_source_separated)
-            return _correlate_chunks(
-                chunks, method, DEFAULT_SR, min_match, log, chunk_count
-            )
-
-        log(
-            f"\n[MULTI-CORRELATION] Running {len(enabled_methods)} methods "
-            f"on {len(chunks)} chunks"
-        )
-
-        all_results: dict[str, list[ChunkResult]] = {}
-
-        for method in enabled_methods:
-            log(f"\n{'=' * 70}")
-            log(f"  MULTI-CORRELATION: {method.name}")
-            log(f"{'=' * 70}")
-
-            results = _correlate_chunks(
-                chunks, method, DEFAULT_SR, min_match, log, chunk_count
-            )
-            all_results[method.name] = results
-
-            # Free GPU memory between methods
-            from vsg_core.analysis.correlation.gpu_backend import cleanup_gpu
-
-            cleanup_gpu()
-
-        # Log summary
-        log(f"\n{'=' * 70}")
-        log("  MULTI-CORRELATION SUMMARY")
-        log(f"{'=' * 70}")
-
-        for method_name, method_results in all_results.items():
-            accepted = [r for r in method_results if r.accepted]
-            if accepted:
-                delays = [r.delay_ms for r in accepted]
-                raw_delays = [r.raw_delay_ms for r in accepted]
-                mode_delay = Counter(delays).most_common(1)[0][0]
-                avg_match = sum(r.match_pct for r in accepted) / len(accepted)
-                avg_raw = sum(raw_delays) / len(raw_delays)
-                log(
-                    f"  {method_name}: {mode_delay:+d}ms "
-                    f"(raw avg: {avg_raw:+.3f}ms) | "
-                    f"match: {avg_match:.1f}% | "
-                    f"accepted: {len(accepted)}/{len(method_results)}"
-                )
-            else:
-                log(f"  {method_name}: NO ACCEPTED CHUNKS")
-
-        log(f"{'=' * 70}\n")
-
-        # Use first method's results for actual processing
-        first_method_name = next(iter(all_results.keys()))
-        log(
-            f"[MULTI-CORRELATION] Using '{first_method_name}' results "
-            f"for delay calculation"
-        )
-        return all_results[first_method_name]
 
     def _run_dense_multi_correlation(
         self,

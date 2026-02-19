@@ -153,7 +153,7 @@ def calculate_delay(
 
     accepted = [r for r in results if r.accepted]
     if len(accepted) < min_accepted_chunks:
-        log(f"[ERROR] Analysis failed: Only {len(accepted)} chunks were accepted.")
+        log(f"[ERROR] Analysis failed: Only {len(accepted)} windows were accepted.")
         return None
 
     delays = [r.delay_ms for r in accepted]

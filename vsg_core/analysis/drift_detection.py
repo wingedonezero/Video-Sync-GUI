@@ -264,7 +264,7 @@ def _validate_cluster(
     Validates a single cluster against quality thresholds.
 
     Args:
-        chunk_duration: Duration of each chunk in seconds (from config 'scan_chunk_duration')
+        chunk_duration: Duration of each analysis window in seconds (from config 'dense_window_s')
     """
     # Get cluster data
     cluster_size = len(cluster_members)
@@ -347,8 +347,8 @@ def _filter_clusters(
     invalid_clusters: dict[int, list[int]] = {}
     validation_results: dict[int, ClusterValidation] = {}
 
-    # Get chunk duration from settings (used for cluster duration calculation)
-    chunk_duration = float(settings.scan_chunk_duration)
+    # Get window duration from settings (used for cluster duration calculation)
+    chunk_duration = float(settings.dense_window_s)
 
     for label, members in cluster_members.items():
         validation = _validate_cluster(
