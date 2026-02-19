@@ -274,6 +274,10 @@ class AppSettings(BaseModel):
     stepping_vad_enabled: bool = True
     stepping_vad_aggressiveness: int = 2
 
+    # Boundary Refinement — Transient Detection
+    stepping_transient_detection_enabled: bool = True
+    stepping_transient_threshold: float = 8.0
+
     # Boundary Refinement — Scoring Weights
     stepping_fusion_weight_silence: int = 10
     stepping_fusion_weight_duration: int = 2

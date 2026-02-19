@@ -1328,6 +1328,37 @@ class SteppingTab(QWidget):
             "Duration Weight:", self.widgets["stepping_fusion_weight_duration"]
         )
 
+        # Transient detection settings
+        segment_layout.addRow(QLabel(""))
+        segment_layout.addRow(QLabel("<i>Transient Detection (click prevention):</i>"))
+
+        self.widgets["stepping_transient_detection_enabled"] = QCheckBox(
+            "Avoid transients when picking splice points"
+        )
+        self.widgets["stepping_transient_detection_enabled"].setToolTip(
+            "Scans the search region for sudden amplitude jumps (drum hits,\n"
+            "impacts, consonant onsets) and penalises silence zones that\n"
+            "contain or border a transient. Splicing on a transient causes\n"
+            "audible clicks even inside a 'quiet' zone.\n"
+            "Default: Enabled"
+        )
+
+        self.widgets["stepping_transient_threshold"] = QDoubleSpinBox()
+        self.widgets["stepping_transient_threshold"].setRange(3.0, 20.0)
+        self.widgets["stepping_transient_threshold"].setSuffix(" dB")
+        self.widgets["stepping_transient_threshold"].setDecimals(1)
+        self.widgets["stepping_transient_threshold"].setToolTip(
+            "Minimum frame-to-frame RMS jump (in dB) to flag as a transient.\n"
+            "Lower = more sensitive (catches more transients)\n"
+            "Higher = less sensitive (only catches large impacts)\n"
+            "Default: 8.0 dB"
+        )
+
+        segment_layout.addRow(self.widgets["stepping_transient_detection_enabled"])
+        segment_layout.addRow(
+            "  Transient Threshold:", self.widgets["stepping_transient_threshold"]
+        )
+
         # Video-aware boundary snapping
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<i>Video Keyframe Snapping (optional):</i>"))

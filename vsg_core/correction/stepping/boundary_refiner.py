@@ -5,8 +5,10 @@ Find precise splice points at transition boundaries.
 For each transition zone the EDL builder identified, this module:
   1. Converts to Source 2 timeline (correct subtract convention)
   2. Searches Source 2 PCM for silence (RMS + VAD combined)
-  3. Snaps to the CENTER of the best silence zone
-  4. Optionally aligns to a video keyframe
+  3. Detects transients (drum hits, impacts) to avoid them
+  4. Snaps to the CENTER of the best silence zone
+  5. Nudges to nearest zero-crossing to prevent clicks
+  6. Optionally aligns to a video keyframe
 """
 
 from __future__ import annotations
@@ -94,6 +96,15 @@ def refine_boundaries(
             splice_src2 = src2_mid
             log(f"    ⚠  No silence found — using raw midpoint {splice_src2:.3f}s")
 
+        # --- Zero-crossing snap (prevents waveform discontinuity clicks) ---
+        pre_zc = splice_src2
+        splice_src2 = _snap_to_zero_crossing(src2_pcm, src2_sr, splice_src2)
+        if splice_src2 != pre_zc:
+            log(
+                f"    Zero-crossing snap: {pre_zc:.4f}s -> {splice_src2:.4f}s "
+                f"(shift {(splice_src2 - pre_zc) * 1000:.2f}ms)"
+            )
+
         # --- Optional video snap ---
         snap_meta: dict[str, object] = {}
         if (
@@ -157,9 +168,10 @@ def _find_best_silence(
 ) -> SilenceZone | None:
     """Find the best splice-worthy silence zone near *target_s*.
 
-    Combines RMS energy detection and WebRTC VAD.  The intersection of
-    "RMS quiet" + "VAD non-speech" gives the safest splice candidates.
-    Falls back to RMS-only or VAD-only if the intersection is empty.
+    Combines RMS energy detection, WebRTC VAD, and transient avoidance.
+    The intersection of "RMS quiet" + "VAD non-speech" gives the safest
+    splice candidates.  Falls back to RMS-only or VAD-only if the
+    intersection is empty.
     """
     threshold_db = settings.stepping_silence_threshold_db
     min_duration_ms = settings.stepping_silence_min_duration_ms
@@ -183,16 +195,35 @@ def _find_best_silence(
         )
         log(f"    VAD: {len(vad_gaps)} non-speech gap(s)")
 
+    # Transient detection
+    transient_times: list[float] = []
+    if settings.stepping_transient_detection_enabled:
+        transient_times = detect_transients(
+            pcm,
+            sr,
+            start_s,
+            end_s,
+            threshold_db=settings.stepping_transient_threshold,
+        )
+        if transient_times:
+            log(f"    Transients: {len(transient_times)} detected")
+
     # Try intersection first
     combined = _intersect_zones(rms_zones, vad_gaps) if vad_gaps else []
     log(f"    Combined: {len(combined)} overlapping zone(s)")
 
-    # Pick best from combined → rms → vad (preference order)
+    # Pick best from combined -> rms -> vad (preference order)
     candidates = combined or rms_zones or vad_gaps
     if not candidates:
         return None
 
-    return _pick_best_zone(candidates, target_s, settings, log)
+    return _pick_best_zone(
+        candidates,
+        target_s,
+        settings,
+        log,
+        transient_times=transient_times,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +422,7 @@ def _pick_best_zone(
     target_s: float,
     settings: AppSettings,
     log: Callable[[str], None],
+    transient_times: list[float] | None = None,
 ) -> SilenceZone:
     """Pick the best silence zone from *candidates*.
 
@@ -398,12 +430,14 @@ def _pick_best_zone(
       - Closeness to *target_s* (most important)
       - Duration (longer is safer)
       - Depth (quieter is better)
+      - Transient penalty (zones containing transients score lower)
     """
     threshold_db = settings.stepping_silence_threshold_db
     search_window = settings.stepping_silence_search_window_s
 
     weight_silence = settings.stepping_fusion_weight_silence
     weight_duration = settings.stepping_fusion_weight_duration
+    transients = transient_times or []
 
     best: SilenceZone | None = None
     best_score = -float("inf")
@@ -414,7 +448,19 @@ def _pick_best_zone(
         depth_score = max(0.0, (threshold_db - zone.avg_db) / 10.0) * weight_silence
         dur_score = min(zone.duration_ms / 1000.0, 1.0) * weight_duration
 
-        score = distance_score + depth_score + dur_score
+        # Transient penalty: count transients within or near (±50ms) the zone
+        transient_penalty = 0.0
+        if transients:
+            margin = 0.05  # 50ms safety margin
+            count = sum(
+                1
+                for t in transients
+                if (zone.start_s - margin) <= t <= (zone.end_s + margin)
+            )
+            # Each transient near the zone applies a heavy penalty
+            transient_penalty = count * 3.0
+
+        score = distance_score + depth_score + dur_score - transient_penalty
 
         if score > best_score:
             best_score = score
@@ -422,6 +468,98 @@ def _pick_best_zone(
 
     assert best is not None  # candidates is non-empty
     return best
+
+
+# ---------------------------------------------------------------------------
+# Transient detection
+# ---------------------------------------------------------------------------
+
+
+def detect_transients(
+    pcm: np.ndarray,
+    sr: int,
+    start_s: float,
+    end_s: float,
+    threshold_db: float = 8.0,
+    window_ms: float = 10.0,
+) -> list[float]:
+    """Detect transients (sudden amplitude jumps) in a PCM region.
+
+    Scans with small RMS windows and looks for frame-to-frame dB jumps
+    that exceed *threshold_db*.  Returns the timestamps (in seconds)
+    where transients are detected.
+
+    These are places we do NOT want to splice — drum hits, impacts,
+    consonant onsets — because cutting there produces audible clicks.
+    """
+    start_sample = max(0, int(start_s * sr))
+    end_sample = min(len(pcm), int(end_s * sr))
+    if end_sample <= start_sample:
+        return []
+
+    window_size = max(1, int((window_ms / 1000.0) * sr))
+    transients: list[float] = []
+    prev_db: float | None = None
+
+    for pos in range(start_sample, end_sample - window_size, window_size):
+        window = pcm[pos : pos + window_size]
+        if len(window) == 0:
+            continue
+
+        rms = np.sqrt(np.mean(window.astype(np.float64) ** 2))
+        db = 20.0 * np.log10(rms / 2147483648.0) if rms > 1e-10 else -96.0
+
+        if prev_db is not None:
+            jump = db - prev_db  # positive = sudden louder
+            if jump >= threshold_db:
+                t = pos / sr
+                transients.append(t)
+
+        prev_db = db
+
+    return transients
+
+
+# ---------------------------------------------------------------------------
+# Zero-crossing snap
+# ---------------------------------------------------------------------------
+
+
+def _snap_to_zero_crossing(
+    pcm: np.ndarray,
+    sr: int,
+    target_s: float,
+    search_radius_ms: float = 2.0,
+) -> float:
+    """Nudge *target_s* to the nearest zero crossing in the PCM.
+
+    A zero crossing is where the waveform crosses through zero amplitude.
+    Splicing at a zero crossing avoids the discontinuity that causes an
+    audible click.  Searches ±search_radius_ms around the target.
+
+    Returns the snapped time (seconds), or the original if no crossing
+    is found within the radius.
+    """
+    target_sample = int(target_s * sr)
+    radius_samples = max(1, int((search_radius_ms / 1000.0) * sr))
+
+    lo = max(0, target_sample - radius_samples)
+    hi = min(len(pcm) - 1, target_sample + radius_samples)
+    if hi <= lo:
+        return target_s
+
+    segment = pcm[lo : hi + 1].astype(np.float64)
+    # Sign changes: where consecutive samples have different signs
+    signs = np.sign(segment)
+    crossings = np.where(np.diff(signs) != 0)[0]
+
+    if len(crossings) == 0:
+        return target_s
+
+    # Find crossing closest to target_sample
+    crossing_abs = crossings + lo
+    nearest_idx = crossing_abs[np.argmin(np.abs(crossing_abs - target_sample))]
+    return nearest_idx / sr
 
 
 # ---------------------------------------------------------------------------
