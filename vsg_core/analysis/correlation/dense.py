@@ -4,7 +4,7 @@ Dense sliding window correlation on GPU.
 
 Replaces the old chunk-based approach (30 fixed chunks) with a dense
 sliding window that processes the entire file at high resolution.
-Produces thousands of delay estimates instead of ~30, enabling:
+Produces hundreds of delay estimates instead of ~30, enabling:
   - Precise stepping transition detection (within hop_s precision)
   - Robust outlier rejection (configurable threshold from median)
   - Detailed confidence and cluster statistics
@@ -167,9 +167,21 @@ def run_dense_correlation(
     )
 
     # ── Summary ──
-    _log_dense_summary(results, silence_count, method.name, outlier_threshold_ms, log)
+    _log_dense_summary(results, silence_count, method.name, outlier_threshold_ms,
+                       duration_s, scan_start / sr, scan_end / sr, log)
 
     return results
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _fmt_time(seconds: float) -> str:
+    """Format seconds as M:SS or H:MM:SS."""
+    s = int(round(seconds))
+    if s < 3600:
+        return f"{s // 60}:{s % 60:02d}"
+    return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
 
 
 # ── Summary Logging ───────────────────────────────────────────────────────
@@ -180,13 +192,17 @@ def _log_dense_summary(
     silence_count: int,
     method_name: str,
     outlier_threshold_ms: float,
+    file_duration_s: float,
+    scan_start_s: float,
+    scan_end_s: float,
     log: Callable[[str], None],
 ) -> None:
     """
     Log a detailed summary of the dense correlation results.
 
-    Shows: delay statistics, outlier analysis, confidence breakdown,
-    and cluster analysis if stepping is detected.
+    Shows: classification, coverage, delay statistics, agreement,
+    outlier analysis, confidence tiers, delay distribution, and
+    cluster analysis with transitions if stepping is detected.
     """
     accepted = [r for r in results if r.accepted]
     rejected = [r for r in results if not r.accepted]
@@ -199,6 +215,7 @@ def _log_dense_summary(
     delays = np.array([r.raw_delay_ms for r in accepted])
     confs = np.array([r.match_pct for r in accepted])
     rounded_delays = np.array([r.delay_ms for r in accepted])
+    times = np.array([r.start_s for r in accepted])
 
     median_delay = float(np.median(delays))
     mean_delay = float(np.mean(delays))
@@ -213,11 +230,37 @@ def _log_dense_summary(
 
     # Inlier statistics (without outliers)
     inlier_delays = delays[~outlier_mask]
+    inlier_median = float(np.median(inlier_delays)) if len(inlier_delays) > 0 else median_delay
     inlier_std = float(np.std(inlier_delays)) if len(inlier_delays) > 1 else 0.0
+
+    # Agreement: what % of windows agree on the top rounded delay
+    delay_counts = Counter(rounded_delays.tolist())
+    most_common = delay_counts.most_common()
+    top_delay, top_count = most_common[0]
+    agreement_pct = top_count / len(accepted) * 100
+
+    # Classification
+    classification = _classify_result(
+        std_delay, outlier_pct, agreement_pct, len(accepted), inlier_std,
+    )
+
+    # Coverage
+    time_span_s = float(times[-1] - times[0]) if len(times) > 1 else 0.0
+    coverage_pct = (time_span_s / file_duration_s * 100) if file_duration_s > 0 else 0.0
 
     log(f"\n{'─' * 70}")
     log(f"  CORRELATION SUMMARY — {method_name}")
     log(f"{'─' * 70}")
+
+    # Classification line (scan-at-a-glance)
+    log(f"  Result:      {classification}")
+
+    # File coverage
+    log(
+        f"  Coverage:    {_fmt_time(scan_start_s)} - {_fmt_time(scan_end_s)} "
+        f"({_fmt_time(time_span_s)} analyzed, "
+        f"{coverage_pct:.0f}% of {_fmt_time(file_duration_s)})"
+    )
 
     # Window counts
     log(
@@ -227,60 +270,121 @@ def _log_dense_summary(
         f"({total + silence_count} total)"
     )
 
+    # Agreement
+    log(
+        f"  Agreement:   {agreement_pct:.1f}% at {int(top_delay):+d}ms "
+        f"({top_count}/{len(accepted)} windows)"
+    )
+
     # Delay statistics
-    log(f"  Delay:       {median_delay:+.3f} ms median (rounded: {int(round(median_delay)):+d} ms)")
-    log(f"               {mean_delay:+.3f} ms mean, {std_delay:.3f} ms std")
-    log(f"               [{min_delay:+.3f}, {max_delay:+.3f}] ms range")
+    log(f"  Delay:       {median_delay:+.3f}ms median, "
+        f"{mean_delay:+.3f}ms mean, {std_delay:.3f}ms std")
+    log(f"               [{min_delay:+.3f}, {max_delay:+.3f}]ms range")
+
+    # Inlier statistics
+    if outlier_count > 0:
+        log(
+            f"  Inliers:     {inlier_median:+.3f}ms median, "
+            f"{inlier_std:.3f}ms std "
+            f"({len(inlier_delays)} windows, excluding {outlier_count} outliers)"
+        )
 
     # Outlier analysis
     log(
         f"  Outliers:    {outlier_count}/{len(accepted)} "
-        f"({outlier_pct:.1f}%) windows >{outlier_threshold_ms:.0f}ms from median"
+        f"({outlier_pct:.1f}%) >{outlier_threshold_ms:.0f}ms from median"
     )
-    if outlier_count > 0 and len(inlier_delays) > 1:
-        log(f"  Inlier std:  {inlier_std:.3f} ms ({len(inlier_delays)} windows)")
 
-    # Confidence breakdown
+    # Confidence tiers
+    n = len(confs)
+    t90 = int(np.sum(confs >= 90))
+    t70 = int(np.sum((confs >= 70) & (confs < 90)))
+    t50 = int(np.sum((confs >= 50) & (confs < 70)))
+    tlow = int(np.sum(confs < 50))
     log(
-        f"  Confidence:  {np.mean(confs):.1f}% mean, "
-        f"{np.min(confs):.1f}% min, {np.max(confs):.1f}% max"
+        f"  Confidence:  "
+        f"≥90%: {t90} ({t90/n*100:.0f}%) | "
+        f"70-89%: {t70} ({t70/n*100:.0f}%) | "
+        f"50-69%: {t50} ({t50/n*100:.0f}%) | "
+        f"<50%: {tlow} ({tlow/n*100:.0f}%)"
+    )
+    log(
+        f"               mean={np.mean(confs):.1f}%, "
+        f"min={np.min(confs):.1f}%, max={np.max(confs):.1f}%"
     )
 
-    # Delay distribution (mode analysis)
-    delay_counts = Counter(rounded_delays.tolist())
-    most_common = delay_counts.most_common(5)
-    log(f"  Delay distribution (top values):")
-    for delay_val, count in most_common:
+    # Delay distribution (top values with bar chart)
+    top_n = min(6, len(most_common))
+    log(f"  Delay distribution (top {top_n}):")
+    for delay_val, count in most_common[:top_n]:
         pct = count / len(accepted) * 100
         bar = "█" * min(50, int(pct / 2))
-        log(f"    {int(delay_val):+6d} ms: {count:5d} ({pct:5.1f}%) {bar}")
+        log(f"    {int(delay_val):+6d}ms: {count:5d} ({pct:5.1f}%) {bar}")
 
     # Cluster analysis for stepping detection
-    _log_cluster_analysis(accepted, delays, median_delay, log)
+    _log_cluster_analysis(accepted, delays, log)
 
     log(f"{'─' * 70}")
+
+
+def _classify_result(
+    std_delay: float,
+    outlier_pct: float,
+    agreement_pct: float,
+    n_accepted: int,
+    inlier_std: float,
+) -> str:
+    """
+    Produce a one-line classification of the correlation result.
+
+    Returns something like:
+      UNIFORM (+145ms, 99.8% agreement, high confidence)
+      STEPPING (3 delay groups detected)
+      NOISY (high variance, only 45% agreement)
+      LOW DATA (only 12 accepted windows)
+    """
+    if n_accepted < 20:
+        return f"⚠ LOW DATA (only {n_accepted} accepted windows)"
+
+    # Uniform: high agreement, low inlier std
+    if agreement_pct >= 90 and inlier_std < 5.0:
+        return f"UNIFORM ({agreement_pct:.1f}% agreement, std={inlier_std:.3f}ms)"
+
+    # Uniform but slightly noisy
+    if agreement_pct >= 70 and inlier_std < 10.0:
+        return f"UNIFORM ({agreement_pct:.1f}% agreement, std={inlier_std:.3f}ms, minor noise)"
+
+    # Stepping: low agreement but low std within groups suggests distinct levels
+    if agreement_pct < 70 and std_delay > 50 and outlier_pct > 10:
+        return f"STEPPING (std={std_delay:.0f}ms, {agreement_pct:.0f}% top agreement — see clusters)"
+
+    # Noisy
+    if outlier_pct > 30:
+        return f"⚠ NOISY ({outlier_pct:.0f}% outliers, {agreement_pct:.0f}% agreement)"
+
+    # Moderate
+    return f"MODERATE ({agreement_pct:.0f}% agreement, std={std_delay:.1f}ms)"
 
 
 def _log_cluster_analysis(
     accepted: list[ChunkResult],
     delays: np.ndarray,
-    median_delay: float,
     log: Callable[[str], None],
 ) -> None:
     """
     Analyze and log delay clusters for stepping detection.
 
-    Uses simple distance-based clustering to identify distinct delay
-    groups and their time ranges. This is informational — the actual
-    stepping decision is made by diagnose_audio_issue() using DBSCAN.
+    Uses DBSCAN clustering to identify distinct delay groups and
+    their time ranges. This is informational — the actual stepping
+    decision is made by diagnose_audio_issue().
     """
     from sklearn.cluster import DBSCAN
 
-    # Only analyze if there's enough spread to suggest stepping
+    # Only analyze if there's enough data
     if len(accepted) < 10:
         return
 
-    # Quick check: if std is very small, no stepping
+    # Quick check: if std is very small, uniform — no cluster analysis needed
     if np.std(delays) < 10.0:
         return
 
@@ -310,6 +414,7 @@ def _log_cluster_analysis(
         pct = count / len(accepted) * 100
         t_start = min(cluster_times)
         t_end = max(cluster_times)
+        span_s = t_end - t_start
         mean_conf = float(np.mean(cluster_confs))
 
         cluster_info.append({
@@ -320,6 +425,7 @@ def _log_cluster_analysis(
             "pct": pct,
             "t_start": t_start,
             "t_end": t_end,
+            "span_s": span_s,
             "mean_conf": mean_conf,
         })
 
@@ -336,32 +442,56 @@ def _log_cluster_analysis(
         log(
             f"    Cluster {i + 1}: {c['mean_delay']:+.1f}ms "
             f"(std={c['std_delay']:.1f}ms, n={c['count']}, {c['pct']:.1f}%) "
-            f"@ {c['t_start']:.1f}s - {c['t_end']:.1f}s "
+            f"@ {_fmt_time(c['t_start'])} - {_fmt_time(c['t_end'])} "
+            f"({_fmt_time(c['span_s'])}) "
             f"conf={c['mean_conf']:.1f}%"
             f"{jump_str}"
         )
 
-    # Transition point detection
+    # Transition point detection — only log real transitions
+    # (skip noise-to-cluster or cluster-to-noise bouncing)
     if len(cluster_info) >= 2:
         log(f"\n  Transitions:")
-        # Sort accepted results by time
         sorted_results = sorted(accepted, key=lambda r: r.start_s)
-        sorted_delays = np.array([r.raw_delay_ms for r in sorted_results])
+        sorted_delays_arr = np.array([r.raw_delay_ms for r in sorted_results])
         sorted_labels = np.array([
             labels[accepted.index(r)] for r in sorted_results
         ])
 
-        prev_label = sorted_labels[0]
+        # Track the last real (non-noise) cluster label
+        prev_real_label = -1
+        for i in range(len(sorted_labels)):
+            if sorted_labels[i] != -1:
+                prev_real_label = sorted_labels[i]
+                break
+
+        transitions = []
         for i in range(1, len(sorted_labels)):
-            if sorted_labels[i] != prev_label and sorted_labels[i] != -1 and prev_label != -1:
-                t_before = sorted_results[i - 1].start_s
-                t_after = sorted_results[i].start_s
-                d_before = sorted_delays[i - 1]
-                d_after = sorted_delays[i]
+            cur = sorted_labels[i]
+            if cur == -1:
+                continue  # skip noise
+            if cur != prev_real_label and prev_real_label != -1:
+                # Find last non-noise point before this
+                t_before = None
+                d_before = None
+                for j in range(i - 1, -1, -1):
+                    if sorted_labels[j] == prev_real_label:
+                        t_before = sorted_results[j].start_s
+                        d_before = sorted_delays_arr[j]
+                        break
+                if t_before is not None:
+                    t_after = sorted_results[i].start_s
+                    d_after = sorted_delays_arr[i]
+                    transitions.append((d_before, d_after, t_before, t_after))
+                prev_real_label = cur
+            elif cur != -1:
+                prev_real_label = cur
+
+        if transitions:
+            for d_before, d_after, t_before, t_after in transitions:
                 log(
-                    f"    {d_before:+.1f}ms -> {d_after:+.1f}ms "
-                    f"between {t_before:.1f}s and {t_after:.1f}s"
+                    f"    {d_before:+.1f}ms → {d_after:+.1f}ms "
+                    f"between {_fmt_time(t_before)} and {_fmt_time(t_after)}"
                 )
-                prev_label = sorted_labels[i]
-            elif sorted_labels[i] != -1:
-                prev_label = sorted_labels[i]
+        else:
+            log("    (no clean transitions detected)")
