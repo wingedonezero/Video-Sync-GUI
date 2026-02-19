@@ -1046,6 +1046,11 @@ class AnalysisStep:
             )
             all_results[method.name] = results
 
+            # Free GPU memory between methods
+            from vsg_core.analysis.correlation.gpu_backend import cleanup_gpu
+
+            cleanup_gpu()
+
         # Log summary
         log(f"\n{'=' * 70}")
         log("  MULTI-CORRELATION SUMMARY")
@@ -1150,6 +1155,11 @@ class AnalysisStep:
                 log=log,
             )
             all_results[method.name] = results
+
+            # Free GPU memory between methods
+            from vsg_core.analysis.correlation.gpu_backend import cleanup_gpu
+
+            cleanup_gpu()
 
         # Log comparison summary
         log(f"\n{'=' * 70}")
