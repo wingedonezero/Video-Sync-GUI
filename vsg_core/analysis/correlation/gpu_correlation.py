@@ -45,12 +45,13 @@ def extract_peak(
     n_fft: int,
     sr: int,
     peak_fit: bool = False,
-) -> tuple[float, float, int]:
+) -> tuple[float, int]:
     """
-    Extract delay and confidence from a waveform-domain correlation.
+    Extract delay and peak index from a waveform-domain correlation.
 
     Searches the full lag range (no max_delay restriction) for the
-    strongest peak, then computes confidence.
+    strongest peak. Confidence is computed separately by each method
+    using the returned peak_index.
 
     Args:
         corr: Correlation result from irfft (length n_fft).
@@ -59,8 +60,8 @@ def extract_peak(
         peak_fit: If True, apply parabolic sub-sample interpolation.
 
     Returns:
-        (delay_ms, confidence, peak_index) — delay in ms, confidence 0-100,
-        and the raw peak index in the correlation array.
+        (delay_ms, peak_index) — delay in ms (raw float) and the
+        peak index in the correlation array for confidence scoring.
     """
     n = n_fft
     abs_corr = torch.abs(corr)
