@@ -38,10 +38,10 @@ class SteppingCorrectionAuditor(BaseAuditor):
         )
         self.log("    → Manual review recommended to verify sync quality")
 
-        # Get configurable thresholds from settings
-        min_boundary_score = self.ctx.settings.stepping_audit_min_score
-        overflow_tolerance_pct = self.ctx.settings.stepping_audit_overflow_tolerance
-        large_correction_threshold_s = self.ctx.settings.stepping_audit_large_correction_s
+        # Audit thresholds (informational, not behavioral)
+        min_boundary_score = 12.0
+        overflow_tolerance_pct = 0.8
+        large_correction_threshold_s = 3.0
 
         # Track high-priority issues
         high_priority_issues = []

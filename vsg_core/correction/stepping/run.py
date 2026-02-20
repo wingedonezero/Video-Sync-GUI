@@ -195,6 +195,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             )
             if not qa_ok:
                 log("[SteppingCorrection] QA assembly failed.")
+                del ctx.stepping_edls[source_key]
                 continue
 
             passed, qa_meta = verify_correction(
@@ -208,13 +209,32 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             )
             if not passed:
                 log("[SteppingCorrection] QA check FAILED — skipping correction.")
+                del ctx.stepping_edls[source_key]
                 continue
 
-            # Store audit metadata
+            # Store audit metadata from splice points for post-mux auditor
             if analysis_track_key in ctx.segment_flags:
-                ctx.segment_flags[analysis_track_key]["audit_metadata"] = [
-                    {"qa": qa_meta}
-                ]
+                boundary_audit: list[dict[str, object]] = []
+                for sp in splice_points:
+                    br = sp.boundary_result
+                    entry: dict[str, object] = {
+                        "target_time_s": sp.src2_time_s,
+                        "delay_change_ms": sp.correction_ms,
+                        "no_silence_found": sp.silence_zone is None,
+                        "zone_start": sp.silence_zone.start_s if sp.silence_zone else 0,
+                        "zone_end": sp.silence_zone.end_s if sp.silence_zone else 0,
+                        "avg_db": sp.silence_zone.avg_db if sp.silence_zone else 0,
+                        "score": br.score if br else 0,
+                        "overlaps_speech": br.overlaps_speech if br else False,
+                        "near_transient": br.near_transient if br else False,
+                        "video_snap_skipped": sp.snap_metadata.get(
+                            "video_snap_skipped", False
+                        ),
+                    }
+                    boundary_audit.append(entry)
+                ctx.segment_flags[analysis_track_key]["audit_metadata"] = (
+                    boundary_audit
+                )
 
             # --- Apply to all audio tracks from this source ---
             log(

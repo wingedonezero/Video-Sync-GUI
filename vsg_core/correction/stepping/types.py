@@ -70,6 +70,16 @@ class SilenceZone:
 
 
 @dataclass(frozen=True, slots=True)
+class BoundaryResult:
+    """Rich result from silence zone selection for audit trail."""
+
+    zone: SilenceZone | None  # Best zone, or None if nothing found
+    score: float  # Composite score from _pick_best_zone (0 if no zone)
+    near_transient: bool  # True if transients detected near the chosen zone
+    overlaps_speech: bool  # True if zone is RMS-only (VAD detected speech there)
+
+
+@dataclass(frozen=True, slots=True)
 class SplicePoint:
     """Precise splice location for a single transition."""
 
@@ -79,4 +89,5 @@ class SplicePoint:
     delay_after_ms: float
     correction_ms: float  # delay_after - delay_before
     silence_zone: SilenceZone | None  # Best silence zone for splice
+    boundary_result: BoundaryResult | None = None  # Rich audit data
     snap_metadata: dict[str, object] = field(default_factory=dict)
