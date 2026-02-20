@@ -262,6 +262,8 @@ class AppConfig:
             "stepping_audit_min_score",
             "stepping_audit_overflow_tolerance",
             "stepping_audit_large_correction_s",
+            "scan_chunk_count",
+            "scan_chunk_duration",
         ]:
             if dead_key in loaded_settings:
                 del loaded_settings[dead_key]

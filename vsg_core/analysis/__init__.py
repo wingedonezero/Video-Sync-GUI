@@ -7,11 +7,9 @@ from .container_delays import (
 from .correlation import (
     CorrelationMethod,
     decode_audio,
-    extract_chunks,
     get_audio_stream_info,
     get_method,
     list_methods,
-    run_audio_correlation,
 )
 from .delay_selection import calculate_delay, find_first_stable_segment_delay
 from .drift_detection import diagnose_audio_issue
@@ -54,7 +52,6 @@ __all__ = [
     "calculate_global_shift",
     "decode_audio",
     "diagnose_audio_issue",
-    "extract_chunks",
     "find_actual_correlation_track_delay",
     "find_first_stable_segment_delay",
     "format_track_details",
@@ -64,7 +61,6 @@ __all__ = [
     "is_audio_separator_available",
     "list_available_models",
     "list_methods",
-    "run_audio_correlation",
     "run_native_videodiff",
     "run_videodiff",
     "select_audio_track",

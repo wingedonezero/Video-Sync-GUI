@@ -99,8 +99,6 @@ class AppSettings(BaseModel):
     analysis_mode: AnalysisModeStr = "Audio Correlation"
     analysis_lang_source1: str = ""
     analysis_lang_others: str = ""
-    scan_chunk_count: int = 10
-    scan_chunk_duration: int = 15
     min_match_pct: float = 10.0
 
     # Dense sliding window correlation (GPU)
