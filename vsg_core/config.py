@@ -247,7 +247,8 @@ class AppConfig:
                 del loaded_settings[old_key]
                 changed = True
 
-        # Remove dead settings (absolute counts replaced by percentages)
+        # Remove dead settings (absolute counts replaced by percentages,
+        # audit thresholds hardcoded in auditor)
         for dead_key in [
             "stepping_first_stable_min_chunks",
             "stepping_first_stable_skip_unstable",
@@ -258,6 +259,9 @@ class AppConfig:
             "stepping_min_windows_per_cluster",
             "stepping_min_chunks_per_cluster",
             "detection_dbscan_min_samples",
+            "stepping_audit_min_score",
+            "stepping_audit_overflow_tolerance",
+            "stepping_audit_large_correction_s",
         ]:
             if dead_key in loaded_settings:
                 del loaded_settings[dead_key]

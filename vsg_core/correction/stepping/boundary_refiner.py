@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from . import timeline
-from .types import SilenceZone, SplicePoint, TransitionZone
+from .types import BoundaryResult, SilenceZone, SplicePoint, TransitionZone
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -74,7 +74,7 @@ def refine_boundaries(
         )
 
         # --- Find silence zones ---
-        best_zone = _find_best_silence(
+        boundary = _find_best_silence(
             src2_pcm,
             src2_sr,
             search_start,
@@ -83,6 +83,7 @@ def refine_boundaries(
             settings,
             log,
         )
+        best_zone = boundary.zone
 
         # Determine splice time
         if best_zone is not None:
@@ -90,7 +91,7 @@ def refine_boundaries(
             log(
                 f"    Splice: {splice_src2:.3f}s  "
                 f"(silence {best_zone.duration_ms:.0f}ms @ {best_zone.avg_db:.1f}dB, "
-                f"source={best_zone.source})"
+                f"source={best_zone.source}, score={boundary.score:.1f})"
             )
         else:
             splice_src2 = src2_mid
@@ -145,6 +146,7 @@ def refine_boundaries(
                 delay_after_ms=zone.delay_after_ms,
                 correction_ms=zone.correction_ms,
                 silence_zone=best_zone,
+                boundary_result=boundary,
                 snap_metadata=snap_meta,
             )
         )
@@ -165,13 +167,15 @@ def _find_best_silence(
     target_s: float,
     settings: AppSettings,
     log: Callable[[str], None],
-) -> SilenceZone | None:
+) -> BoundaryResult:
     """Find the best splice-worthy silence zone near *target_s*.
 
     Combines RMS energy detection, WebRTC VAD, and transient avoidance.
     The intersection of "RMS quiet" + "VAD non-speech" gives the safest
     splice candidates.  Falls back to RMS-only or VAD-only if the
     intersection is empty.
+
+    Returns a BoundaryResult with the zone, score, and audit flags.
     """
     threshold_db = settings.stepping_silence_threshold_db
     min_duration_ms = settings.stepping_silence_min_duration_ms
@@ -215,14 +219,32 @@ def _find_best_silence(
     # Pick best from combined -> rms -> vad (preference order)
     candidates = combined or rms_zones or vad_gaps
     if not candidates:
-        return None
+        return BoundaryResult(
+            zone=None, score=0.0, near_transient=False, overlaps_speech=False
+        )
 
-    return _pick_best_zone(
+    best_zone, score, near_transient = _pick_best_zone(
         candidates,
         target_s,
         settings,
         log,
         transient_times=transient_times,
+    )
+
+    # If VAD was enabled and we fell back to RMS-only (no combined zones),
+    # the winning zone likely overlaps speech detected by VAD.
+    overlaps_speech = (
+        settings.stepping_vad_enabled
+        and len(vad_gaps) > 0
+        and len(combined) == 0
+        and best_zone.source == "rms"
+    )
+
+    return BoundaryResult(
+        zone=best_zone,
+        score=score,
+        near_transient=near_transient,
+        overlaps_speech=overlaps_speech,
     )
 
 
@@ -423,7 +445,7 @@ def _pick_best_zone(
     settings: AppSettings,
     log: Callable[[str], None],
     transient_times: list[float] | None = None,
-) -> SilenceZone:
+) -> tuple[SilenceZone, float, bool]:
     """Pick the best silence zone from *candidates*.
 
     Scoring:
@@ -431,6 +453,10 @@ def _pick_best_zone(
       - Duration (longer is safer)
       - Depth (quieter is better)
       - Transient penalty (zones containing transients score lower)
+
+    Returns:
+        (best_zone, score, near_transient) — the winning zone, its composite
+        score, and whether transients were detected near it.
     """
     threshold_db = settings.stepping_silence_threshold_db
     search_window = settings.stepping_silence_search_window_s
@@ -441,6 +467,7 @@ def _pick_best_zone(
 
     best: SilenceZone | None = None
     best_score = -float("inf")
+    best_near_transient = False
 
     for zone in candidates:
         distance = abs(zone.center_s - target_s)
@@ -450,6 +477,7 @@ def _pick_best_zone(
 
         # Transient penalty: count transients within or near (±50ms) the zone
         transient_penalty = 0.0
+        zone_has_transient = False
         if transients:
             margin = 0.05  # 50ms safety margin
             count = sum(
@@ -457,6 +485,7 @@ def _pick_best_zone(
                 for t in transients
                 if (zone.start_s - margin) <= t <= (zone.end_s + margin)
             )
+            zone_has_transient = count > 0
             # Each transient near the zone applies a heavy penalty
             transient_penalty = count * 3.0
 
@@ -465,9 +494,10 @@ def _pick_best_zone(
         if score > best_score:
             best_score = score
             best = zone
+            best_near_transient = zone_has_transient
 
     assert best is not None  # candidates is non-empty
-    return best
+    return best, best_score, best_near_transient
 
 
 # ---------------------------------------------------------------------------
