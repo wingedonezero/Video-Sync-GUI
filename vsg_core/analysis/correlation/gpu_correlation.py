@@ -50,8 +50,8 @@ def extract_peak(
     Extract delay and peak index from a waveform-domain correlation.
 
     Searches the full lag range (no max_delay restriction) for the
-    strongest peak. Confidence is computed separately via
-    psr_confidence() or scc_confidence() using the returned peak_index.
+    strongest peak. Confidence is computed separately by each method
+    using the returned peak_index.
 
     Args:
         corr: Correlation result from irfft (length n_fft).
