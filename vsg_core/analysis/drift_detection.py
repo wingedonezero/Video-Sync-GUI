@@ -66,7 +66,7 @@ def _build_cluster_diagnostics(
 
         cluster_info.append(
             ClusterDiagnostic(
-                cluster_id=label,
+                cluster_id=int(label),
                 mean_delay_ms=mean_delay,
                 std_delay_ms=std_delay,
                 chunk_count=chunk_count,

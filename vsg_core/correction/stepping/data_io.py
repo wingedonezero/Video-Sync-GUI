@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...analysis.types import ChunkResult, ClusterDiagnostic
+from ...audit.trail import NumpyJSONEncoder
 from .types import SteppingData
 
 if TYPE_CHECKING:
@@ -64,7 +65,7 @@ def save_stepping_data(
         ],
     }
 
-    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    out_path.write_text(json.dumps(payload, indent=2, cls=NumpyJSONEncoder), encoding="utf-8")
     return out_path
 
 
