@@ -5,7 +5,8 @@ description = "Video subtitle synchronization tool"
 requires-python = ">=3.11"
 dependencies = [
     # Core GUI Framework
-    "PySide6",
+    # Pinned to 6.8.x to match Debian 13 system Qt (6.8.2) for Breeze style ABI compatibility.
+    "PySide6>=6.8,<6.9",
 
     # Scientific Computing & Analysis
     "numpy",
