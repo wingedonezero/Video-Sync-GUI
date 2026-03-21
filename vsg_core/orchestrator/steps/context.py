@@ -111,6 +111,12 @@ class Context:
     # Format: {"Source2_t3": FrameAuditResult, ...}
     frame_audit_results: dict[str, FrameAuditResult] = field(default_factory=dict)
 
+    # Cached video properties per source (detected on first access)
+    # Used to gate video-verified frame matching: MPEG-2 and interlaced
+    # sources skip frame matching and use audio correlation directly.
+    # Format: {"Source 1": {fps, content_type, is_dvd, ...}, "Source 2": {...}}
+    video_properties: dict[str, dict] = field(default_factory=dict)
+
     # Results/summaries
     out_file: str | None = None
     tokens: list[str] | None = None
