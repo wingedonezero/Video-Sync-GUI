@@ -257,6 +257,12 @@ def run_per_source_preprocessing(
         f"[VideoVerified] Aligning: {', '.join(sorted(sources_with_subs))} → Source 1"
     )
 
+    # Detect Source 1 properties and cache for later use
+    from ...frame_utils import detect_video_properties
+
+    source1_props = detect_video_properties(str(source1_file), runner)
+    ctx.video_properties["Source 1"] = source1_props
+
     # Process each source
     for source_key in sorted(sources_with_subs):
         source_video = ctx.sources.get(source_key)
@@ -277,6 +283,42 @@ def run_per_source_preprocessing(
             global_shift_ms = ctx.delays.raw_global_shift_ms
 
         original_delay = total_delay_ms
+
+        # Detect source video properties and cache
+        source_props = detect_video_properties(str(source_video), runner)
+        ctx.video_properties[source_key] = source_props
+
+        # Gate: skip frame matching for MPEG-2 (DVD) or interlaced content.
+        # MPEG-2 metadata is unreliable for distinguishing soft telecine,
+        # hard telecine, and true interlaced — all use correlation for now.
+        # Non-MPEG-2 interlaced (e.g., H.264 Blu-ray) is reliably detected
+        # by ffprobe and also skips frame matching.
+        codec = source_props.get("codec_name", "")
+        is_mpeg2 = codec in ("mpeg2video", "mpeg1video")
+        content_type = source_props.get("content_type", "unknown")
+
+        if is_mpeg2 or content_type == "interlaced":
+            reason = "MPEG-2" if is_mpeg2 else "interlaced"
+            runner._log_message(
+                f"[VideoVerified] {source_key}: {reason} content detected "
+                f"(type={content_type}, codec={codec})"
+            )
+            runner._log_message(
+                f"[VideoVerified] {source_key}: skipping frame matching, "
+                f"using audio correlation ({original_delay:+.1f}ms)"
+            )
+            ctx.video_verified_sources[source_key] = {
+                "original_delay_ms": original_delay,
+                "corrected_delay_ms": original_delay,
+                "details": {
+                    "reason": f"skipped-{reason}-content",
+                    "content_type": content_type,
+                    "codec": codec,
+                },
+                "fallback": True,
+            }
+            ctx.subtitle_delays_ms[source_key] = original_delay
+            continue
 
         try:
             # Calculate frame-corrected delay (dispatches to classic or neural)
