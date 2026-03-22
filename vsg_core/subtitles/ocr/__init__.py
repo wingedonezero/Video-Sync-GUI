@@ -110,8 +110,8 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         "ocr_output_format": get_val("ocr_output_format", "ass"),
         "ocr_preserve_positions": get_val("ocr_preserve_positions", True),
         "ocr_bottom_threshold": get_val("ocr_bottom_threshold", 75.0),
-        "ocr_video_width": get_val("ocr_video_width", 1920),
-        "ocr_video_height": get_val("ocr_video_height", 1080),
+        "ocr_video_width": get_val("ocr_video_width", 0),
+        "ocr_video_height": get_val("ocr_video_height", 0),
         "ocr_font_size_ratio": get_val("ocr_font_size_ratio", 5.80),
         # Reporting
         "ocr_generate_report": get_val("ocr_generate_report", True),

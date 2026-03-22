@@ -43,9 +43,9 @@ class OutputConfig:
     shadow_depth: float = 1.0
     margin_v: int = 30  # Vertical margin from bottom
 
-    # Video resolution (for PlayRes)
-    video_width: int = 1920
-    video_height: int = 1080
+    # Video resolution (for PlayRes) — unused, resolution comes from pipeline
+    video_width: int = 0
+    video_height: int = 0
 
 
 @dataclass(slots=True)
