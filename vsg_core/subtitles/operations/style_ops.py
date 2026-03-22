@@ -20,6 +20,53 @@ if TYPE_CHECKING:
     from ..data import OperationResult, SubtitleData
 
 
+def _find_matching_paren(text: str, open_pos: int) -> int:
+    """Find the position of the matching closing paren.
+
+    Args:
+        text: The text to search.
+        open_pos: Position of the opening '('.
+
+    Returns:
+        Position of matching ')' or -1 if not found.
+    """
+    depth = 1
+    pos = open_pos + 1
+    while pos < len(text):
+        if text[pos] == "(":
+            depth += 1
+        elif text[pos] == ")":
+            depth -= 1
+            if depth == 0:
+                return pos
+        pos += 1
+    return -1
+
+
+def _split_transform_args(content: str) -> tuple[str, str]:
+    """Split \\t() content into timing/accel params and the tag block.
+
+    In ASS, \\t() format is: \\t([t1,t2,][accel,]\\tags...)
+    The tag block always starts with '\\'.  Everything before that
+    first backslash (minus any trailing comma/whitespace) is the
+    numeric timing/acceleration parameters.
+
+    Args:
+        content: The content inside \\t(...), excluding outer parens.
+
+    Returns:
+        Tuple of (timing_params, tag_block).  Either may be empty.
+    """
+    # Scan for the first backslash — that's where tags begin
+    for i, ch in enumerate(content):
+        if ch == "\\":
+            timing = content[:i].rstrip(", ")
+            tags = content[i:]
+            return timing, tags
+    # No backslash found — everything is timing/accel, no tags
+    return content, ""
+
+
 def _scale_override_tags(
     text: str, scale: float, scale_h: float, offset_x: float, offset_y: float
 ) -> str:
@@ -27,6 +74,13 @@ def _scale_override_tags(
     Scales all ASS override tags using uniform scaling and adds border offsets.
     Maintains aspect ratio like Aegisub's "Add Borders" resampling.
     Uses vertical scaling (scale_h) for font sizes to match Aegisub behavior.
+
+    Matches Aegisub's resolution resampler behaviour:
+    - Percentage-based tags (\\fscx, \\fscy) are NOT rescaled (avoids
+      double-scaling since \\fs is already rescaled).
+    - \\t() transform blocks are recursively processed so pixel-based
+      tags inside animations are correctly rescaled.
+    - \\iclip is handled identically to \\clip.
 
     Args:
         text: Event text with ASS override tags
@@ -39,6 +93,15 @@ def _scale_override_tags(
         Text with scaled override tags
     """
 
+    # Tags that need vertical scaling (absolute pixel sizes)
+    _SCALE_H_TAGS = frozenset(("fs", "blur", "be", "fsp", "ybord", "yshad", "pbo", "shad"))
+    # Tags that need uniform/horizontal scaling (absolute pixel sizes)
+    _SCALE_TAGS = frozenset(("bord", "xbord", "xshad"))
+    # Position tags with (x, y) that need offsets
+    _POS_TAGS = frozenset(("pos", "org"))
+    # Clip tags with (x1, y1, x2, y2) that need offsets
+    _CLIP_TAGS = frozenset(("clip", "iclip"))
+
     def scale_value(val: str, scale_factor: float, offset: float = 0) -> str:
         """Scale a numeric value, add offset, and format cleanly."""
         try:
@@ -48,7 +111,7 @@ def _scale_override_tags(
             return val
 
     def scale_tag(tag_name: str, args: str) -> str:
-        """Scale tag arguments based on tag type."""
+        """Scale parenthesised tag arguments based on tag type."""
         if not args:
             return args
 
@@ -57,44 +120,104 @@ def _scale_override_tags(
         scaled_parts = []
 
         for i, part in enumerate(parts):
-            # Width/X measurements (no offset needed for size measurements)
-            if tag_lower in ("fscx", "bord", "xbord"):
+            # Uniform/horizontal pixel measurements (no offset)
+            if tag_lower in _SCALE_TAGS:
                 scaled_parts.append(scale_value(part, scale))
 
-            # Height/Y measurements and font size (use vertical scaling, no offset for size measurements)
-            elif tag_lower in ("fscy", "ybord", "yshad", "fs", "blur", "pbo", "shad"):
+            # Vertical pixel measurements and font size (no offset)
+            elif tag_lower in _SCALE_H_TAGS:
                 scaled_parts.append(scale_value(part, scale_h))
 
-            # Position tags (x, y) - need offsets
-            elif tag_lower in ("pos", "org") and i < 2:
+            # Position tags (x, y) — need offsets
+            elif tag_lower in _POS_TAGS and i < 2:
                 pos_offset = offset_x if i == 0 else offset_y
                 scaled_parts.append(scale_value(part, scale, pos_offset))
 
-            # Clip rectangles - need offsets
-            elif tag_lower == "clip" and i < 4:
-                clip_offset = offset_x if i in [0, 2] else offset_y
+            # Clip rectangles — need offsets
+            elif tag_lower in _CLIP_TAGS and i < 4:
+                clip_offset = offset_x if i in (0, 2) else offset_y
                 scaled_parts.append(scale_value(part, scale, clip_offset))
 
-            # move tag: (x1, y1, x2, y2, t1, t2) - positions need offsets
+            # move tag: (x1, y1, x2, y2, t1, t2) — positions need offsets
             elif tag_lower == "move":
-                if i in [0, 2]:  # x coordinates
+                if i in (0, 2):  # x coordinates
                     scaled_parts.append(scale_value(part, scale, offset_x))
-                elif i in [1, 3]:  # y coordinates
+                elif i in (1, 3):  # y coordinates
                     scaled_parts.append(scale_value(part, scale, offset_y))
-                else:  # time values
+                else:  # time values — preserve
                     scaled_parts.append(part)
 
-            # Time-based tags, factors, coefficients - don't scale
+            # Everything else (time-based, percentages, etc.) — preserve
             else:
                 scaled_parts.append(part)
 
         return ",".join(scaled_parts)
 
     def process_override_block(block_content: str) -> str:
-        """Process all tags within a single {...} block."""
-        tag_pattern = re.compile(r"\\([a-zA-Z]+)(\([^)]*\)|(?:\-?\d+(?:\.\d+)?))?")
+        """Process all tags within a single {...} block.
 
-        def replace_tag(match):
+        Handles \\t() transform blocks with balanced-paren matching
+        and recursive tag processing.  All other tags are processed
+        via the existing regex path.
+        """
+        # --- Phase 1: extract \\t() blocks with balanced parens ---
+        segments: list[str] = []
+        last_end = 0
+        i = 0
+
+        while i < len(block_content):
+            # Look for \t( — the transform tag with opening paren
+            if (
+                block_content[i] == "\\"
+                and i + 2 < len(block_content)
+                and block_content[i + 1] == "t"
+                and block_content[i + 2] == "("
+            ):
+                # Process everything before this \t with the regex pass
+                if i > last_end:
+                    segments.append(
+                        _process_simple_tags(block_content[last_end:i])
+                    )
+
+                close = _find_matching_paren(block_content, i + 2)
+                if close > 0:
+                    t_content = block_content[i + 3 : close]
+                    timing, tags = _split_transform_args(t_content)
+
+                    if tags:
+                        # Recursively process tags inside the transform
+                        processed_tags = process_override_block(tags)
+                        if timing:
+                            segments.append(f"\\t({timing},{processed_tags})")
+                        else:
+                            segments.append(f"\\t({processed_tags})")
+                    else:
+                        # No tags, just timing/accel — preserve as-is
+                        segments.append(f"\\t({timing})")
+
+                    i = close + 1
+                    last_end = i
+                else:
+                    # Unmatched paren — don't touch, advance past \t
+                    i += 3
+            else:
+                i += 1
+
+        # Process remaining content after the last \t() block
+        if last_end < len(block_content):
+            segments.append(
+                _process_simple_tags(block_content[last_end:])
+            )
+
+        return "".join(segments)
+
+    def _process_simple_tags(content: str) -> str:
+        """Process non-\\t tags via regex (unchanged logic)."""
+        tag_pattern = re.compile(
+            r"\\([a-zA-Z]+)(\([^)]*\)|(?:\-?\d+(?:\.\d+)?))?"
+        )
+
+        def replace_tag(match: re.Match[str]) -> str:
             tag_name = match.group(1)
             tag_lower = tag_name.lower()
             args_or_value = match.group(2)
@@ -103,28 +226,27 @@ def _scale_override_tags(
                 return match.group(0)
 
             elif args_or_value.startswith("("):
-                # Tag with parentheses
+                # Tag with parentheses — scale args
                 args = args_or_value[1:-1]
                 scaled_args = scale_tag(tag_name, args)
                 return f"\\{tag_name}({scaled_args})"
 
             else:
-                # Shorthand format
+                # Shorthand numeric value
                 value = args_or_value
 
-                # Scale size measurements (use vertical scaling for font/outline/shadow)
-                if tag_lower in ("fs", "blur", "fscy", "ybord", "yshad", "pbo", "shad"):
+                if tag_lower in _SCALE_H_TAGS:
                     scaled = scale_value(value, scale_h)
                     return f"\\{tag_name}{scaled}"
-                elif tag_lower in ("fscx", "bord", "xbord"):
+                elif tag_lower in _SCALE_TAGS:
                     scaled = scale_value(value, scale)
                     return f"\\{tag_name}{scaled}"
                 else:
                     return match.group(0)
 
-        return tag_pattern.sub(replace_tag, block_content)
+        return tag_pattern.sub(replace_tag, content)
 
-    def replace_block(match):
+    def replace_block(match: re.Match[str]) -> str:
         block_content = match.group(1)
         scaled_content = process_override_block(block_content)
         return "{" + scaled_content + "}"
