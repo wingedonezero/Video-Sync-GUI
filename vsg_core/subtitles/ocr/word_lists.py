@@ -378,6 +378,23 @@ class ValidationManager:
                     is_protected=wl.config.protects_from_fix,
                 )
 
+        # Check hyphenated compounds (e.g., "Onee-chan", "Nee-san")
+        # If every part is individually known, the compound is known too.
+        if "-" in word:
+            parts = word.split("-")
+            if len(parts) >= 2 and all(part for part in parts):
+                results = [self.is_known_word(part) for part in parts]
+                if all(r.is_known for r in results):
+                    # Use the first part's protection status
+                    is_protected = any(r.is_protected for r in results)
+                    if track_stats:
+                        self._stats.add_validated("Compound")
+                    return ValidationResult(
+                        is_known=True,
+                        source_name="Compound",
+                        is_protected=is_protected,
+                    )
+
         # Not found
         if track_stats:
             self._stats.add_unknown(word)
@@ -416,6 +433,15 @@ class ValidationManager:
                 continue
 
             if wl.contains(word):
+                return True
+
+        # Check hyphenated compounds (e.g., "Onee-chan", "Nee-san", "well-known")
+        # If every part is individually protected, the compound is protected too.
+        if "-" in word:
+            parts = word.split("-")
+            if len(parts) >= 2 and all(
+                part and self.is_protected_word(part) for part in parts
+            ):
                 return True
 
         return False
