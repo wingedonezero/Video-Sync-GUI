@@ -537,7 +537,7 @@ class StylesTab(BaseTab):
         from vsg_qt.resample_dialog import ResampleDialog
 
         # Get current resolution from subtitle
-        info = self._state.subtitle_data.info
+        info = self._state.subtitle_data.script_info
         current_x = int(info.get("PlayResX", 0) or 0)
         current_y = int(info.get("PlayResY", 0) or 0)
 
