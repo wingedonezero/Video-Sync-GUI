@@ -248,13 +248,65 @@ class ValidationManager:
         self.config_path = self.config_dir / "ocr_config.json"
 
         self.word_lists: list[WordList] = []
-        self.spell_checker = None  # Enchant dictionary, set externally
+        self.spell_checker = None  # Enchant dictionary (en_US), set externally
+        # Additional language dictionaries for protection only (not fix validation)
+        self.protection_checkers: dict[str, object] = {}
 
         self._stats = ValidationStats()
 
     def set_spell_checker(self, spell_checker):
         """Set the system spell checker (Enchant/Hunspell)."""
         self.spell_checker = spell_checker
+
+    def init_protection_languages(self) -> None:
+        """Load additional language dictionaries for word protection.
+
+        Words found in any of these languages are considered "known" and
+        protected from auto-fixing, but are NOT valid fix targets (fixes
+        should produce English words).
+
+        Auto-detects installed Hunspell/Aspell dictionaries.
+        """
+        try:
+            import enchant
+        except ImportError:
+            logger.debug("[WordLists] Enchant not available, skipping extra languages")
+            return
+
+        # Languages commonly found in anime subtitles
+        protection_languages = [
+            ("it_IT", "Italian"),
+            ("fr_FR", "French"),
+            ("de_DE", "German"),
+            ("es_ES", "Spanish"),
+            ("pt_BR", "Portuguese"),
+            ("nl_NL", "Dutch"),
+        ]
+
+        loaded = []
+        for lang_code, lang_name in protection_languages:
+            if enchant.dict_exists(lang_code):
+                try:
+                    self.protection_checkers[lang_code] = enchant.Dict(lang_code)
+                    loaded.append(f"{lang_name} ({lang_code})")
+                except Exception as e:
+                    logger.debug(f"[WordLists] Failed to load {lang_code}: {e}")
+
+        if loaded:
+            logger.info(
+                f"[WordLists] Loaded {len(loaded)} protection language(s): "
+                + ", ".join(loaded)
+            )
+
+    def _check_protection_languages(self, word: str) -> bool:
+        """Check if a word exists in any protection language dictionary."""
+        for checker in self.protection_checkers.values():
+            try:
+                if checker.check(word) or checker.check(word.lower()):
+                    return True
+            except Exception:
+                continue
+        return False
 
     def load_config(self) -> list[WordListConfig]:
         """Load word list configurations from JSON."""
@@ -378,6 +430,17 @@ class ValidationManager:
                     is_protected=wl.config.protects_from_fix,
                 )
 
+        # Check additional protection languages (Italian, French, etc.)
+        # Known in another language = protected from fixing, like romaji
+        if self._check_protection_languages(word):
+            if track_stats:
+                self._stats.add_validated("Foreign Language")
+            return ValidationResult(
+                is_known=True,
+                source_name="Foreign Language",
+                is_protected=True,
+            )
+
         # Check hyphenated compounds (e.g., "Onee-chan", "Nee-san")
         # If every part is individually known, the compound is known too.
         if "-" in word:
@@ -434,6 +497,10 @@ class ValidationManager:
 
             if wl.contains(word):
                 return True
+
+        # Check additional protection languages (Italian, French, etc.)
+        if self._check_protection_languages(word):
+            return True
 
         # Check hyphenated compounds (e.g., "Onee-chan", "Nee-san", "well-known")
         # If every part is individually protected, the compound is protected too.
@@ -662,6 +729,9 @@ def initialize_validation_manager(
     # Set spell checker
     if spell_checker:
         manager.set_spell_checker(spell_checker)
+
+    # Load additional language dictionaries for protection
+    manager.init_protection_languages()
 
     # Load configurations (from JSON or defaults)
     configs = manager.load_config()
