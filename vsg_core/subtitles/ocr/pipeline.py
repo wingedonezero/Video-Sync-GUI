@@ -610,7 +610,7 @@ class OCRPipeline:
             end_time=sub_image.end_time,
             text=post_result.text,
             confidence=ocr_result.average_confidence,
-            image=None,  # Image not available in parallel mode
+            image=sub_image.image,
             raw_ocr_text=raw_text,
         )
 
