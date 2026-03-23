@@ -88,22 +88,22 @@ ROCM_OPTIONS: list[tuple[str, str, bool]] = [
         False,
     ),
     (
-        "ROCm 6.4 (Stable - recommended)",
+        "ROCm 6.4 (Stable)",
         "https://download.pytorch.org/whl/rocm6.4",
         False,
     ),
     (
-        "ROCm 7.1 (Nightly - for ROCm 7.x)",
-        "https://download.pytorch.org/whl/nightly/rocm7.1",
-        True,
+        "ROCm 7.2 (Stable - recommended)",
+        "https://download.pytorch.org/whl/rocm7.2",
+        False,
     ),
 ]
 
 # GPU options for optional dependency installation
 GPU_OPTIONS: list[tuple[str, str]] = [
     ("NVIDIA GPU (CUDA)", "cuda"),
+    ("AMD GPU (ROCm 7.2 - Stable, recommended)", "rocm72"),
     ("AMD GPU (ROCm 6.4 - Stable)", "rocm64"),
-    ("AMD GPU (ROCm 7.1 - Nightly)", "rocm71"),
     ("CPU only", "cpu"),
 ]
 
@@ -861,18 +861,17 @@ class SetupController:
                     None,
                 )
             )
-        elif gpu_type == "rocm71":
+        elif gpu_type == "rocm72":
             steps.append(
                 (
-                    "Installing PyTorch with ROCm 7.1 (nightly)...",
+                    "Installing PyTorch with ROCm 7.2...",
                     pip_cmd(
                         "install",
-                        "--pre",
                         "torch",
                         "torchvision",
                         "torchaudio",
                         "--index-url",
-                        "https://download.pytorch.org/whl/nightly/rocm7.1",
+                        "https://download.pytorch.org/whl/rocm7.2",
                     ),
                     None,
                 )
