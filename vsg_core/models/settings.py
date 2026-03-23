@@ -344,8 +344,8 @@ class AppSettings(BaseModel):
     # OCR Output & Position
     ocr_preserve_positions: bool = True
     ocr_bottom_threshold: float = 75.0
-    ocr_video_width: int = 1920
-    ocr_video_height: int = 1080
+    ocr_video_width: int = 0  # 0 = use source resolution
+    ocr_video_height: int = 0  # 0 = use source resolution
 
     # OCR Post-Processing
     ocr_cleanup_enabled: bool = True
