@@ -261,7 +261,8 @@ class VobSubParser(SubtitleImageParser):
         # Calculate end time using duration from control sequence
         # The duration comes from the SP_DCSQ_STM delay field when stop display (0x02) is seen
         # Logic matches SubtitleEdit's VobSubParser.cs behavior
-        if duration_ms > 0:
+        has_spu_duration = duration_ms > 0
+        if has_spu_duration:
             # Use the actual duration from the subtitle packet
             end_ms = entry.timestamp_ms + duration_ms
             logger.debug(f"Subtitle {index}: using SPU duration {duration_ms}ms")
@@ -279,7 +280,7 @@ class VobSubParser(SubtitleImageParser):
                 f"Subtitle {index}: no SPU duration, using {DEFAULT_LAST_DURATION_MS}ms default"
             )
 
-        # Enforce duration limits (matching SubtitleEdit defaults)
+        # Enforce duration limits
         calculated_duration = end_ms - entry.timestamp_ms
 
         # Cap maximum duration
@@ -289,8 +290,9 @@ class VobSubParser(SubtitleImageParser):
                 f"Subtitle {index}: capped duration from {calculated_duration}ms to {MAX_DURATION_MS}ms"
             )
 
-        # Enforce minimum duration (but don't extend past next subtitle)
-        if calculated_duration < MIN_DURATION_MS:
+        # Enforce minimum duration ONLY for fallback durations (no SPU stop command)
+        # When the DVD explicitly provides a stop display time, trust it even if short
+        if not has_spu_duration and calculated_duration < MIN_DURATION_MS:
             if index + 1 < len(all_entries):
                 # Don't extend past next subtitle minus gap
                 max_end = all_entries[index + 1].timestamp_ms - MIN_GAP_MS
