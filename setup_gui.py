@@ -19,8 +19,6 @@ import os
 import shutil
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +58,6 @@ PROJECT_DIR = Path(__file__).parent.resolve()
 VENV_DIR = PROJECT_DIR / ".venv"
 VENV_PYTHON = VENV_DIR / "bin" / "python"
 PYPROJECT_PATH = PROJECT_DIR / "pyproject.toml"
-SETTINGS_PATH = PROJECT_DIR / "settings.json"
 
 # Audio separator repo URLs
 AUDIO_SEP_REPO = (
@@ -107,46 +104,6 @@ GPU_OPTIONS: list[tuple[str, str]] = [
     ("CPU only", "cpu"),
 ]
 
-# Audio-separator curated model downloads
-AUDIO_SEP_MODELS: list[tuple[str, str]] = [
-    (
-        "955717e8-8726e21a.th",
-        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/Demucs/Demucs_v4/955717e8-8726e21a.th",
-    ),
-    (
-        "htdemucs.yaml",
-        "https://raw.githubusercontent.com/Bebra777228/UVR_resources/refs/heads/main/UVR_resources/configs/demucs/htdemucs.yaml",
-    ),
-    (
-        "model_bs_roformer_ep_937_sdr_10.5309.ckpt",
-        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/Roformer/BandSplit/model_bs_roformer_ep_937_sdr_10.5309.ckpt",
-    ),
-    (
-        "config_bs_roformer_ep_937_sdr_10.5309.yaml",
-        "https://raw.githubusercontent.com/Bebra777228/UVR_resources/refs/heads/main/UVR_resources/configs/Roformer/BandSplit/config_bs_roformer_ep_937_sdr_10.5309.yaml",
-    ),
-    (
-        "MDX23C-8KFFT-InstVoc_HQ.ckpt",
-        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/MDX23C/MDX23C-8KFFT-InstVoc_HQ.ckpt",
-    ),
-    (
-        "model_2_stem_full_band_8k.yaml",
-        "https://raw.githubusercontent.com/Bebra777228/UVR_resources/refs/heads/main/UVR_resources/configs/MDX23C/model_2_stem_full_band_8k.yaml",
-    ),
-    (
-        "Kim_Vocal_2.onnx",
-        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/MDXNet/Kim_Vocal_2.onnx",
-    ),
-    (
-        "checkpoint-multi_fixed.ckpt",
-        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/Bandit/Bandit_v2/checkpoint-multi_fixed.ckpt",
-    ),
-    (
-        "config_dnr_bandit_v2_mus64.yaml",
-        "https://raw.githubusercontent.com/Bebra777228/UVR_resources/refs/heads/main/UVR_resources/configs/Bandit/config_dnr_bandit_v2_mus64.yaml",
-    ),
-]
-
 # Log colors
 COLOR_INFO = "#888"
 COLOR_SUCCESS = "#00AA00"
@@ -186,20 +143,6 @@ def get_venv_python_version() -> str | None:
     except (subprocess.TimeoutExpired, OSError):
         pass
     return None
-
-
-def get_audio_separator_model_dir() -> Path:
-    """Get the configured audio-separator model directory."""
-    default = PROJECT_DIR / ".config" / "audio_separator_models"
-    if SETTINGS_PATH.is_file():
-        try:
-            data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-            configured = data.get("source_separation_model_dir")
-            if isinstance(configured, str) and configured.strip():
-                return Path(configured.strip())
-        except (json.JSONDecodeError, OSError):
-            pass
-    return default
 
 
 # =============================================================================
@@ -299,86 +242,6 @@ class SubprocessWorker(QRunnable):
         except OSError as e:
             self._emit_log(f"[ERROR] {e}")
             self.signals.finished.emit(False, str(e))
-
-
-class DownloadWorker(QRunnable):
-    """Downloads a list of files with progress reporting."""
-
-    def __init__(
-        self,
-        downloads: list[tuple[str, str, Path]],
-    ):
-        """
-        Args:
-            downloads: List of (filename, url, target_path) tuples.
-        """
-        super().__init__()
-        self.downloads = downloads
-        self.signals = SetupSignals()
-        self.cancelled = False
-
-    def _emit_log(self, msg: str) -> None:
-        try:
-            self.signals.log.emit(msg)
-        except RuntimeError:
-            pass
-
-    @Slot()
-    def run(self) -> None:
-        total = len(self.downloads)
-        for i, (filename, url, target) in enumerate(self.downloads):
-            if self.cancelled:
-                self._emit_log("[CANCELLED]")
-                self.signals.finished.emit(False, "Cancelled")
-                return
-
-            if target.is_file():
-                self._emit_log(f"[SKIP] Already exists: {filename}")
-                self.signals.progress.emit((i + 1) / total)
-                continue
-
-            self._emit_log(f"[DOWNLOAD] {filename}")
-            self.signals.status.emit(f"Downloading {filename}...")
-
-            target.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                req = urllib.request.Request(
-                    url, headers={"User-Agent": "VSG-Setup/1.0"}
-                )
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    content_length = resp.headers.get("Content-Length")
-                    total_size = int(content_length) if content_length else None
-
-                    downloaded = 0
-                    chunk_size = 65536
-                    with open(target, "wb") as f:
-                        while True:
-                            chunk = resp.read(chunk_size)
-                            if not chunk:
-                                break
-                            if self.cancelled:
-                                f.close()
-                                target.unlink(missing_ok=True)
-                                self._emit_log("[CANCELLED]")
-                                self.signals.finished.emit(False, "Cancelled")
-                                return
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            if total_size:
-                                file_pct = downloaded / total_size
-                                overall_pct = (i + file_pct) / total
-                                self.signals.progress.emit(overall_pct)
-
-                self._emit_log(f"[OK] Downloaded: {filename}")
-            except (urllib.error.URLError, OSError) as e:
-                self._emit_log(f"[ERROR] Failed to download {filename}: {e}")
-                target.unlink(missing_ok=True)
-                self.signals.finished.emit(False, f"Download failed: {filename}")
-                return
-
-            self.signals.progress.emit((i + 1) / total)
-
-        self.signals.finished.emit(True, "All downloads complete")
 
 
 # =============================================================================
@@ -1013,27 +876,6 @@ except Exception as e:
         ]
         self._run_chain(steps)
 
-    def download_audio_sep_models(self) -> None:
-        """Download curated audio-separator models."""
-        self.window.clear_log()
-        model_dir = get_audio_separator_model_dir()
-        model_dir.mkdir(parents=True, exist_ok=True)
-
-        self.window.log_info(f"Model directory: {model_dir}")
-        self.window.log_info(f"Downloading {len(AUDIO_SEP_MODELS)} model files...")
-
-        downloads = [
-            (filename, url, model_dir / filename) for filename, url in AUDIO_SEP_MODELS
-        ]
-
-        worker = DownloadWorker(downloads)
-        worker.signals.log.connect(self.window.append_log)
-        worker.signals.status.connect(self.window.set_status)
-        worker.signals.progress.connect(self.window.set_progress)
-        worker.signals.finished.connect(self._default_finished)
-        self.window.set_running(True)
-        self._start_worker(worker)
-
     def fix_paddleocr(self) -> None:
         """Fix PaddleOCR version compatibility."""
         self.window.clear_log()
@@ -1256,11 +1098,10 @@ class SetupWindow(QMainWindow):
         # Models group
         self._add_group(
             sidebar_layout,
-            "OCR & Models",
+            "OCR Models",
             [
                 ("EasyOCR Models", self.controller.download_easyocr_models),
                 ("PaddleOCR Models", self.controller.download_paddleocr_models),
-                ("Audio-Sep Models", self.controller.download_audio_sep_models),
             ],
         )
 
