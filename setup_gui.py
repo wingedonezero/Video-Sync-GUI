@@ -411,7 +411,11 @@ class SetupController:
         if not activate.is_file():
             return False
 
-        qt_plugin_dir = Path("/usr/lib/qt6/plugins")
+        # Debian/Ubuntu use the multiarch path
+        qt_plugin_dir = Path("/usr/lib/x86_64-linux-gnu/qt6/plugins")
+        if not qt_plugin_dir.is_dir():
+            # Fallback for non-multiarch distros (Arch, Fedora, etc.)
+            qt_plugin_dir = Path("/usr/lib/qt6/plugins")
         if not qt_plugin_dir.is_dir():
             return False
 
