@@ -52,6 +52,9 @@ dependencies = [
     "ffms2",
     "VapourSynth",
 
+    # Neural frame matching (NeuralVerified subtitle sync)
+    "isc-feature-extractor",
+
     # Voice Activity Detection
     "webrtcvad-wheels",
 
