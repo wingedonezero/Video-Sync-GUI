@@ -16,7 +16,6 @@ from __future__ import annotations
 import html
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -671,9 +670,29 @@ class SetupController:
             [str(VENV_PYTHON), "-c", script],
             label="Verifying dependencies...",
         )
-        worker.signals.log.connect(self.window.append_log)
+        self._verify_lines: list[str] = []
+
+        def capture_log(line: str) -> None:
+            self.window.append_log(line)
+            self._verify_lines.append(line)
+
+        def on_verify_done(success: bool, message: str) -> None:
+            # Check if there were missing packages
+            for line in self._verify_lines:
+                if line.startswith("RESULT_MISSING"):
+                    self.window.log_info("Installing missing dependencies...")
+                    self._run_subprocess(
+                        pip_cmd("install", "-e", "."),
+                        label="Installing missing dependencies...",
+                    )
+                    return
+            self.window.log_success(message)
+            self.window.set_running(False)
+            self.refresh_venv_status()
+
+        worker.signals.log.connect(capture_log)
         worker.signals.status.connect(self.window.set_status)
-        worker.signals.finished.connect(self._default_finished)
+        worker.signals.finished.connect(on_verify_done)
         self._start_worker(worker)
 
     def install_optional_gpu(self) -> None:
@@ -799,13 +818,15 @@ class SetupController:
     def rebuild_pyav(self) -> None:
         """Rebuild PyAV from source against system FFmpeg (for subtitle filter)."""
         self.window.clear_log()
-        self.window.log_info(
-            "Rebuilding PyAV from source against system FFmpeg..."
-        )
+        self.window.log_info("Rebuilding PyAV from source against system FFmpeg...")
         self._run_subprocess(
             pip_cmd(
-                "install", "--no-binary", "av", "--no-cache-dir",
-                "--force-reinstall", "av==16.1.0",
+                "install",
+                "--no-binary",
+                "av",
+                "--no-cache-dir",
+                "--force-reinstall",
+                "av==16.1.0",
             ),
             label="Rebuilding PyAV from source...",
         )
