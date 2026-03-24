@@ -398,6 +398,38 @@ class SetupController:
         self._step_chain = []
         self._step_index = 0
 
+    # -- Helpers --
+
+    @staticmethod
+    def _patch_venv_qt_theme() -> bool:
+        """Patch the venv activate script to use system Qt plugins for KDE theming.
+
+        This lets venv-installed PySide6 pick up the Breeze/KDE platform theme
+        from /usr/lib/qt6/plugins instead of falling back to Fusion.
+        """
+        activate = VENV_DIR / "bin" / "activate"
+        if not activate.is_file():
+            return False
+
+        qt_plugin_dir = Path("/usr/lib/qt6/plugins")
+        if not qt_plugin_dir.is_dir():
+            return False
+
+        marker = "# --- Qt/KDE theme fix (added by setup_gui) ---"
+        content = activate.read_text(encoding="utf-8")
+        if marker in content:
+            return True  # Already patched
+
+        patch = (
+            f"\n{marker}\n"
+            f'export QT_PLUGIN_PATH="{qt_plugin_dir}"\n'
+            'export QT_QPA_PLATFORMTHEME="kde"\n'
+            "unset QT_STYLE_OVERRIDE\n"
+            "# --- end Qt/KDE theme fix ---\n"
+        )
+        activate.write_text(content + patch, encoding="utf-8")
+        return True
+
     # -- Actions --
 
     def full_setup(self) -> None:
@@ -876,6 +908,22 @@ except Exception as e:
         ]
         self._run_chain(steps)
 
+    def fix_qt_kde_theme(self) -> None:
+        """Patch venv activate script for KDE/Breeze Qt theming."""
+        self.window.clear_log()
+        self.window.log_info("Applying Qt/KDE theme fix to venv...")
+        if self._patch_venv_qt_theme():
+            self.window.log_success(
+                "Qt/KDE theme fix applied. "
+                "Venv activate script now exports QT_PLUGIN_PATH "
+                "and QT_QPA_PLATFORMTHEME=kde."
+            )
+        else:
+            self.window.log_error(
+                "Could not apply fix. Check that the venv exists "
+                "and /usr/lib/qt6/plugins is available."
+            )
+
     def fix_paddleocr(self) -> None:
         """Fix PaddleOCR version compatibility."""
         self.window.clear_log()
@@ -1110,6 +1158,7 @@ class SetupWindow(QMainWindow):
             sidebar_layout,
             "Fixes",
             [
+                ("Fix Qt/KDE Theme", self.controller.fix_qt_kde_theme),
                 ("Fix PaddleOCR Versions", self.controller.fix_paddleocr),
                 ("Fix ROCm / PyTorch", self.controller.fix_rocm_pytorch),
             ],
