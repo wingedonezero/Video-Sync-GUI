@@ -53,7 +53,8 @@ dependencies = [
     "VapourSynth",
 
     # Neural frame matching (NeuralVerified subtitle sync)
-    "isc-feature-extractor",
+    # Not on PyPI — installed from GitHub repo
+    "isc-feature-extractor @ git+https://github.com/lyakaap/ISC21-Descriptor-Track-1st",
 
     # Voice Activity Detection
     "webrtcvad-wheels",
