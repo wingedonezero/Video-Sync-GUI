@@ -456,17 +456,6 @@ class SetupController:
             ),
         ]
 
-        # Check if FFmpeg has subtitle filter (for PyAV rebuild decision)
-        ffmpeg_path = shutil.which("ffmpeg")
-        if ffmpeg_path:
-            steps.append(
-                (
-                    "Rebuilding PyAV from source (FFmpeg subtitle support)...",
-                    pip_cmd("install", "--no-binary", "av", "av"),
-                    None,
-                )
-            )
-
         self._run_chain(steps)
 
     def install_dev_deps(self) -> None:
@@ -808,41 +797,18 @@ class SetupController:
         self._run_chain(steps)
 
     def rebuild_pyav(self) -> None:
-        """Rebuild PyAV from source against system FFmpeg."""
+        """Rebuild PyAV from source against system FFmpeg (for subtitle filter)."""
         self.window.clear_log()
-        self.window.log_info("Rebuilding PyAV from source...")
-
-        # Check FFmpeg
-        ffmpeg_path = shutil.which("ffmpeg")
-        if ffmpeg_path:
-            try:
-                result = subprocess.run(
-                    ["ffmpeg", "-filters"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if "subtitles" in result.stdout:
-                    self.window.log_success("FFmpeg subtitles filter detected")
-                else:
-                    self.window.log_warning(
-                        "FFmpeg subtitles filter not detected. "
-                        "Make sure FFmpeg is built with libass support."
-                    )
-            except (subprocess.TimeoutExpired, OSError):
-                pass
-        else:
-            self.window.log_warning("FFmpeg not found in PATH")
-
-        steps: list[tuple[str, list[str], dict[str, str] | None]] = [
-            ("Uninstalling current PyAV...", pip_cmd("uninstall", "-y", "av"), None),
-            (
-                "Building PyAV from source...",
-                pip_cmd("install", "--no-binary", "av", "av"),
-                None,
+        self.window.log_info(
+            "Rebuilding PyAV from source against system FFmpeg..."
+        )
+        self._run_subprocess(
+            pip_cmd(
+                "install", "--no-binary", "av", "--no-cache-dir",
+                "--force-reinstall", "av==16.1.0",
             ),
-        ]
-        self._run_chain(steps)
+            label="Rebuilding PyAV from source...",
+        )
 
     def download_easyocr_models(self) -> None:
         """Install EasyOCR and download its models."""
