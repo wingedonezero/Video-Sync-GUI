@@ -21,6 +21,9 @@ __pycache__/
 .Python
 PHANTOM_SIGNS_TRACK_PLAN.md
 
+# Downloaded model weights (managed by setup_gui.py)
+models/
+
 # Self-contained Python environment
 Dependencies/
 .venv/

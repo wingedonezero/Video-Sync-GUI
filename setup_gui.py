@@ -71,6 +71,14 @@ AUDIO_SEP_CPU_REPO = (
     "git+https://github.com/nomadkaraoke/python-audio-separator.git"
 )
 
+# ISC model (neural frame matching)
+ISC_DOWNLOAD_URL = (
+    "https://github.com/lyakaap/ISC21-Descriptor-Track-1st/"
+    "releases/download/v1.0.1/isc_ft_v107.pth.tar"
+)
+ISC_WEIGHTS_FILENAME = "isc_ft_v107_weights.pt"
+ISC_MODEL_DIR = PROJECT_DIR / "models" / "isc"
+
 # PaddleOCR compatible versions
 PADDLE_VERSION = "3.2.0"
 PADDLEOCR_VERSION = "3.3.0"
@@ -831,6 +839,72 @@ class SetupController:
             label="Rebuilding PyAV from source...",
         )
 
+    def download_isc_model(self) -> None:
+        """Download ISC model weights and strip to essentials."""
+        self.window.clear_log()
+        weights_path = ISC_MODEL_DIR / ISC_WEIGHTS_FILENAME
+
+        if weights_path.is_file():
+            size_mb = weights_path.stat().st_size / 1024 / 1024
+            self.window.log_success(
+                f"ISC weights already downloaded ({size_mb:.0f} MB): {weights_path}"
+            )
+            return
+
+        self.window.log_info("Downloading ISC model weights (~401 MB)...")
+        self.window.log_info("After download, weights are stripped to ~201 MB")
+        self.window.log_info(f"  Source: {ISC_DOWNLOAD_URL}")
+        self.window.log_info(f"  Destination: {weights_path}")
+
+        # Download and strip in one script via venv python (needs torch)
+        script = f"""
+import sys, os, torch, torch.nn.functional as F
+from pathlib import Path
+
+model_dir = Path({str(ISC_MODEL_DIR)!r})
+model_dir.mkdir(parents=True, exist_ok=True)
+weights_path = model_dir / {ISC_WEIGHTS_FILENAME!r}
+
+url = {ISC_DOWNLOAD_URL!r}
+
+print("Downloading from GitHub...")
+ckpt = torch.hub.load_state_dict_from_url(url, model_dir=str(model_dir), map_location="cpu")
+
+print(f"Original checkpoint keys: {{list(ckpt.keys())}}")
+print(f"Architecture: {{ckpt['arch']}}")
+
+# Map old arch name to current timm name
+arch = ckpt["arch"]
+if arch == "tf_efficientnetv2_m_in21ft1k":
+    arch = "timm/tf_efficientnetv2_m.in21k_ft_in1k"
+
+# Strip module. prefix from state dict keys
+state_dict = {{}}
+for k, v in ckpt["state_dict"].items():
+    state_dict[k.replace("module.", "")] = v
+
+# Save stripped checkpoint (state_dict + arch + input_size only)
+stripped = {{
+    "state_dict": state_dict,
+    "arch": arch,
+    "input_size": ckpt["args"].input_size,
+}}
+torch.save(stripped, str(weights_path))
+
+# Remove the original download
+for f in model_dir.glob("*.pth.tar"):
+    f.unlink()
+    print(f"Removed original: {{f.name}}")
+
+size_mb = weights_path.stat().st_size / 1024 / 1024
+n_keys = len(state_dict)
+print(f"OK Saved stripped weights: {{weights_path.name}} ({{size_mb:.0f}} MB, {{n_keys}} keys)")
+"""
+        self._run_subprocess(
+            [str(VENV_PYTHON), "-c", script],
+            label="Downloading ISC weights...",
+        )
+
     def download_easyocr_models(self) -> None:
         """Install EasyOCR and download its models."""
         self.window.clear_log()
@@ -1137,8 +1211,9 @@ class SetupWindow(QMainWindow):
         # Models group
         self._add_group(
             sidebar_layout,
-            "OCR Models",
+            "Models",
             [
+                ("ISC Weights (Neural Match)", self.controller.download_isc_model),
                 ("EasyOCR Models", self.controller.download_easyocr_models),
                 ("PaddleOCR Models", self.controller.download_paddleocr_models),
             ],
