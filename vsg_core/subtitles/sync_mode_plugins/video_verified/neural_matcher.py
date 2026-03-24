@@ -470,8 +470,9 @@ def _frame_to_tensor(frame, device, F):
     resized = F.interpolate(
         tensor, size=(512, 512), mode="bilinear", align_corners=False
     )
-    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
+    # ISC ft_v107 uses (0.5, 0.5, 0.5) normalization, not ImageNet defaults
+    mean = torch.tensor([0.5, 0.5, 0.5], device=device).view(1, 3, 1, 1)
+    std = torch.tensor([0.5, 0.5, 0.5], device=device).view(1, 3, 1, 1)
     normalized = (resized - mean) / std
     return normalized.squeeze(0)
 

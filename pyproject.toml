@@ -53,8 +53,9 @@ dependencies = [
     "VapourSynth",
 
     # Neural frame matching (NeuralVerified subtitle sync)
-    # Not on PyPI — installed from GitHub repo
-    "isc-feature-extractor @ git+https://github.com/lyakaap/ISC21-Descriptor-Track-1st",
+    # ISC model definition is self-contained; only the timm backbone is needed.
+    # Weights are downloaded via setup_gui.py Models tab to models/isc/.
+    "timm",
 
     # Voice Activity Detection
     "webrtcvad-wheels",
