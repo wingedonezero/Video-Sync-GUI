@@ -36,7 +36,9 @@ dependencies = [
     "lxml",
 
     # Video/Audio Processing
-    "av",
+    # Pinned: 17.x uses sws_free_context() not in Debian 13 FFmpeg 7.1.3.
+    # Must build from source (--no-binary av) for subtitle filter support.
+    "av==16.1.0",
 
     # Image Processing
     "Pillow",
