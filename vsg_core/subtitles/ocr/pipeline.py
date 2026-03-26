@@ -469,6 +469,11 @@ class OCRPipeline:
         # Validation tracking (for log + debug)
         wide_region_flags: list[tuple[int, int, int]] = []  # (sub_idx, width, h_gap)
         same_zone_splits: list[tuple[int, str, int]] = []  # (sub_idx, zone, gap_px)
+        tiny_regions: list[tuple[int, int, int]] = []  # (sub_idx, w, h)
+        huge_regions: list[tuple[int, int, int]] = []  # (sub_idx, w, h)
+        very_tall_single: list[tuple[int, int, int]] = []  # (sub_idx, w, h)
+        four_plus_regions: list[tuple[int, int]] = []  # (sub_idx, count)
+        per_sub_data: list[dict] = []  # full per-sub tracking for debug
 
         for i, sub_image in enumerate(subtitle_images):
             # Progress every 25 subs (not spammy)
@@ -496,20 +501,56 @@ class OCRPipeline:
             frame_w = sub_image.image.shape[1]
 
             # Track region stats
-            if len(regions) == 1:
+            n_regions = len(regions)
+            if n_regions == 1:
                 region_counts[1] = region_counts.get(1, 0) + 1
-            else:
+            elif n_regions >= 2:
                 region_counts[2] = region_counts.get(2, 0) + 1
+            if n_regions >= 4:
+                four_plus_regions.append((sub_image.index, n_regions))
 
-            # Validation: check for horizontal merge issues (wide regions)
+            # Per-sub tracking for debug
+            sub_regions_info = []
             for r in regions:
-                if r.width > frame_w * 0.7:
-                    # Check column gaps within this region
-                    import cv2 as _cv2
+                zone = r.classify_zone(frame_h, frame_w)
+                sub_regions_info.append({
+                    "id": r.region_id, "zone": zone,
+                    "bbox": [r.x1, r.y1, r.x2, r.y2],
+                    "size": f"{r.width}x{r.height}",
+                    "pos": r.needs_pos_tag(frame_h, frame_w),
+                })
+            if n_regions > 1 or any(ri["pos"] for ri in sub_regions_info):
+                per_sub_data.append({
+                    "index": sub_image.index,
+                    "time": sub_image.start_time,
+                    "n_regions": n_regions,
+                    "regions": sub_regions_info,
+                })
 
+            # Anomaly checks
+            import cv2 as _cv2
+
+            for r in regions:
+                # Tiny region
+                if r.width < 10 or r.height < 5:
+                    tiny_regions.append((sub_image.index, r.width, r.height))
+
+                # Huge region (>90% width AND >50% height)
+                if r.width > frame_w * 0.9 and r.height > frame_h * 0.5:
+                    huge_regions.append((sub_image.index, r.width, r.height))
+
+                # Very tall single region (>40% frame, single region only)
+                if n_regions == 1 and r.height > frame_h * 0.4:
+                    very_tall_single.append(
+                        (sub_image.index, r.width, r.height)
+                    )
+
+                # Horizontal merge check (wide regions with column gaps)
+                if r.width > frame_w * 0.7:
                     _mask = (
                         sub_image.image[:, :, 3]
-                        if sub_image.image.ndim == 3 and sub_image.image.shape[2] == 4
+                        if sub_image.image.ndim == 3
+                        and sub_image.image.shape[2] == 4
                         else _cv2.cvtColor(sub_image.image, _cv2.COLOR_RGB2GRAY)
                         if sub_image.image.ndim == 3
                         else sub_image.image
@@ -518,7 +559,7 @@ class OCRPipeline:
                     if _crop.size > 0:
                         _col_text = np.any(_crop > 10, axis=0)
                         _in_c = False
-                        _clusters = []
+                        _clusters: list[tuple[int, int]] = []
                         _cs = 0
                         for _x, _has in enumerate(_col_text):
                             if _has and not _in_c:
@@ -539,8 +580,8 @@ class OCRPipeline:
                                     (sub_image.index, r.width, _max_gap)
                                 )
 
-            # Validation: check same-zone splits
-            if len(regions) >= 2:
+            # Same-zone split check
+            if n_regions >= 2:
                 _sorted_r = sorted(regions, key=lambda _r: _r.y1)
                 for _ri in range(1, len(_sorted_r)):
                     _gap = _sorted_r[_ri].y1 - _sorted_r[_ri - 1].y2
@@ -566,6 +607,10 @@ class OCRPipeline:
             ocr_times.append(sub_ms)
 
             # Step 3: Add to debugger FIRST (so add_unknown_word/add_fix can find it)
+            # Generate annotated image for debug regardless of backend type
+            if self.config.debug_output or not hasattr(self, '_debug_annotated'):
+                debug_annotated = annotate_image(rgb, regions)
+
             if self.config.debug_output:
                 full_text = " | ".join(
                     vr.text for vr in vlm_regions if vr.text
@@ -580,9 +625,8 @@ class OCRPipeline:
                     raw_ocr_text=full_text,
                 )
 
-                # Save annotated image (with boxes drawn)
-                if backend.uses_annotated:
-                    debugger.add_annotated_image(sub_image.index, annotated)
+                # Always save annotated image with region boxes for debug
+                debugger.add_annotated_image(sub_image.index, debug_annotated)
 
                 # Save region data
                 has_pos = any(
@@ -714,7 +758,17 @@ class OCRPipeline:
         self._log_progress(summary, 0.90)
         logger.info(summary)
 
-        # Region analysis summary (normal log — short and sweet)
+        # Normal log — one-line summary with percentages
+        total_r = sum(zone_counts.values())
+        single_pct = region_counts.get(1, 0) / max(total, 1) * 100
+        pos_pct = pos_count / max(total_r, 1) * 100
+        issues = len(wide_region_flags) + len(same_zone_splits) + len(tiny_regions) + len(huge_regions)
+        self._log_progress(
+            f"Pixel: {single_pct:.1f}% single-region, "
+            f"{pos_pct:.1f}% need \\pos(), "
+            f"{issues} issues",
+            0.91,
+        )
         self._log_progress(
             f"Regions: {region_counts.get(1, 0)} single, "
             f"{region_counts.get(2, 0)} multi, {empty_count} empty, "
@@ -727,67 +781,220 @@ class OCRPipeline:
             )
             self._log_progress(f"Zones: {zones_str}", 0.91)
 
-        # Validation warnings (normal log — only if issues found)
+        # Warnings only if issues found
         if wide_region_flags:
             self._log_progress(
-                f"WARNING: Possible horizontal merge issues: "
-                f"{len(wide_region_flags)} subs (check debug)",
+                f"WARNING: Horizontal merge suspects: "
+                f"{len(wide_region_flags)} (check debug)",
                 0.91,
             )
         if same_zone_splits:
             self._log_progress(
-                f"WARNING: Same-zone splits: {len(same_zone_splits)} subs",
+                f"WARNING: Same-zone splits: {len(same_zone_splits)}",
                 0.91,
             )
+        if tiny_regions:
+            self._log_progress(
+                f"WARNING: Tiny regions: {len(tiny_regions)}", 0.91
+            )
 
-        # Debug: write validation details
-        if self.config.debug_output and (wide_region_flags or same_zone_splits):
-            self._save_validation_debug(
-                debugger, wide_region_flags, same_zone_splits
+        # Debug: write full pixel analysis + per-sub detail
+        if self.config.debug_output:
+            self._save_pixel_analysis_debug(
+                debugger, total, empty_count, region_counts,
+                zone_counts, pos_count, ocr_times,
+                wide_region_flags, same_zone_splits,
+                tiny_regions, huge_regions, very_tall_single,
+                four_plus_regions, per_sub_data,
             )
 
         return ocr_results
 
-    def _save_validation_debug(
+    def _save_pixel_analysis_debug(
         self,
         debugger: OCRDebugger,
+        total_subs: int,
+        empty_count: int,
+        region_counts: dict,
+        zone_counts: dict,
+        pos_count: int,
+        ocr_times: list[float],
         wide_flags: list[tuple[int, int, int]],
         zone_splits: list[tuple[int, str, int]],
+        tiny_regions: list[tuple[int, int, int]] | None = None,
+        huge_regions: list[tuple[int, int, int]] | None = None,
+        very_tall_single: list[tuple[int, int, int]] | None = None,
+        four_plus_regions: list[tuple[int, int]] | None = None,
+        per_sub_data: list[dict] | None = None,
     ) -> None:
-        """Save validation issue details to debug output."""
-        validation_dir = debugger.debug_dir / "validation_flags"
-        validation_dir.mkdir(parents=True, exist_ok=True)
+        """Save full pixel analysis and validation to debug output."""
+        tiny_regions = tiny_regions or []
+        huge_regions = huge_regions or []
+        very_tall_single = very_tall_single or []
+        four_plus_regions = four_plus_regions or []
+        per_sub_data = per_sub_data or []
+        analysis_dir = debugger.debug_dir / "pixel_analysis"
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+
+        total_regions = sum(zone_counts.values())
+        single = region_counts.get(1, 0)
+        multi = region_counts.get(2, 0)
+        processed = single + multi
+        std_count = total_regions - pos_count
+
+        def pct(n: int, total: int) -> str:
+            return f"{n / max(total, 1) * 100:.1f}%" if total > 0 else "0%"
 
         lines = [
-            "Region Detection Validation",
-            "=" * 50,
+            "Pixel Region Detection Analysis",
+            "=" * 60,
             "",
+            f"Total subtitles:  {total_subs}",
+            f"Processed:        {processed}",
+            f"Empty (no text):  {empty_count} ({pct(empty_count, total_subs)})",
+            "",
+            "Region Distribution:",
+            f"  {'Stat':<25} {'Count':>6}  {'%':>6}",
+            f"  {'-'*25} {'-'*6}  {'-'*6}",
+            f"  {'Single region':<25} {single:>6}  {pct(single, total_subs):>6}",
+            f"  {'Multi region':<25} {multi:>6}  {pct(multi, total_subs):>6}",
+            f"  {'Empty':<25} {empty_count:>6}  {pct(empty_count, total_subs):>6}",
+            "",
+            "Zone Distribution:",
+            f"  {'Zone':<10} {'Count':>6}  {'%':>6}",
+            f"  {'-'*10} {'-'*6}  {'-'*6}",
         ]
+        for zone in sorted(zone_counts.keys(), key=lambda z: -zone_counts[z]):
+            count = zone_counts[zone]
+            lines.append(
+                f"  {zone:<10} {count:>6}  {pct(count, total_regions):>6}"
+            )
 
-        if wide_flags:
-            lines.append(f"Possible horizontal merges: {len(wide_flags)}")
-            lines.append("(Wide regions with large internal column gaps)")
-            lines.append("")
-            for sub_idx, width, h_gap in wide_flags:
-                lines.append(
-                    f"  [{sub_idx:04d}] region width={width}px, "
-                    f"horizontal gap={h_gap}px ({h_gap*100//width}%)"
-                )
-            lines.append("")
+        lines.extend([
+            "",
+            "Positioning:",
+            f"  {'Stat':<25} {'Count':>6}  {'%':>6}",
+            f"  {'-'*25} {'-'*6}  {'-'*6}",
+            f"  {'Standard (no \\pos)':<25} {std_count:>6}  {pct(std_count, total_regions):>6}",
+            f"  {'Needs \\pos()':<25} {pos_count:>6}  {pct(pos_count, total_regions):>6}",
+        ])
+
+        if ocr_times:
+            avg_ms = sum(ocr_times) / len(ocr_times)
+            lines.extend([
+                "",
+                "OCR Timing:",
+                f"  Avg:   {avg_ms:.0f}ms/sub",
+                f"  Min:   {min(ocr_times):.0f}ms",
+                f"  Max:   {max(ocr_times):.0f}ms",
+                f"  Total: {sum(ocr_times)/1000:.1f}s",
+            ])
+
+        # Full anomaly report
+        lines.extend([
+            "",
+            "=" * 60,
+            "Anomaly Report",
+            "=" * 60,
+            "",
+            f"  {'Issue':<35} {'Count':>6}  {'%':>8}  Verdict",
+            f"  {'-'*35} {'-'*6}  {'-'*8}  {'-'*30}",
+            f"  {'Empty subs':<35} {empty_count:>6}  "
+            f"{pct(empty_count, total_subs):>8}  "
+            f"{'Blank forced subs or timing markers' if empty_count else 'Clean'}",
+            f"  {'Tiny regions (<10px)':<35} {len(tiny_regions):>6}  "
+            f"{pct(len(tiny_regions), total_subs):>8}  "
+            f"{'Possible noise' if tiny_regions else 'Clean'}",
+            f"  {'Huge regions (>90%w+50%h)':<35} {len(huge_regions):>6}  "
+            f"{pct(len(huge_regions), total_subs):>8}  "
+            f"{'Check for merge errors' if huge_regions else 'Clean'}",
+            f"  {'Very tall single (>40%h)':<35} {len(very_tall_single):>6}  "
+            f"{pct(len(very_tall_single), total_subs):>8}  "
+            f"{'Possible missed split' if very_tall_single else 'Clean'}",
+            f"  {'4+ regions':<35} {len(four_plus_regions):>6}  "
+            f"{pct(len(four_plus_regions), total_subs):>8}  "
+            f"{'Unusual complexity' if four_plus_regions else 'Clean'}",
+            f"  {'Same-zone splits (<80px gap)':<35} {len(zone_splits):>6}  "
+            f"{pct(len(zone_splits), total_subs):>8}  "
+            f"{'May be incorrect splits' if zone_splits else 'Clean'}",
+            f"  {'Horizontal merge suspects':<35} {len(wide_flags):>6}  "
+            f"{pct(len(wide_flags), total_subs):>8}  "
+            f"{'Wide regions with column gaps' if wide_flags else 'Clean'}",
+        ])
+
+        # Detail sections for each issue type with sub indices
+        has_issues = (
+            wide_flags or zone_splits or tiny_regions
+            or huge_regions or very_tall_single or four_plus_regions
+        )
+
+        if has_issues:
+            lines.extend(["", "=" * 60, "Issue Details (by sub index)", "=" * 60])
+
+        if tiny_regions:
+            lines.extend(["", "Tiny regions:"])
+            for idx, w, h in tiny_regions:
+                lines.append(f"  [{idx:04d}] {w}x{h}")
+
+        if huge_regions:
+            lines.extend(["", "Huge regions:"])
+            for idx, w, h in huge_regions:
+                lines.append(f"  [{idx:04d}] {w}x{h}")
+
+        if very_tall_single:
+            lines.extend(["", "Very tall single regions:"])
+            for idx, w, h in very_tall_single:
+                lines.append(f"  [{idx:04d}] {w}x{h}")
+
+        if four_plus_regions:
+            lines.extend(["", "4+ regions:"])
+            for idx, count in four_plus_regions:
+                lines.append(f"  [{idx:04d}] {count} regions")
 
         if zone_splits:
-            lines.append(f"Same-zone splits: {len(zone_splits)}")
-            lines.append("(Multiple regions in same zone with small gap)")
-            lines.append("")
+            lines.extend(["", "Same-zone splits:"])
             for sub_idx, zone, gap in zone_splits:
-                lines.append(
-                    f"  [{sub_idx:04d}] zone={zone}, gap={gap}px"
-                )
-            lines.append("")
+                lines.append(f"  [{sub_idx:04d}] zone={zone}, gap={gap}px")
 
-        (validation_dir / "validation_flags.txt").write_text(
+        if wide_flags:
+            lines.extend(["", "Horizontal merge suspects:"])
+            for sub_idx, width, h_gap in wide_flags:
+                lines.append(
+                    f"  [{sub_idx:04d}] region={width}px, "
+                    f"gap={h_gap}px ({h_gap * 100 // width}%)"
+                )
+
+        if not has_issues:
+            lines.extend(["", "No issues detected."])
+
+        (analysis_dir / "pixel_analysis.txt").write_text(
             "\n".join(lines), encoding="utf-8"
         )
+
+        # Per-sub region detail (multi-region and positioned subs only)
+        if per_sub_data:
+            detail_lines = [
+                "Per-Subtitle Region Detail",
+                "=" * 60,
+                "(Only multi-region and positioned subs shown)",
+                "",
+            ]
+            for sd in per_sub_data:
+                detail_lines.append(f"[{sd['index']:04d}] {sd.get('time', '')} "
+                                    f"— {sd['n_regions']} region(s)")
+                for ri in sd["regions"]:
+                    bbox = ri["bbox"]
+                    pos_tag = " \\pos" if ri["pos"] else ""
+                    detail_lines.append(
+                        f"  R{ri['id']}: {ri['zone']}{pos_tag} "
+                        f"[{bbox[0]},{bbox[1]}]-[{bbox[2]},{bbox[3]}] "
+                        f"({ri['size']})"
+                    )
+                detail_lines.append("")
+
+            (analysis_dir / "per_sub_regions.txt").write_text(
+                "\n".join(detail_lines), encoding="utf-8"
+            )
 
     def _process_subtitles_sequential(
         self,
