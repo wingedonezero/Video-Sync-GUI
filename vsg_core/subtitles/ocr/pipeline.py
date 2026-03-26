@@ -598,8 +598,30 @@ class OCRPipeline:
                     processed_text = post_result.text
                     fixes = post_result.fixes_applied
                     unknown = post_result.unknown_words
+
+                    # Track unknown words in report + debugger
+                    for word in post_result.unknown_words:
+                        report.add_unknown_word(
+                            word=word,
+                            context=post_result.text[:50],
+                            timestamp=sub_image.start_time,
+                            confidence=90.0,
+                        )
+                        debugger.add_unknown_word(sub_image.index, word)
+
+                    # Track fixes in debugger
+                    if post_result.was_modified:
+                        for fix_name, fix_count in post_result.fixes_applied.items():
+                            debugger.add_fix(
+                                sub_image.index,
+                                fix_name,
+                                f"Applied {fix_count} time(s)",
+                                original_text=raw_text,
+                            )
                 except Exception as e:
-                    logger.debug(f"Post-processing error on sub {sub_image.index}: {e}")
+                    logger.debug(
+                        f"Post-processing error on sub {sub_image.index}: {e}"
+                    )
 
                 ocr_result = OCRSubtitleResult(
                     index=sub_image.index,
