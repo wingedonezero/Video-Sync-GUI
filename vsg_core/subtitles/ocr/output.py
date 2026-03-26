@@ -189,24 +189,10 @@ def create_subtitle_data_from_ocr(
         margin_v=config.margin_v,
     )
 
-    # Create sign style for positioned subtitles (\pos() tagged)
-    sign_style = SubtitleStyle(
-        name="Sign",
-        fontname=config.font_name,
-        fontsize=float(config.font_size),
-        primary_color=config.primary_color,
-        outline_color=config.outline_color,
-        outline=config.outline_width,
-        shadow=config.shadow_depth,
-        alignment=5,  # Middle center (anchor for \pos)
-        margin_v=config.margin_v,
-    )
-
     data.styles = OrderedDict(
         [
             ("Default", default_style),
             ("Top", top_style),
-            ("Sign", sign_style),
         ]
     )
 
@@ -250,8 +236,8 @@ def create_subtitle_data_from_ocr(
                 style = "Top"
                 positioned_count += 1
             else:
-                # Non-standard position — use Sign style with \pos() tag
-                style = "Sign"
+                # Non-standard position — Default style with \pos() override
+                style = "Default"
                 text = f"{{\\pos({result.pos_x},{result.pos_y})}}{text}"
                 positioned_count += 1
 
