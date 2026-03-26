@@ -236,10 +236,11 @@ def create_subtitle_data_from_ocr(
                 style = "Top"
                 positioned_count += 1
             else:
-                # Non-standard position — Default style with \pos() override
+                # Non-standard position — Default style with \an5\pos() override
+                # \an5 = center-center anchor (matches our center coordinates)
                 # Coordinates are in source resolution space, same as PlayRes
                 style = "Default"
-                text = f"{{\\pos({result.pos_x},{result.pos_y})}}{text}"
+                text = f"{{\\an5\\pos({result.pos_x},{result.pos_y})}}{text}"
                 positioned_count += 1
 
             event = SubtitleEvent(
