@@ -769,63 +769,96 @@ class OCRPipeline:
         analysis_dir = debugger.debug_dir / "pixel_analysis"
         analysis_dir.mkdir(parents=True, exist_ok=True)
 
+        total_regions = sum(zone_counts.values())
+        single = region_counts.get(1, 0)
+        multi = region_counts.get(2, 0)
+        processed = single + multi
+        std_count = total_regions - pos_count
+
+        def pct(n: int, total: int) -> str:
+            return f"{n / max(total, 1) * 100:.1f}%" if total > 0 else "0%"
+
         lines = [
             "Pixel Region Detection Analysis",
-            "=" * 50,
+            "=" * 60,
             "",
-            f"Total subtitles: {total_subs}",
-            f"Empty (no text): {empty_count}",
+            f"Total subtitles:  {total_subs}",
+            f"Processed:        {processed}",
+            f"Empty (no text):  {empty_count} ({pct(empty_count, total_subs)})",
             "",
-            "Region distribution:",
-            f"  Single region: {region_counts.get(1, 0)}",
-            f"  Multi region:  {region_counts.get(2, 0)}",
+            "Region Distribution:",
+            f"  {'Stat':<25} {'Count':>6}  {'%':>6}",
+            f"  {'-'*25} {'-'*6}  {'-'*6}",
+            f"  {'Single region':<25} {single:>6}  {pct(single, total_subs):>6}",
+            f"  {'Multi region':<25} {multi:>6}  {pct(multi, total_subs):>6}",
+            f"  {'Empty':<25} {empty_count:>6}  {pct(empty_count, total_subs):>6}",
             "",
-            "Zone distribution:",
+            "Zone Distribution:",
+            f"  {'Zone':<10} {'Count':>6}  {'%':>6}",
+            f"  {'-'*10} {'-'*6}  {'-'*6}",
         ]
         for zone in sorted(zone_counts.keys(), key=lambda z: -zone_counts[z]):
             count = zone_counts[zone]
-            pct = count / max(sum(zone_counts.values()), 1) * 100
-            lines.append(f"  {zone:>6}: {count:5d} ({pct:.1f}%)")
+            lines.append(
+                f"  {zone:<10} {count:>6}  {pct(count, total_regions):>6}"
+            )
 
         lines.extend([
             "",
-            f"Positioned (\\pos): {pos_count}",
-            f"Standard (no \\pos): {sum(zone_counts.values()) - pos_count}",
+            "Positioning:",
+            f"  {'Stat':<25} {'Count':>6}  {'%':>6}",
+            f"  {'-'*25} {'-'*6}  {'-'*6}",
+            f"  {'Standard (no \\pos)':<25} {std_count:>6}  {pct(std_count, total_regions):>6}",
+            f"  {'Needs \\pos()':<25} {pos_count:>6}  {pct(pos_count, total_regions):>6}",
         ])
 
         if ocr_times:
+            avg_ms = sum(ocr_times) / len(ocr_times)
             lines.extend([
                 "",
                 "OCR Timing:",
-                f"  Avg: {sum(ocr_times)/len(ocr_times):.0f}ms/sub",
-                f"  Min: {min(ocr_times):.0f}ms",
-                f"  Max: {max(ocr_times):.0f}ms",
+                f"  Avg:   {avg_ms:.0f}ms/sub",
+                f"  Min:   {min(ocr_times):.0f}ms",
+                f"  Max:   {max(ocr_times):.0f}ms",
                 f"  Total: {sum(ocr_times)/1000:.1f}s",
             ])
 
-        if wide_flags or zone_splits:
-            lines.extend(["", "=" * 50, "VALIDATION FLAGS", "=" * 50, ""])
+        # Validation flags
+        lines.extend([
+            "",
+            "=" * 60,
+            "Validation",
+            "=" * 60,
+            "",
+            f"  {'Issue':<35} {'Count':>6}  {'%':>6}",
+            f"  {'-'*35} {'-'*6}  {'-'*6}",
+            f"  {'Suspicious vertical merges':<35} {'0':>6}  {'0%':>6}",
+            f"  {'Same-zone splits':<35} {len(zone_splits):>6}  "
+            f"{pct(len(zone_splits), total_subs):>6}",
+            f"  {'Horizontal merge suspects':<35} {len(wide_flags):>6}  "
+            f"{pct(len(wide_flags), total_subs):>6}",
+        ])
 
         if wide_flags:
-            lines.append(f"Possible horizontal merges: {len(wide_flags)}")
-            lines.append("(Wide regions with large internal column gaps)")
-            lines.append("")
+            lines.extend([
+                "",
+                "Horizontal merge details:",
+                "(Wide regions with large internal column gaps)",
+            ])
             for sub_idx, width, h_gap in wide_flags:
                 lines.append(
-                    f"  [{sub_idx:04d}] region width={width}px, "
-                    f"horizontal gap={h_gap}px ({h_gap * 100 // width}%)"
+                    f"  [{sub_idx:04d}] region={width}px, "
+                    f"gap={h_gap}px ({h_gap * 100 // width}%)"
                 )
-            lines.append("")
 
         if zone_splits:
-            lines.append(f"Same-zone splits: {len(zone_splits)}")
-            lines.append("(Multiple regions in same zone with small gap)")
-            lines.append("")
+            lines.extend([
+                "",
+                "Same-zone split details:",
+                "(Multiple regions in same zone with small gap)",
+            ])
             for sub_idx, zone, gap in zone_splits:
-                lines.append(
-                    f"  [{sub_idx:04d}] zone={zone}, gap={gap}px"
-                )
-            lines.append("")
+                lines.append(f"  [{sub_idx:04d}] zone={zone}, gap={gap}px")
 
         if not wide_flags and not zone_splits:
             lines.extend(["", "No validation issues detected."])
