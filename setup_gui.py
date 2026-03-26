@@ -92,6 +92,30 @@ OCR_VLM_MODELS = {
     },
 }
 
+# Optional dependency groups (name, packages, check_import)
+OPTIONAL_DEPS = {
+    "ocr-easyocr": {
+        "label": "EasyOCR",
+        "packages": ["easyocr"],
+        "check": "easyocr",
+    },
+    "ocr-paddle": {
+        "label": "PaddleOCR",
+        "packages": ["paddleocr"],
+        "check": "paddleocr",
+    },
+    "ocr-vlm": {
+        "label": "VLM OCR (transformers)",
+        "packages": ["transformers>=5.0", "huggingface-hub"],
+        "check": "transformers",
+    },
+    "ai-audio": {
+        "label": "Audio Separation",
+        "packages": ["audio-separator[gpu]"],
+        "check": "audio_separator",
+    },
+}
+
 # PaddleOCR compatible versions
 PADDLE_VERSION = "3.2.0"
 PADDLEOCR_VERSION = "3.3.0"
@@ -969,6 +993,48 @@ print(f"OK Download complete: {{model_dir}}")
             label=f"Downloading {model_name}...",
         )
 
+    def check_optional_deps(self) -> None:
+        """Check which optional dependencies are installed."""
+        self.window.clear_log()
+        self.window.log_info("Checking optional dependencies...\n")
+
+        script = """
+import importlib, sys
+
+deps = {deps_repr}
+for name, info in deps.items():
+    check = info["check"]
+    try:
+        mod = importlib.import_module(check)
+        ver = getattr(mod, "__version__", "unknown")
+        print(f"OK {{info['label']}}: installed ({{ver}})")
+    except ImportError:
+        print(f"MISSING {{info['label']}}: not installed")
+        print(f"  Packages: {{', '.join(info['packages'])}}")
+""".replace("{deps_repr}", repr(OPTIONAL_DEPS))
+
+        self._run_subprocess(
+            [str(VENV_PYTHON), "-c", script],
+            label="Checking optional dependencies...",
+        )
+
+    def install_optional_dep(self, dep_name: str) -> None:
+        """Install an optional dependency group."""
+        if dep_name not in OPTIONAL_DEPS:
+            self.window.log_error(f"Unknown dependency: {dep_name}")
+            return
+
+        info = OPTIONAL_DEPS[dep_name]
+        self.window.clear_log()
+        packages = " ".join(f'"{p}"' for p in info["packages"])
+        self.window.log_info(f"Installing {info['label']}...")
+        self.window.log_info(f"  Packages: {', '.join(info['packages'])}")
+
+        self._run_subprocess(
+            [str(VENV_PYTHON), "-m", "pip", "install"] + info["packages"],
+            label=f"Installing {info['label']}...",
+        )
+
     def download_easyocr_models(self) -> None:
         """Install EasyOCR and download its models."""
         self.window.clear_log()
@@ -1287,6 +1353,31 @@ class SetupWindow(QMainWindow):
                 (
                     "Qwen3.5-4B (Archival VLM OCR)",
                     lambda: self.controller.download_ocr_vlm_model("Qwen3.5-4B"),
+                ),
+            ],
+        )
+
+        # Optional Dependencies group
+        self._add_group(
+            sidebar_layout,
+            "Optional Deps",
+            [
+                ("Check Installed", self.controller.check_optional_deps),
+                (
+                    "Install: VLM OCR",
+                    lambda: self.controller.install_optional_dep("ocr-vlm"),
+                ),
+                (
+                    "Install: EasyOCR",
+                    lambda: self.controller.install_optional_dep("ocr-easyocr"),
+                ),
+                (
+                    "Install: PaddleOCR",
+                    lambda: self.controller.install_optional_dep("ocr-paddle"),
+                ),
+                (
+                    "Install: Audio Sep",
+                    lambda: self.controller.install_optional_dep("ai-audio"),
                 ),
             ],
         )
