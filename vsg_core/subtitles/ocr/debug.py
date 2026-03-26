@@ -107,6 +107,11 @@ class OCRDebugger:
         self.fix_indices: set[int] = set()
         self.low_confidence_indices: set[int] = set()
 
+        # VLM region data (annotated images, region info, positioned subs)
+        self.annotated_images: dict[int, np.ndarray] = {}
+        self.region_data: dict[int, list[dict]] = {}  # index -> [{region_id, zone, bbox, text}]
+        self.positioned_indices: set[int] = set()  # Indices with \pos() tags
+
     @property
     def debug_dir(self) -> Path:
         """Get the debug output directory path."""
@@ -176,6 +181,32 @@ class OCRDebugger:
                 self.subtitles[index].original_text = original_text
             self.fix_indices.add(index)
 
+    def add_annotated_image(self, index: int, image: np.ndarray) -> None:
+        """Store an annotated image (with region boxes drawn) for debug output."""
+        if not self.enabled:
+            return
+        self.annotated_images[index] = image
+
+    def add_region_data(
+        self,
+        index: int,
+        regions: list[dict],
+        has_pos: bool = False,
+    ) -> None:
+        """
+        Store region detection data for a subtitle.
+
+        Args:
+            index: Subtitle index
+            regions: List of dicts with region_id, zone, bbox, text, needs_pos
+            has_pos: Whether any region needs \\pos() tag
+        """
+        if not self.enabled:
+            return
+        self.region_data[index] = regions
+        if has_pos:
+            self.positioned_indices.add(index)
+
     def save(self):
         """Save all debug output to disk."""
         if not self.enabled:
@@ -205,6 +236,13 @@ class OCRDebugger:
 
         if self.low_confidence_indices:
             self._save_low_confidence()
+
+        # Save VLM-specific debug data
+        if self.annotated_images:
+            self._save_annotated_images()
+
+        if self.positioned_indices:
+            self._save_positioned()
 
     def _save_summary(self):
         """Save overall summary file."""
@@ -236,6 +274,14 @@ class OCRDebugger:
         if self.low_confidence_indices:
             lines.append(
                 f"  low_confidence/ - {len(self.low_confidence_indices)} images"
+            )
+        if self.annotated_images:
+            lines.append(
+                f"  annotated/ - {len(self.annotated_images)} images (region boxes)"
+            )
+        if self.positioned_indices:
+            lines.append(
+                f"  positioned/ - {len(self.positioned_indices)} subs with \\pos() tags"
             )
 
         summary_path.write_text("\n".join(lines), encoding="utf-8")
@@ -519,6 +565,64 @@ class OCRDebugger:
                 self._save_image(sub.image, folder / f"sub_{sub.index:04d}.png")
 
         (folder / "low_confidence.txt").write_text("\n".join(lines), encoding="utf-8")
+
+    def _save_annotated_images(self):
+        """Save annotated images with region boxes drawn."""
+        folder = self.debug_dir / "annotated"
+        folder.mkdir(parents=True, exist_ok=True)
+
+        for idx in sorted(self.annotated_images.keys()):
+            img = self.annotated_images[idx]
+            self._save_image(img, folder / f"sub_{idx:04d}.png")
+
+    def _save_positioned(self):
+        """Save positioned subtitle debug info (subs with \\pos() tags)."""
+        folder = self.debug_dir / "positioned"
+        folder.mkdir(parents=True, exist_ok=True)
+
+        lines = [
+            "Positioned Subtitles (\\pos() tags)",
+            "=" * 50,
+            "",
+            "These subtitles have non-standard positions (not bottom-center or top-center)",
+            "and use \\pos() tags for exact placement.",
+            "",
+        ]
+
+        for idx in sorted(self.positioned_indices):
+            sub = self.subtitles.get(idx)
+            regions = self.region_data.get(idx, [])
+
+            lines.append("-" * 50)
+            lines.append(f"Index: {idx}")
+            if sub:
+                lines.append(f"Time: {sub.start_time} -> {sub.end_time}")
+                lines.append(f"Text: {sub.raw_text}")
+
+            if regions:
+                lines.append(f"Regions: {len(regions)}")
+                for rd in regions:
+                    bbox = rd.get("bbox", [0, 0, 0, 0])
+                    lines.append(
+                        f"  R{rd.get('region_id', '?')}: "
+                        f"zone={rd.get('zone', '?')} "
+                        f"bbox=[{bbox[0]},{bbox[1]}]-[{bbox[2]},{bbox[3]}] "
+                        f"pos={rd.get('needs_pos', False)} "
+                        f'"{rd.get("text", "")[:60]}"'
+                    )
+            lines.append("")
+
+            # Save image if available
+            if sub and sub.image is not None:
+                self._save_image(sub.image, folder / f"sub_{idx:04d}.png")
+            # Also save annotated version if available
+            if idx in self.annotated_images:
+                self._save_image(
+                    self.annotated_images[idx],
+                    folder / f"sub_{idx:04d}_annotated.png",
+                )
+
+        (folder / "positioned.txt").write_text("\n".join(lines), encoding="utf-8")
 
     def _save_image(self, image: np.ndarray, path: Path):
         """Save a numpy image array to disk."""

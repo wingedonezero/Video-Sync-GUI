@@ -194,22 +194,30 @@ class SubtitleImageParser(ABC):
         pass
 
     @staticmethod
-    def detect_parser(file_path: Path) -> Optional["SubtitleImageParser"]:
+    def detect_parser(
+        file_path: Path, raw: bool = False
+    ) -> Optional["SubtitleImageParser"]:
         """
         Detect the appropriate parser for a file based on extension.
 
         Args:
             file_path: Path to the subtitle file
+            raw: If True, return a raw parser that preserves original
+                 colors/alpha (for VLM OCR). If False, return the standard
+                 parser with grayscale preprocessing (for traditional OCR).
 
         Returns:
             Appropriate parser instance, or None if no parser matches
         """
         from .vobsub import VobSubParser
-        # Future: from .pgs import PGSParser
 
         suffix = file_path.suffix.lower()
 
         if suffix in (".idx", ".sub"):
+            if raw:
+                from .raw_vobsub import RawVobSubParser
+
+                return RawVobSubParser()
             return VobSubParser()
         # Future: elif suffix == '.sup':
         #     return PGSParser()

@@ -132,7 +132,9 @@ SyncStabilityOutlierModeStr = Literal["any", "threshold"]
 # =========================================================================
 
 # OCR engine
-OcrEngineStr = Literal["tesseract", "easyocr", "paddleocr"]
+OcrEngineStr = Literal[
+    "tesseract", "easyocr", "paddleocr", "lfm2vl-450m", "qwen35-4b"
+]
 
 # OCR output format
 OcrOutputFormatStr = Literal["ass", "srt"]

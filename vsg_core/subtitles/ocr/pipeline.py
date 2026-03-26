@@ -40,6 +40,9 @@ from .postprocess import OCRPostProcessor, create_postprocessor
 from .preprocessing import ImagePreprocessor, create_preprocessor
 from .report import OCRReport, SubtitleOCRResult, create_report
 
+# VLM engine names that use the new region-based pipeline
+_VLM_ENGINES = {"lfm2vl-450m", "qwen35-4b"}
+
 
 @dataclass(slots=True)
 class PipelineConfig:
@@ -127,6 +130,7 @@ class OCRPipeline:
         self._preprocessor: ImagePreprocessor | None = None
         self._engine: OCREngine | None = None
         self._postprocessor: OCRPostProcessor | None = None
+        self._vlm_backend = None  # VLM backend (loaded in _process_subtitles_vlm)
         self._extra_engines: list = []  # Additional engines for parallel processing
 
     def _create_config(self) -> PipelineConfig:
@@ -218,15 +222,23 @@ class OCRPipeline:
 
             # Log which OCR engine is being used
             backend_setting = self.settings.get("ocr_engine", "tesseract")
-            # Access engine property to initialize it and get the actual backend name
-            engine_name = getattr(self.engine, "name", "tesseract")
-            self._log_progress(
-                f"Using OCR engine: {engine_name} (setting: {backend_setting})", 0.02
-            )
+            is_vlm = backend_setting in _VLM_ENGINES
 
-            # Step 1: Detect and create parser
+            if is_vlm:
+                self._log_progress(
+                    f"Using VLM OCR engine: {backend_setting}", 0.02
+                )
+            else:
+                # Access engine property to initialize it and get the actual backend name
+                engine_name = getattr(self.engine, "name", "tesseract")
+                self._log_progress(
+                    f"Using OCR engine: {engine_name} (setting: {backend_setting})",
+                    0.02,
+                )
+
+            # Step 1: Detect and create parser (raw for VLM, standard for traditional)
             self._log_progress("Parsing subtitle file", 0.05)
-            parser = SubtitleImageParser.detect_parser(input_path)
+            parser = SubtitleImageParser.detect_parser(input_path, raw=is_vlm)
             if parser is None:
                 result.error = f"No parser available for file: {input_path}"
                 return result
@@ -273,28 +285,33 @@ class OCRPipeline:
             )
 
             # Step 4: Process each subtitle
-            max_workers = max(1, self.config.max_workers)
-
-            # Reduce workers for small subtitle counts to avoid race conditions
-            # PaddleOCR can segfault if processing finishes before all workers initialize
-            subtitle_count = len(subtitle_images)
-            if subtitle_count < 30 and max_workers > 1:
-                original_workers = max_workers
-                max_workers = 1
-                self._log_progress(
-                    f"Using 1 worker for {subtitle_count} subtitles "
-                    f"(configured: {original_workers}, threshold: 30)",
-                    0.10,
-                )
-
-            if max_workers > 1:
-                ocr_results = self._process_subtitles_parallel(
-                    subtitle_images, max_workers, report, debugger
+            if is_vlm:
+                ocr_results = self._process_subtitles_vlm(
+                    subtitle_images, backend_setting, report, debugger
                 )
             else:
-                ocr_results = self._process_subtitles_sequential(
-                    subtitle_images, report, debugger
-                )
+                max_workers = max(1, self.config.max_workers)
+
+                # Reduce workers for small subtitle counts to avoid race conditions
+                # PaddleOCR can segfault if processing finishes before all workers initialize
+                subtitle_count = len(subtitle_images)
+                if subtitle_count < 30 and max_workers > 1:
+                    original_workers = max_workers
+                    max_workers = 1
+                    self._log_progress(
+                        f"Using 1 worker for {subtitle_count} subtitles "
+                        f"(configured: {original_workers}, threshold: 30)",
+                        0.10,
+                    )
+
+                if max_workers > 1:
+                    ocr_results = self._process_subtitles_parallel(
+                        subtitle_images, max_workers, report, debugger
+                    )
+                else:
+                    ocr_results = self._process_subtitles_sequential(
+                        subtitle_images, report, debugger
+                    )
 
             # Step 5: Finalize report
             report.finalize()
@@ -304,7 +321,10 @@ class OCRPipeline:
             self._log_progress("Creating output", 0.92)
 
             # Create SubtitleData with all OCR metadata
-            engine_name = getattr(self.engine, "name", "tesseract")
+            engine_name = (
+                backend_setting if is_vlm
+                else getattr(self.engine, "name", "tesseract")
+            )
             source_res = (
                 subtitle_images[0].frame_width if subtitle_images else 720,
                 subtitle_images[0].frame_height if subtitle_images else 480,
@@ -383,9 +403,249 @@ class OCRPipeline:
                 engine.cleanup()
         self._extra_engines.clear()
 
+        # Clean up VLM backend
+        if self._vlm_backend is not None:
+            self._vlm_backend.unload()
+            self._vlm_backend = None
+
         # Clear other cached objects
         self._preprocessor = None
         self._postprocessor = None
+
+    def _process_subtitles_vlm(
+        self,
+        subtitle_images: list[SubtitleImage],
+        engine_name: str,
+        report: OCRReport,
+        debugger: OCRDebugger,
+    ) -> list[OCRSubtitleResult]:
+        """Process subtitles using VLM backend with region detection."""
+        import torch
+
+        from .annotator import annotate_image, rgba_to_rgb_on_black
+        from .region_detector import detect_regions_pixel
+        from .vlm_backends import get_vlm_backend
+
+        logger = logging.getLogger(__name__)
+        total = len(subtitle_images)
+
+        # ── Load model ────────────────────────────────────────────────
+        self._log_progress(f"Loading model: {engine_name}", 0.10)
+        load_start = time.time()
+        backend = get_vlm_backend(engine_name)
+        backend.load()
+        self._vlm_backend = backend
+        load_time = time.time() - load_start
+
+        vram = torch.cuda.memory_allocated() / 1024**3
+        self._log_progress(
+            f"Model loaded in {load_time:.1f}s (VRAM: {vram:.2f}GB)", 0.15
+        )
+
+        # ── Warmup ────────────────────────────────────────────────────
+        self._log_progress("Warming up model...", 0.16)
+        sub0 = subtitle_images[0]
+        rgb0 = rgba_to_rgb_on_black(sub0.image)
+        regions0 = detect_regions_pixel(sub0.image)
+        if regions0:
+            if backend.uses_annotated:
+                ann0 = annotate_image(rgb0, regions0)
+                with torch.inference_mode():
+                    backend.ocr(ann0, regions0)
+            else:
+                with torch.inference_mode():
+                    backend.ocr(rgb0, regions0, raw_image=rgb0)
+
+        # ── Process subtitles ─────────────────────────────────────────
+        ocr_results: list[OCRSubtitleResult] = []
+        ocr_start = time.time()
+        ocr_times: list[float] = []
+        empty_count = 0
+        region_counts = {1: 0, 2: 0}  # 1-region, 2+ region
+        zone_counts: dict[str, int] = {}
+        pos_count = 0
+
+        for i, sub_image in enumerate(subtitle_images):
+            # Progress every 25 subs (not spammy)
+            if i % 25 == 0 or i == total - 1:
+                elapsed = time.time() - ocr_start
+                avg_ms = (elapsed / max(i, 1)) * 1000
+                eta = (total - i) * avg_ms / 1000
+                progress = 0.18 + (0.72 * i / total)
+                self._log_progress(
+                    f"OCR {i+1}/{total} "
+                    f"({avg_ms:.0f}ms/sub, ETA {eta:.0f}s)",
+                    progress,
+                )
+
+            sub_start = time.time()
+
+            # Step 1: Detect regions
+            regions = detect_regions_pixel(sub_image.image)
+
+            if not regions:
+                empty_count += 1
+                continue
+
+            frame_h = sub_image.image.shape[0]
+            frame_w = sub_image.image.shape[1]
+
+            # Track region stats
+            if len(regions) == 1:
+                region_counts[1] = region_counts.get(1, 0) + 1
+            else:
+                region_counts[2] = region_counts.get(2, 0) + 1
+
+            # Step 2: Run OCR
+            rgb = rgba_to_rgb_on_black(sub_image.image)
+
+            if backend.uses_annotated:
+                annotated = annotate_image(rgb, regions)
+                with torch.inference_mode():
+                    vlm_regions = backend.ocr(annotated, regions)
+            else:
+                with torch.inference_mode():
+                    vlm_regions = backend.ocr(rgb, regions, raw_image=rgb)
+
+            sub_ms = (time.time() - sub_start) * 1000
+            ocr_times.append(sub_ms)
+
+            # Step 3: Create one OCRSubtitleResult per region
+            for vlm_r in vlm_regions:
+                if not vlm_r.text:
+                    continue
+
+                region = next(
+                    (r for r in regions if r.region_id == vlm_r.region_id), None
+                )
+                if region is None:
+                    continue
+
+                zone = region.classify_zone(frame_h, frame_w)
+                needs_pos = region.needs_pos_tag(frame_h, frame_w)
+
+                zone_counts[zone] = zone_counts.get(zone, 0) + 1
+                if needs_pos:
+                    pos_count += 1
+
+                # Post-process text
+                raw_text = vlm_r.text
+                processed_text = vlm_r.text
+                fixes = {}
+                unknown = []
+
+                try:
+                    post_result = self.postprocessor.process(
+                        vlm_r.text,
+                        confidence=90.0,
+                        timestamp=f"{sub_image.start_ms}ms",
+                    )
+                    processed_text = post_result.text
+                    fixes = getattr(post_result, "fixes_applied", {})
+                    unknown = getattr(post_result, "unknown_words", [])
+                except Exception:
+                    pass  # Post-processing is optional
+
+                ocr_result = OCRSubtitleResult(
+                    index=sub_image.index,
+                    start_ms=float(sub_image.start_ms),
+                    end_ms=float(sub_image.end_ms),
+                    text=processed_text,
+                    confidence=90.0,
+                    raw_ocr_text=raw_text,
+                    fixes_applied=fixes,
+                    unknown_words=unknown,
+                    x=region.x1,
+                    y=region.y1,
+                    width=region.width,
+                    height=region.height,
+                    frame_width=frame_w,
+                    frame_height=frame_h,
+                    is_forced=sub_image.is_forced,
+                    zone=zone,
+                    needs_pos=needs_pos,
+                    pos_x=region.center_x,
+                    pos_y=region.center_y,
+                )
+                ocr_results.append(ocr_result)
+
+                # Report tracking
+                report.add_subtitle(
+                    sub_image.index,
+                    sub_image.start_time,
+                    sub_image.end_time,
+                    processed_text,
+                    90.0,
+                )
+
+            # Debug: save images, region data, positioned flags
+            if self.config.debug_output:
+                full_text = " | ".join(
+                    vr.text for vr in vlm_regions if vr.text
+                )
+                debugger.add_subtitle(
+                    sub_image.index,
+                    sub_image.start_time,
+                    sub_image.end_time,
+                    full_text,
+                    90.0,
+                    sub_image.image,
+                    raw_ocr_text=full_text,
+                )
+
+                # Save annotated image (with boxes drawn)
+                if backend.uses_annotated:
+                    debugger.add_annotated_image(sub_image.index, annotated)
+
+                # Save region data
+                has_pos = any(
+                    r.needs_pos_tag(frame_h, frame_w) for r in regions
+                )
+                region_dicts = [
+                    {
+                        "region_id": r.region_id,
+                        "zone": r.classify_zone(frame_h, frame_w),
+                        "bbox": [r.x1, r.y1, r.x2, r.y2],
+                        "needs_pos": r.needs_pos_tag(frame_h, frame_w),
+                        "text": next(
+                            (vr.text for vr in vlm_regions
+                             if vr.region_id == r.region_id),
+                            "",
+                        ),
+                    }
+                    for r in regions
+                ]
+                debugger.add_region_data(
+                    sub_image.index, region_dicts, has_pos=has_pos
+                )
+
+        # ── Summary ───────────────────────────────────────────────────
+        total_time = time.time() - ocr_start
+        avg_ms = sum(ocr_times) / max(len(ocr_times), 1)
+
+        summary = (
+            f"OCR complete: {len(ocr_results)} events from {total} subs "
+            f"in {total_time:.1f}s ({avg_ms:.0f}ms/sub avg)"
+        )
+        self._log_progress(summary, 0.90)
+        logger.info(summary)
+
+        # Region analysis summary (normal log)
+        logger.info(
+            f"Region analysis: {region_counts.get(1, 0)} single-region, "
+            f"{region_counts.get(2, 0)} multi-region, {empty_count} empty"
+        )
+        if pos_count > 0:
+            logger.info(
+                f"Positioning: {pos_count} events need \\pos() tags"
+            )
+        if zone_counts:
+            zones_str = ", ".join(
+                f"{z}={c}" for z, c in sorted(zone_counts.items(), key=lambda x: -x[1])
+            )
+            logger.info(f"Zone distribution: {zones_str}")
+
+        return ocr_results
 
     def _process_subtitles_sequential(
         self,

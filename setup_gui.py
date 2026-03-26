@@ -79,6 +79,19 @@ ISC_DOWNLOAD_URL = (
 ISC_WEIGHTS_FILENAME = "isc_ft_v107_weights.pt"
 ISC_MODEL_DIR = PROJECT_DIR / "models" / "isc"
 
+# OCR VLM models
+OCR_MODELS_DIR = PROJECT_DIR / "models" / "ocr"
+OCR_VLM_MODELS = {
+    "LFM2-VL-450M": {
+        "repo_id": "LiquidAI/LFM2-VL-450M",
+        "size_hint": "~900MB",
+    },
+    "Qwen3.5-4B": {
+        "repo_id": "Qwen/Qwen3.5-4B",
+        "size_hint": "~8.7GB",
+    },
+}
+
 # PaddleOCR compatible versions
 PADDLE_VERSION = "3.2.0"
 PADDLEOCR_VERSION = "3.3.0"
@@ -905,6 +918,57 @@ print(f"OK Saved stripped weights: {{weights_path.name}} ({{size_mb:.0f}} MB, {{
             label="Downloading ISC weights...",
         )
 
+    def download_ocr_vlm_model(self, model_name: str) -> None:
+        """Download an OCR VLM model from HuggingFace."""
+        self.window.clear_log()
+
+        if model_name not in OCR_VLM_MODELS:
+            self.window.log_error(f"Unknown OCR model: {model_name}")
+            return
+
+        model_info = OCR_VLM_MODELS[model_name]
+        model_dir = OCR_MODELS_DIR / model_name
+
+        if (model_dir / "config.json").is_file():
+            size_mb = sum(
+                f.stat().st_size for f in model_dir.rglob("*") if f.is_file()
+            ) / 1024 / 1024
+            self.window.log_success(
+                f"{model_name} already downloaded ({size_mb:.0f} MB): {model_dir}"
+            )
+            return
+
+        repo_id = model_info["repo_id"]
+        size_hint = model_info["size_hint"]
+        self.window.log_info(f"Downloading {model_name} ({size_hint})...")
+        self.window.log_info(f"  Source: huggingface.co/{repo_id}")
+        self.window.log_info(f"  Destination: {model_dir}")
+
+        script = f"""
+import sys
+from pathlib import Path
+
+model_dir = Path({str(model_dir)!r})
+model_dir.mkdir(parents=True, exist_ok=True)
+
+try:
+    from huggingface_hub import snapshot_download
+except ImportError:
+    print("ERROR: huggingface_hub not installed. Run: pip install huggingface-hub")
+    sys.exit(1)
+
+print("Downloading from HuggingFace Hub...")
+snapshot_download(
+    {repo_id!r},
+    local_dir=str(model_dir),
+)
+print(f"OK Download complete: {{model_dir}}")
+"""
+        self._run_subprocess(
+            [str(VENV_PYTHON), "-c", script],
+            label=f"Downloading {model_name}...",
+        )
+
     def download_easyocr_models(self) -> None:
         """Install EasyOCR and download its models."""
         self.window.clear_log()
@@ -1216,6 +1280,14 @@ class SetupWindow(QMainWindow):
                 ("ISC Weights (Neural Match)", self.controller.download_isc_model),
                 ("EasyOCR Models", self.controller.download_easyocr_models),
                 ("PaddleOCR Models", self.controller.download_paddleocr_models),
+                (
+                    "LFM2-VL-450M (Fast VLM OCR)",
+                    lambda: self.controller.download_ocr_vlm_model("LFM2-VL-450M"),
+                ),
+                (
+                    "Qwen3.5-4B (Archival VLM OCR)",
+                    lambda: self.controller.download_ocr_vlm_model("Qwen3.5-4B"),
+                ),
             ],
         )
 
