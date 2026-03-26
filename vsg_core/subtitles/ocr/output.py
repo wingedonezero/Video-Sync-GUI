@@ -408,11 +408,13 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
                 merged.add(j)
                 found_merge = True
                 j += 1
-            elif events[j].style == style:
-                # Same style but different text or gap too large — stop
-                break
             else:
-                # Different style — skip (e.g., Default between Top events)
+                # Different text or gap too large — skip but keep looking
+                # Multi-region subs interleave events from different regions
+                # (e.g., Lisette, Her maybe?, Lisette, Then you're...)
+                # Stop if we're too far in time from the original event
+                if events[j].start_ms - events[i].end_ms > max_gap_ms * 10:
+                    break
                 j += 1
 
         if not found_merge:
