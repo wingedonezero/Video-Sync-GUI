@@ -475,6 +475,14 @@ class OCRPipeline:
         four_plus_regions: list[tuple[int, int]] = []  # (sub_idx, count)
         per_sub_data: list[dict] = []  # full per-sub tracking for debug
 
+        # Line analysis tracking
+        from collections import defaultdict
+        line_counts: dict[int, int] = defaultdict(int)  # lines_per_region -> count
+        all_internal_gaps: list[int] = []  # gaps between lines within regions
+        all_inter_gaps: list[int] = []  # gaps between separate regions
+        all_region_widths: list[int] = []
+        all_region_heights: list[int] = []
+
         for i, sub_image in enumerate(subtitle_images):
             # Progress every 25 subs (not spammy)
             if i % 25 == 0 or i == total - 1:
@@ -509,16 +517,66 @@ class OCRPipeline:
             if n_regions >= 4:
                 four_plus_regions.append((sub_image.index, n_regions))
 
-            # Per-sub tracking for debug
+            # Per-sub tracking + line analysis
+            import cv2 as _cv2
+
+            _mask = (
+                sub_image.image[:, :, 3]
+                if sub_image.image.ndim == 3 and sub_image.image.shape[2] == 4
+                else _cv2.cvtColor(sub_image.image, _cv2.COLOR_RGB2GRAY)
+                if sub_image.image.ndim == 3
+                else sub_image.image
+            )
+
             sub_regions_info = []
             for r in regions:
                 zone = r.classify_zone(frame_h, frame_w)
+                all_region_widths.append(r.width)
+                all_region_heights.append(r.height)
+
+                # Line analysis: scan rows within region
+                _crop = _mask[r.y1:r.y2, r.x1:r.x2]
+                _n_lines = 0
+                _max_gap = 0
+                if _crop.size > 0:
+                    _row_text = np.any(_crop > 10, axis=1)
+                    _lines = []
+                    _in_l = False
+                    _ls = 0
+                    for _y, _has in enumerate(_row_text):
+                        if _has and not _in_l:
+                            _ls = _y
+                            _in_l = True
+                        elif not _has and _in_l:
+                            _lines.append((_ls, _y))
+                            _in_l = False
+                    if _in_l:
+                        _lines.append((_ls, len(_row_text)))
+                    _n_lines = len(_lines)
+                    for _li in range(1, len(_lines)):
+                        _g = _lines[_li][0] - _lines[_li - 1][1]
+                        if _g > 0:
+                            all_internal_gaps.append(_g)
+                        _max_gap = max(_max_gap, _g)
+
+                line_counts[_n_lines] += 1
+
                 sub_regions_info.append({
                     "id": r.region_id, "zone": zone,
                     "bbox": [r.x1, r.y1, r.x2, r.y2],
                     "size": f"{r.width}x{r.height}",
                     "pos": r.needs_pos_tag(frame_h, frame_w),
+                    "lines": _n_lines,
+                    "max_gap": _max_gap,
                 })
+
+            # Inter-region gaps
+            if n_regions >= 2:
+                _sorted = sorted(regions, key=lambda _r: _r.y1)
+                for _ri in range(1, len(_sorted)):
+                    _g = _sorted[_ri].y1 - _sorted[_ri - 1].y2
+                    if _g > 0:
+                        all_inter_gaps.append(_g)
             if n_regions > 1 or any(ri["pos"] for ri in sub_regions_info):
                 per_sub_data.append({
                     "index": sub_image.index,
@@ -528,8 +586,6 @@ class OCRPipeline:
                 })
 
             # Anomaly checks
-            import cv2 as _cv2
-
             for r in regions:
                 # Tiny region
                 if r.width < 10 or r.height < 5:
@@ -806,6 +862,8 @@ class OCRPipeline:
                 wide_region_flags, same_zone_splits,
                 tiny_regions, huge_regions, very_tall_single,
                 four_plus_regions, per_sub_data,
+                dict(line_counts), all_internal_gaps, all_inter_gaps,
+                all_region_widths, all_region_heights,
             )
 
         return ocr_results
@@ -821,11 +879,16 @@ class OCRPipeline:
         ocr_times: list[float],
         wide_flags: list[tuple[int, int, int]],
         zone_splits: list[tuple[int, str, int]],
-        tiny_regions: list[tuple[int, int, int]] | None = None,
-        huge_regions: list[tuple[int, int, int]] | None = None,
-        very_tall_single: list[tuple[int, int, int]] | None = None,
-        four_plus_regions: list[tuple[int, int]] | None = None,
+        tiny_regions: list | None = None,
+        huge_regions: list | None = None,
+        very_tall_single: list | None = None,
+        four_plus_regions: list | None = None,
         per_sub_data: list[dict] | None = None,
+        line_counts: dict | None = None,
+        internal_gaps: list[int] | None = None,
+        inter_gaps: list[int] | None = None,
+        region_widths: list[int] | None = None,
+        region_heights: list[int] | None = None,
     ) -> None:
         """Save full pixel analysis and validation to debug output."""
         tiny_regions = tiny_regions or []
@@ -833,6 +896,11 @@ class OCRPipeline:
         very_tall_single = very_tall_single or []
         four_plus_regions = four_plus_regions or []
         per_sub_data = per_sub_data or []
+        line_counts = line_counts or {}
+        internal_gaps = internal_gaps or []
+        inter_gaps = inter_gaps or []
+        region_widths = region_widths or []
+        region_heights = region_heights or []
         analysis_dir = debugger.debug_dir / "pixel_analysis"
         analysis_dir.mkdir(parents=True, exist_ok=True)
 
@@ -878,6 +946,52 @@ class OCRPipeline:
             f"  {'Standard (no \\pos)':<25} {std_count:>6}  {pct(std_count, total_regions):>6}",
             f"  {'Needs \\pos()':<25} {pos_count:>6}  {pct(pos_count, total_regions):>6}",
         ])
+
+        # Lines per region
+        if line_counts:
+            lines.extend([
+                "",
+                "Lines Per Region:",
+                f"  {'Lines':<10} {'Count':>6}  {'%':>6}",
+                f"  {'-'*10} {'-'*6}  {'-'*6}",
+            ])
+            total_lc = sum(line_counts.values())
+            for lc in sorted(line_counts.keys()):
+                cnt = line_counts[lc]
+                lines.append(
+                    f"  {lc:<10} {cnt:>6}  {pct(cnt, total_lc):>6}"
+                )
+
+        # Gap analysis
+        if internal_gaps:
+            ig = sorted(internal_gaps)
+            lines.extend([
+                "",
+                "Internal Gaps (between lines within regions):",
+                f"  Min: {ig[0]}px  Max: {ig[-1]}px  "
+                f"Avg: {sum(ig)/len(ig):.1f}px  Median: {ig[len(ig)//2]}px",
+            ])
+        if inter_gaps:
+            eg = sorted(inter_gaps)
+            lines.extend([
+                "",
+                "Inter-Region Gaps (between separate regions):",
+                f"  Min: {eg[0]}px  Max: {eg[-1]}px  "
+                f"Avg: {sum(eg)/len(eg):.1f}px  Median: {eg[len(eg)//2]}px",
+            ])
+
+        # Region sizes
+        if region_widths:
+            rw = sorted(region_widths)
+            rh = sorted(region_heights)
+            lines.extend([
+                "",
+                "Region Sizes:",
+                f"  Width:  min={rw[0]}  max={rw[-1]}  "
+                f"avg={sum(rw)/len(rw):.0f}  median={rw[len(rw)//2]}",
+                f"  Height: min={rh[0]}  max={rh[-1]}  "
+                f"avg={sum(rh)/len(rh):.0f}  median={rh[len(rh)//2]}",
+            ])
 
         if ocr_times:
             avg_ms = sum(ocr_times) / len(ocr_times)
@@ -985,10 +1099,12 @@ class OCRPipeline:
                 for ri in sd["regions"]:
                     bbox = ri["bbox"]
                     pos_tag = " \\pos" if ri["pos"] else ""
+                    lines_info = f" lines={ri.get('lines', '?')}" if ri.get("lines", 0) > 0 else ""
+                    gap_info = f" max_gap={ri.get('max_gap', 0)}px" if ri.get("max_gap", 0) > 0 else ""
                     detail_lines.append(
                         f"  R{ri['id']}: {ri['zone']}{pos_tag} "
                         f"[{bbox[0]},{bbox[1]}]-[{bbox[2]},{bbox[3]}] "
-                        f"({ri['size']})"
+                        f"({ri['size']}){lines_info}{gap_info}"
                     )
                 detail_lines.append("")
 
