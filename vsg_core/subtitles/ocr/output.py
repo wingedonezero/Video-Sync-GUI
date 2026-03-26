@@ -236,10 +236,11 @@ def create_subtitle_data_from_ocr(
                 style = "Top"
                 positioned_count += 1
             else:
-                # Non-standard position — Default style with \pos() override
+                # Non-standard position — Default style with \an5\pos() override
+                # \an5 = center-center anchor (matches our center coordinates)
                 # Coordinates are in source resolution space, same as PlayRes
                 style = "Default"
-                text = f"{{\\pos({result.pos_x},{result.pos_y})}}{text}"
+                text = f"{{\\an5\\pos({result.pos_x},{result.pos_y})}}{text}"
                 positioned_count += 1
 
             event = SubtitleEvent(
@@ -408,11 +409,13 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
                 merged.add(j)
                 found_merge = True
                 j += 1
-            elif events[j].style == style:
-                # Same style but different text or gap too large — stop
-                break
             else:
-                # Different style — skip (e.g., Default between Top events)
+                # Different text or gap too large — skip but keep looking
+                # Multi-region subs interleave events from different regions
+                # (e.g., Lisette, Her maybe?, Lisette, Then you're...)
+                # Stop if we're too far in time from the original event
+                if events[j].start_ms - events[i].end_ms > max_gap_ms * 10:
+                    break
                 j += 1
 
         if not found_merge:
