@@ -106,7 +106,7 @@ OPTIONAL_DEPS = {
     },
     "ocr-vlm": {
         "label": "VLM OCR (transformers)",
-        "packages": ["transformers>=5.0", "huggingface-hub"],
+        "packages": ["transformers>=5.0", "huggingface-hub", "accelerate"],
         "check": "transformers",
     },
     "ai-audio": {
