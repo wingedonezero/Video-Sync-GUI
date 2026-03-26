@@ -566,6 +566,10 @@ class OCRPipeline:
             ocr_times.append(sub_ms)
 
             # Step 3: Add to debugger FIRST (so add_unknown_word/add_fix can find it)
+            # Generate annotated image for debug regardless of backend type
+            if self.config.debug_output or not hasattr(self, '_debug_annotated'):
+                debug_annotated = annotate_image(rgb, regions)
+
             if self.config.debug_output:
                 full_text = " | ".join(
                     vr.text for vr in vlm_regions if vr.text
@@ -580,9 +584,8 @@ class OCRPipeline:
                     raw_ocr_text=full_text,
                 )
 
-                # Save annotated image (with boxes drawn)
-                if backend.uses_annotated:
-                    debugger.add_annotated_image(sub_image.index, annotated)
+                # Always save annotated image with region boxes for debug
+                debugger.add_annotated_image(sub_image.index, debug_annotated)
 
                 # Save region data
                 has_pos = any(
@@ -740,29 +743,68 @@ class OCRPipeline:
                 0.91,
             )
 
-        # Debug: write validation details
-        if self.config.debug_output and (wide_region_flags or same_zone_splits):
-            self._save_validation_debug(
-                debugger, wide_region_flags, same_zone_splits
+        # Debug: write pixel analysis + validation details
+        if self.config.debug_output:
+            self._save_pixel_analysis_debug(
+                debugger, total, empty_count, region_counts,
+                zone_counts, pos_count, ocr_times,
+                wide_region_flags, same_zone_splits,
             )
 
         return ocr_results
 
-    def _save_validation_debug(
+    def _save_pixel_analysis_debug(
         self,
         debugger: OCRDebugger,
+        total_subs: int,
+        empty_count: int,
+        region_counts: dict,
+        zone_counts: dict,
+        pos_count: int,
+        ocr_times: list[float],
         wide_flags: list[tuple[int, int, int]],
         zone_splits: list[tuple[int, str, int]],
     ) -> None:
-        """Save validation issue details to debug output."""
-        validation_dir = debugger.debug_dir / "validation_flags"
-        validation_dir.mkdir(parents=True, exist_ok=True)
+        """Save full pixel analysis and validation to debug output."""
+        analysis_dir = debugger.debug_dir / "pixel_analysis"
+        analysis_dir.mkdir(parents=True, exist_ok=True)
 
         lines = [
-            "Region Detection Validation",
+            "Pixel Region Detection Analysis",
             "=" * 50,
             "",
+            f"Total subtitles: {total_subs}",
+            f"Empty (no text): {empty_count}",
+            "",
+            "Region distribution:",
+            f"  Single region: {region_counts.get(1, 0)}",
+            f"  Multi region:  {region_counts.get(2, 0)}",
+            "",
+            "Zone distribution:",
         ]
+        for zone in sorted(zone_counts.keys(), key=lambda z: -zone_counts[z]):
+            count = zone_counts[zone]
+            pct = count / max(sum(zone_counts.values()), 1) * 100
+            lines.append(f"  {zone:>6}: {count:5d} ({pct:.1f}%)")
+
+        lines.extend([
+            "",
+            f"Positioned (\\pos): {pos_count}",
+            f"Standard (no \\pos): {sum(zone_counts.values()) - pos_count}",
+        ])
+
+        if ocr_times:
+            lines.extend([
+                "",
+                "OCR Timing:",
+                f"  Avg: {sum(ocr_times)/len(ocr_times):.0f}ms/sub",
+                f"  Min: {min(ocr_times):.0f}ms",
+                f"  Max: {max(ocr_times):.0f}ms",
+                f"  Total: {sum(ocr_times)/1000:.1f}s",
+            ])
+
+        if wide_flags or zone_splits:
+            lines.extend(["", "=" * 50, "VALIDATION FLAGS", "=" * 50, ""])
 
         if wide_flags:
             lines.append(f"Possible horizontal merges: {len(wide_flags)}")
@@ -771,7 +813,7 @@ class OCRPipeline:
             for sub_idx, width, h_gap in wide_flags:
                 lines.append(
                     f"  [{sub_idx:04d}] region width={width}px, "
-                    f"horizontal gap={h_gap}px ({h_gap*100//width}%)"
+                    f"horizontal gap={h_gap}px ({h_gap * 100 // width}%)"
                 )
             lines.append("")
 
@@ -785,7 +827,10 @@ class OCRPipeline:
                 )
             lines.append("")
 
-        (validation_dir / "validation_flags.txt").write_text(
+        if not wide_flags and not zone_splits:
+            lines.extend(["", "No validation issues detected."])
+
+        (analysis_dir / "pixel_analysis.txt").write_text(
             "\n".join(lines), encoding="utf-8"
         )
 
