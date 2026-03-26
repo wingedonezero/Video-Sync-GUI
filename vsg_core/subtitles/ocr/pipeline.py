@@ -625,12 +625,17 @@ class OCRPipeline:
                 ocr_results.append(ocr_result)
 
                 # Report tracking
-                report.add_subtitle(
-                    sub_image.index,
-                    sub_image.start_time,
-                    sub_image.end_time,
-                    processed_text,
-                    90.0,
+                report.add_subtitle_result(
+                    SubtitleOCRResult(
+                        index=sub_image.index,
+                        timestamp_start=sub_image.start_time,
+                        timestamp_end=sub_image.end_time,
+                        text=processed_text,
+                        confidence=90.0,
+                        fixes_applied=fixes if isinstance(fixes, dict) else {},
+                        unknown_words=unknown if isinstance(unknown, list) else [],
+                        is_positioned=needs_pos,
+                    )
                 )
 
             # Debug: save images, region data, positioned flags
