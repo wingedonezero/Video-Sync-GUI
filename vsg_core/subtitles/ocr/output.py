@@ -92,6 +92,12 @@ class OCRSubtitleResult:
     # Per-line region classifications from pipeline
     line_regions: list[LineRegion] = field(default_factory=list)
 
+    # VLM region classification (set by VLM pipeline, empty for traditional OCR)
+    zone: str = ""  # e.g., "bot-C", "top-C", "mid-L" — from region_detector
+    needs_pos: bool = False  # True if \pos() tag needed in ASS
+    pos_x: int = 0  # Center X for \pos() tag
+    pos_y: int = 0  # Center Y for \pos() tag
+
     # Debug image reference
     debug_image: str = ""  # e.g., "sub_0000.png"
 
@@ -183,10 +189,24 @@ def create_subtitle_data_from_ocr(
         margin_v=config.margin_v,
     )
 
+    # Create sign style for positioned subtitles (\pos() tagged)
+    sign_style = SubtitleStyle(
+        name="Sign",
+        fontname=config.font_name,
+        fontsize=float(config.font_size),
+        primary_color=config.primary_color,
+        outline_color=config.outline_color,
+        outline=config.outline_width,
+        shadow=config.shadow_depth,
+        alignment=5,  # Middle center (anchor for \pos)
+        margin_v=config.margin_v,
+    )
+
     data.styles = OrderedDict(
         [
             ("Default", default_style),
             ("Top", top_style),
+            ("Sign", sign_style),
         ]
     )
 
@@ -221,14 +241,37 @@ def create_subtitle_data_from_ocr(
             dominant_color=result.dominant_color,
         )
 
+        # VLM zone-based positioning (takes precedence over line_regions)
+        if result.zone:
+            text = result.text.replace("\n", "\\N")
+            if result.zone == "bot-C":
+                style = "Default"
+            elif result.zone == "top-C":
+                style = "Top"
+                positioned_count += 1
+            else:
+                # Non-standard position — use Sign style with \pos() tag
+                style = "Sign"
+                text = f"{{\\pos({result.pos_x},{result.pos_y})}}{text}"
+                positioned_count += 1
+
+            event = SubtitleEvent(
+                start_ms=float(result.start_ms),
+                end_ms=float(result.end_ms),
+                text=text,
+                style=style,
+                original_index=result.index,
+            )
+            event.ocr = ocr_event_data
+            data.events.append(event)
+
+        # Traditional line_regions approach (Tesseract/EasyOCR/PaddleOCR)
         # Check if we need to split into multiple events by region
-        has_multiple = (
+        elif (
             config.preserve_positions
             and result.line_regions
             and len({lr.region for lr in result.line_regions}) > 1
-        )
-
-        if has_multiple:
+        ):
             # Group lines by region, using corrected text from result.text
             # (lr.text is raw OCR; result.text has corrections applied)
             corrected_lines = result.text.split("\n")
