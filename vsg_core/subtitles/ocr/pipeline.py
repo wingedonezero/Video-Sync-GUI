@@ -329,11 +329,9 @@ class OCRPipeline:
                 subtitle_images[0].frame_width if subtitle_images else 720,
                 subtitle_images[0].frame_height if subtitle_images else 480,
             )
-            # Use source resolution as default - only override if explicitly set
-            output_res = (
-                self.settings.get("ocr_video_width") or source_res[0],
-                self.settings.get("ocr_video_height") or source_res[1],
-            )
+            # Always use source resolution for PlayRes — OCR coordinates are
+            # in source space. Rescaling happens later in style editor if needed.
+            output_res = source_res
 
             # Calculate font size from ratio (% of PlayResY)
             font_ratio = self.settings.get("ocr_font_size_ratio", 5.80)

@@ -237,6 +237,7 @@ def create_subtitle_data_from_ocr(
                 positioned_count += 1
             else:
                 # Non-standard position — Default style with \pos() override
+                # Coordinates are in source resolution space, same as PlayRes
                 style = "Default"
                 text = f"{{\\pos({result.pos_x},{result.pos_y})}}{text}"
                 positioned_count += 1
