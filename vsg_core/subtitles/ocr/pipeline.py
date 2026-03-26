@@ -565,7 +565,48 @@ class OCRPipeline:
             sub_ms = (time.time() - sub_start) * 1000
             ocr_times.append(sub_ms)
 
-            # Step 3: Create one OCRSubtitleResult per region
+            # Step 3: Add to debugger FIRST (so add_unknown_word/add_fix can find it)
+            if self.config.debug_output:
+                full_text = " | ".join(
+                    vr.text for vr in vlm_regions if vr.text
+                )
+                debugger.add_subtitle(
+                    sub_image.index,
+                    sub_image.start_time,
+                    sub_image.end_time,
+                    full_text,
+                    90.0,
+                    sub_image.image,
+                    raw_ocr_text=full_text,
+                )
+
+                # Save annotated image (with boxes drawn)
+                if backend.uses_annotated:
+                    debugger.add_annotated_image(sub_image.index, annotated)
+
+                # Save region data
+                has_pos = any(
+                    r.needs_pos_tag(frame_h, frame_w) for r in regions
+                )
+                region_dicts = [
+                    {
+                        "region_id": r.region_id,
+                        "zone": r.classify_zone(frame_h, frame_w),
+                        "bbox": [r.x1, r.y1, r.x2, r.y2],
+                        "needs_pos": r.needs_pos_tag(frame_h, frame_w),
+                        "text": next(
+                            (vr.text for vr in vlm_regions
+                             if vr.region_id == r.region_id),
+                            "",
+                        ),
+                    }
+                    for r in regions
+                ]
+                debugger.add_region_data(
+                    sub_image.index, region_dicts, has_pos=has_pos
+                )
+
+            # Step 4: Create one OCRSubtitleResult per region
             for vlm_r in vlm_regions:
                 if not vlm_r.text:
                     continue
@@ -660,46 +701,7 @@ class OCRPipeline:
                     )
                 )
 
-            # Debug: save images, region data, positioned flags
-            if self.config.debug_output:
-                full_text = " | ".join(
-                    vr.text for vr in vlm_regions if vr.text
-                )
-                debugger.add_subtitle(
-                    sub_image.index,
-                    sub_image.start_time,
-                    sub_image.end_time,
-                    full_text,
-                    90.0,
-                    sub_image.image,
-                    raw_ocr_text=full_text,
-                )
-
-                # Save annotated image (with boxes drawn)
-                if backend.uses_annotated:
-                    debugger.add_annotated_image(sub_image.index, annotated)
-
-                # Save region data
-                has_pos = any(
-                    r.needs_pos_tag(frame_h, frame_w) for r in regions
-                )
-                region_dicts = [
-                    {
-                        "region_id": r.region_id,
-                        "zone": r.classify_zone(frame_h, frame_w),
-                        "bbox": [r.x1, r.y1, r.x2, r.y2],
-                        "needs_pos": r.needs_pos_tag(frame_h, frame_w),
-                        "text": next(
-                            (vr.text for vr in vlm_regions
-                             if vr.region_id == r.region_id),
-                            "",
-                        ),
-                    }
-                    for r in regions
-                ]
-                debugger.add_region_data(
-                    sub_image.index, region_dicts, has_pos=has_pos
-                )
+            # (debug tracking already done in Step 3 above)
 
         # ── Summary ───────────────────────────────────────────────────
         total_time = time.time() - ocr_start
