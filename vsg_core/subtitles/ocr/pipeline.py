@@ -583,7 +583,7 @@ class OCRPipeline:
                 if needs_pos:
                     pos_count += 1
 
-                # Post-process text
+                # Post-process text (dictionary fixes, pattern corrections)
                 raw_text = vlm_r.text
                 processed_text = vlm_r.text
                 fixes = {}
@@ -593,13 +593,35 @@ class OCRPipeline:
                     post_result = self.postprocessor.process(
                         vlm_r.text,
                         confidence=90.0,
-                        timestamp=f"{sub_image.start_ms}ms",
+                        timestamp=sub_image.start_time,
                     )
                     processed_text = post_result.text
-                    fixes = getattr(post_result, "fixes_applied", {})
-                    unknown = getattr(post_result, "unknown_words", [])
-                except Exception:
-                    pass  # Post-processing is optional
+                    fixes = post_result.fixes_applied
+                    unknown = post_result.unknown_words
+
+                    # Track unknown words in report + debugger
+                    for word in post_result.unknown_words:
+                        report.add_unknown_word(
+                            word=word,
+                            context=post_result.text[:50],
+                            timestamp=sub_image.start_time,
+                            confidence=90.0,
+                        )
+                        debugger.add_unknown_word(sub_image.index, word)
+
+                    # Track fixes in debugger
+                    if post_result.was_modified:
+                        for fix_name, fix_count in post_result.fixes_applied.items():
+                            debugger.add_fix(
+                                sub_image.index,
+                                fix_name,
+                                f"Applied {fix_count} time(s)",
+                                original_text=raw_text,
+                            )
+                except Exception as e:
+                    logger.debug(
+                        f"Post-processing error on sub {sub_image.index}: {e}"
+                    )
 
                 ocr_result = OCRSubtitleResult(
                     index=sub_image.index,
@@ -691,27 +713,29 @@ class OCRPipeline:
         logger.info(summary)
 
         # Region analysis summary (normal log — short and sweet)
-        logger.info(
+        self._log_progress(
             f"Regions: {region_counts.get(1, 0)} single, "
             f"{region_counts.get(2, 0)} multi, {empty_count} empty, "
-            f"{pos_count} positioned"
+            f"{pos_count} positioned",
+            0.91,
         )
         if zone_counts:
             zones_str = ", ".join(
                 f"{z}={c}" for z, c in sorted(zone_counts.items(), key=lambda x: -x[1])
             )
-            logger.info(f"Zones: {zones_str}")
+            self._log_progress(f"Zones: {zones_str}", 0.91)
 
         # Validation warnings (normal log — only if issues found)
         if wide_region_flags:
-            logger.warning(
-                f"Possible horizontal merge issues: {len(wide_region_flags)} subs "
-                f"(check debug output for details)"
+            self._log_progress(
+                f"WARNING: Possible horizontal merge issues: "
+                f"{len(wide_region_flags)} subs (check debug)",
+                0.91,
             )
         if same_zone_splits:
-            logger.warning(
-                f"Same-zone splits: {len(same_zone_splits)} subs "
-                f"(may be incorrect region splits)"
+            self._log_progress(
+                f"WARNING: Same-zone splits: {len(same_zone_splits)} subs",
+                0.91,
             )
 
         # Debug: write validation details
