@@ -420,6 +420,7 @@ class OCRPipeline:
         debugger: OCRDebugger,
     ) -> list[OCRSubtitleResult]:
         """Process subtitles using VLM backend with region detection."""
+        import numpy as np
         import torch
 
         from .annotator import annotate_image, rgba_to_rgb_on_black
@@ -465,6 +466,10 @@ class OCRPipeline:
         zone_counts: dict[str, int] = {}
         pos_count = 0
 
+        # Validation tracking (for log + debug)
+        wide_region_flags: list[tuple[int, int, int]] = []  # (sub_idx, width, h_gap)
+        same_zone_splits: list[tuple[int, str, int]] = []  # (sub_idx, zone, gap_px)
+
         for i, sub_image in enumerate(subtitle_images):
             # Progress every 25 subs (not spammy)
             if i % 25 == 0 or i == total - 1:
@@ -495,6 +500,56 @@ class OCRPipeline:
                 region_counts[1] = region_counts.get(1, 0) + 1
             else:
                 region_counts[2] = region_counts.get(2, 0) + 1
+
+            # Validation: check for horizontal merge issues (wide regions)
+            for r in regions:
+                if r.width > frame_w * 0.7:
+                    # Check column gaps within this region
+                    import cv2 as _cv2
+
+                    _mask = (
+                        sub_image.image[:, :, 3]
+                        if sub_image.image.ndim == 3 and sub_image.image.shape[2] == 4
+                        else _cv2.cvtColor(sub_image.image, _cv2.COLOR_RGB2GRAY)
+                        if sub_image.image.ndim == 3
+                        else sub_image.image
+                    )
+                    _crop = _mask[r.y1:r.y2, r.x1:r.x2]
+                    if _crop.size > 0:
+                        _col_text = np.any(_crop > 10, axis=0)
+                        _in_c = False
+                        _clusters = []
+                        _cs = 0
+                        for _x, _has in enumerate(_col_text):
+                            if _has and not _in_c:
+                                _cs = _x
+                                _in_c = True
+                            elif not _has and _in_c:
+                                _clusters.append((_cs, _x))
+                                _in_c = False
+                        if _in_c:
+                            _clusters.append((_cs, len(_col_text)))
+                        if len(_clusters) >= 2:
+                            _max_gap = max(
+                                _clusters[j][0] - _clusters[j - 1][1]
+                                for j in range(1, len(_clusters))
+                            )
+                            if _max_gap > r.width * 0.15 and _max_gap > 30:
+                                wide_region_flags.append(
+                                    (sub_image.index, r.width, _max_gap)
+                                )
+
+            # Validation: check same-zone splits
+            if len(regions) >= 2:
+                _sorted_r = sorted(regions, key=lambda _r: _r.y1)
+                for _ri in range(1, len(_sorted_r)):
+                    _gap = _sorted_r[_ri].y1 - _sorted_r[_ri - 1].y2
+                    _z1 = _sorted_r[_ri - 1].classify_zone(frame_h, frame_w)
+                    _z2 = _sorted_r[_ri].classify_zone(frame_h, frame_w)
+                    if _z1 == _z2 and 0 < _gap < 80:
+                        same_zone_splits.append(
+                            (sub_image.index, _z1, _gap)
+                        )
 
             # Step 2: Run OCR
             rgb = rgba_to_rgb_on_black(sub_image.image)
@@ -630,22 +685,78 @@ class OCRPipeline:
         self._log_progress(summary, 0.90)
         logger.info(summary)
 
-        # Region analysis summary (normal log)
+        # Region analysis summary (normal log — short and sweet)
         logger.info(
-            f"Region analysis: {region_counts.get(1, 0)} single-region, "
-            f"{region_counts.get(2, 0)} multi-region, {empty_count} empty"
+            f"Regions: {region_counts.get(1, 0)} single, "
+            f"{region_counts.get(2, 0)} multi, {empty_count} empty, "
+            f"{pos_count} positioned"
         )
-        if pos_count > 0:
-            logger.info(
-                f"Positioning: {pos_count} events need \\pos() tags"
-            )
         if zone_counts:
             zones_str = ", ".join(
                 f"{z}={c}" for z, c in sorted(zone_counts.items(), key=lambda x: -x[1])
             )
-            logger.info(f"Zone distribution: {zones_str}")
+            logger.info(f"Zones: {zones_str}")
+
+        # Validation warnings (normal log — only if issues found)
+        if wide_region_flags:
+            logger.warning(
+                f"Possible horizontal merge issues: {len(wide_region_flags)} subs "
+                f"(check debug output for details)"
+            )
+        if same_zone_splits:
+            logger.warning(
+                f"Same-zone splits: {len(same_zone_splits)} subs "
+                f"(may be incorrect region splits)"
+            )
+
+        # Debug: write validation details
+        if self.config.debug_output and (wide_region_flags or same_zone_splits):
+            self._save_validation_debug(
+                debugger, wide_region_flags, same_zone_splits
+            )
 
         return ocr_results
+
+    def _save_validation_debug(
+        self,
+        debugger: OCRDebugger,
+        wide_flags: list[tuple[int, int, int]],
+        zone_splits: list[tuple[int, str, int]],
+    ) -> None:
+        """Save validation issue details to debug output."""
+        validation_dir = debugger.debug_dir / "validation_flags"
+        validation_dir.mkdir(parents=True, exist_ok=True)
+
+        lines = [
+            "Region Detection Validation",
+            "=" * 50,
+            "",
+        ]
+
+        if wide_flags:
+            lines.append(f"Possible horizontal merges: {len(wide_flags)}")
+            lines.append("(Wide regions with large internal column gaps)")
+            lines.append("")
+            for sub_idx, width, h_gap in wide_flags:
+                lines.append(
+                    f"  [{sub_idx:04d}] region width={width}px, "
+                    f"horizontal gap={h_gap}px ({h_gap*100//width}%)"
+                )
+            lines.append("")
+
+        if zone_splits:
+            lines.append(f"Same-zone splits: {len(zone_splits)}")
+            lines.append("(Multiple regions in same zone with small gap)")
+            lines.append("")
+            for sub_idx, zone, gap in zone_splits:
+                lines.append(
+                    f"  [{sub_idx:04d}] zone={zone}, gap={gap}px"
+                )
+            lines.append("")
+
+        (validation_dir / "validation_flags.txt").write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
 
     def _process_subtitles_sequential(
         self,
