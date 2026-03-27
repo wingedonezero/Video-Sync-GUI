@@ -119,9 +119,11 @@ OPTIONAL_DEPS = {
         "check": "transformers",
     },
     "ocr-vlm-llama": {
-        "label": "VLM OCR (llama.cpp)",
+        "label": "VLM OCR (llama.cpp + ROCm)",
         "packages": ["llama-cpp-python"],
         "check": "llama_cpp",
+        "env": {"CMAKE_ARGS": "-DGGML_HIP=on"},
+        "pip_extra": ["--force-reinstall", "--no-cache-dir"],
     },
     "ai-audio": {
         "label": "Audio Separation",
@@ -1076,13 +1078,27 @@ for name, info in deps.items():
 
         info = OPTIONAL_DEPS[dep_name]
         self.window.clear_log()
-        packages = " ".join(f'"{p}"' for p in info["packages"])
         self.window.log_info(f"Installing {info['label']}...")
         self.window.log_info(f"  Packages: {', '.join(info['packages'])}")
 
+        # Build pip command with optional extra args
+        cmd = [str(VENV_PYTHON), "-m", "pip", "install"]
+        cmd.extend(info.get("pip_extra", []))
+        cmd.extend(info["packages"])
+
+        # Pass optional environment variables (e.g., CMAKE_ARGS for ROCm builds)
+        extra_env = info.get("env")
+        if extra_env:
+            self.window.log_info(f"  Build env: {extra_env}")
+            import os
+            env = {**os.environ, **extra_env}
+        else:
+            env = None
+
         self._run_subprocess(
-            [str(VENV_PYTHON), "-m", "pip", "install"] + info["packages"],
+            cmd,
             label=f"Installing {info['label']}...",
+            env=env,
         )
 
     def download_easyocr_models(self) -> None:
