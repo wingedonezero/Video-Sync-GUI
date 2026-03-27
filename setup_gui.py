@@ -90,6 +90,15 @@ OCR_VLM_MODELS = {
         "repo_id": "Qwen/Qwen3.5-4B",
         "size_hint": "~8.7GB",
     },
+    "PaddleOCR-VL-1.5-GGUF": {
+        "repo_id": "PaddlePaddle/PaddleOCR-VL-1.5-GGUF",
+        "size_hint": "~1.7GB",
+        "gguf_files": [
+            "PaddleOCR-VL-1.5.gguf",
+            "PaddleOCR-VL-1.5-mmproj.gguf",
+            "chat_template.jinja",
+        ],
+    },
 }
 
 # Optional dependency groups (name, packages, check_import)
@@ -108,6 +117,11 @@ OPTIONAL_DEPS = {
         "label": "VLM OCR (transformers)",
         "packages": ["transformers>=5.0", "huggingface-hub", "accelerate"],
         "check": "transformers",
+    },
+    "ocr-vlm-llama": {
+        "label": "VLM OCR (llama.cpp)",
+        "packages": ["llama-cpp-python"],
+        "check": "llama_cpp",
     },
     "ai-audio": {
         "label": "Audio Separation",
@@ -953,7 +967,14 @@ print(f"OK Saved stripped weights: {{weights_path.name}} ({{size_mb:.0f}} MB, {{
         model_info = OCR_VLM_MODELS[model_name]
         model_dir = OCR_MODELS_DIR / model_name
 
-        if (model_dir / "config.json").is_file():
+        # Check if already downloaded (config.json for transformers, .gguf for GGUF)
+        gguf_files = model_info.get("gguf_files")
+        if gguf_files:
+            check_file = gguf_files[0]  # First GGUF file as indicator
+        else:
+            check_file = "config.json"
+
+        if (model_dir / check_file).is_file():
             size_mb = sum(
                 f.stat().st_size for f in model_dir.rglob("*") if f.is_file()
             ) / 1024 / 1024
@@ -968,7 +989,36 @@ print(f"OK Saved stripped weights: {{weights_path.name}} ({{size_mb:.0f}} MB, {{
         self.window.log_info(f"  Source: huggingface.co/{repo_id}")
         self.window.log_info(f"  Destination: {model_dir}")
 
-        script = f"""
+        if gguf_files:
+            # GGUF models — download specific files only
+            files_repr = repr(gguf_files)
+            script = f"""
+import sys
+from pathlib import Path
+
+model_dir = Path({str(model_dir)!r})
+model_dir.mkdir(parents=True, exist_ok=True)
+
+try:
+    from huggingface_hub import hf_hub_download
+except ImportError:
+    print("ERROR: huggingface_hub not installed. Run: pip install huggingface-hub")
+    sys.exit(1)
+
+files = {files_repr}
+for fname in files:
+    print(f"Downloading {{fname}}...")
+    hf_hub_download(
+        {repo_id!r},
+        fname,
+        local_dir=str(model_dir),
+        local_dir_use_symlinks=False,
+    )
+print(f"OK Download complete: {{model_dir}}")
+"""
+        else:
+            # Standard transformers models — full snapshot
+            script = f"""
 import sys
 from pathlib import Path
 
@@ -1354,6 +1404,10 @@ class SetupWindow(QMainWindow):
                     "Qwen3.5-4B (Archival VLM OCR)",
                     lambda: self.controller.download_ocr_vlm_model("Qwen3.5-4B"),
                 ),
+                (
+                    "PaddleOCR-VL 1.5 (Fast GGUF OCR)",
+                    lambda: self.controller.download_ocr_vlm_model("PaddleOCR-VL-1.5-GGUF"),
+                ),
             ],
         )
 
@@ -1378,6 +1432,10 @@ class SetupWindow(QMainWindow):
                 (
                     "Install: Audio Sep",
                     lambda: self.controller.install_optional_dep("ai-audio"),
+                ),
+                (
+                    "Install: VLM OCR (llama.cpp)",
+                    lambda: self.controller.install_optional_dep("ocr-vlm-llama"),
                 ),
             ],
         )

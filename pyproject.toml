@@ -80,6 +80,7 @@ dev = [
 ocr-easyocr = ["easyocr"]
 ocr-paddle = ["paddleocr"]
 ocr-vlm = ["transformers>=5.0", "huggingface-hub", "accelerate"]
+ocr-vlm-llama = ["llama-cpp-python"]
 ai-audio = ["audio-separator[gpu]"]
 
 [project.scripts]
