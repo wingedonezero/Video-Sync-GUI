@@ -12,7 +12,7 @@ Benchmarks (RX 7900 GRE, ROCm 7.2):
 
 Critical notes:
     - Must use enable_thinking=False in chat template (NOT generation_config)
-    - Must use attn_implementation="eager" for ROCm
+    - Uses attn_implementation="sdpa" for ROCm (memory-efficient attention)
     - Must use CPU-first loading to avoid VRAM spikes
     - Hallucinate on crops — only use annotated full-frame approach
 """
@@ -64,7 +64,7 @@ class Qwen35Base(VLMBackend):
             dtype=torch.bfloat16,
             trust_remote_code=True,
             low_cpu_mem_usage=True,
-            attn_implementation="eager",
+            attn_implementation="sdpa",
             device_map="cpu",
         )
         self.model = self.model.to("cuda")

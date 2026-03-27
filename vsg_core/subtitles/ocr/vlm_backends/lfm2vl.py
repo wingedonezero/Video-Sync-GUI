@@ -44,7 +44,7 @@ class LFM2VLBase(VLMBackend):
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_path,
             dtype=torch.bfloat16,
-            attn_implementation="eager",
+            attn_implementation="sdpa",
             device_map="cpu",
         )
         self.model = self.model.to("cuda")
