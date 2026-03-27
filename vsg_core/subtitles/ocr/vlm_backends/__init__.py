@@ -40,6 +40,7 @@ class VLMRegionResult:
     region_id: int
     text: str
     raw_output: str = ""
+    vl_bbox: tuple[int, int, int, int] | None = None  # VL-detected bbox (x1,y1,x2,y2)
 
 
 @dataclass
@@ -151,6 +152,11 @@ _MODEL_REGISTRY: dict[str, dict] = {
         "repo_id": "Qwen/Qwen3.5-4B",
         "dir_name": "Qwen3.5-4B",
     },
+    "paddleocr-vl": {
+        "repo_id": "PaddlePaddle/PaddleOCR-VL-1.5-GGUF",
+        "dir_name": "PaddleOCR-VL-1.5-GGUF",
+        "check_file": "PaddleOCR-VL-1.5.gguf",
+    },
 }
 
 
@@ -166,7 +172,9 @@ def is_model_available(name: str) -> bool:
     model_dir = get_model_dir(name)
     if not model_dir.exists():
         return False
-    # Check for config.json as minimum indicator of a valid model
+    # GGUF models use a specific file instead of config.json
+    if name in _MODEL_REGISTRY and "check_file" in _MODEL_REGISTRY[name]:
+        return (model_dir / _MODEL_REGISTRY[name]["check_file"]).exists()
     return (model_dir / "config.json").exists()
 
 
@@ -189,3 +197,8 @@ try:
     from . import qwen35  # noqa: F401
 except ImportError as e:
     logger.debug(f"Qwen3.5 backend not available: {e}")
+
+try:
+    from . import paddleocr_vl  # noqa: F401
+except ImportError as e:
+    logger.debug(f"PaddleOCR-VL backend not available: {e}")

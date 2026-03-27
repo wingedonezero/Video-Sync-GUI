@@ -41,7 +41,7 @@ from .preprocessing import ImagePreprocessor, create_preprocessor
 from .report import OCRReport, SubtitleOCRResult, create_report
 
 # VLM engine names that use the new region-based pipeline
-_VLM_ENGINES = {"lfm2vl-450m", "qwen35-4b"}
+_VLM_ENGINES = {"lfm2vl-450m", "qwen35-4b", "paddleocr-vl"}
 
 
 @dataclass(slots=True)
@@ -464,6 +464,10 @@ class OCRPipeline:
         zone_counts: dict[str, int] = {}
         pos_count = 0
 
+        # Cross-validation tracking (VL bbox vs pixel regions)
+        cv_aligned = 0
+        cv_flagged: list[tuple[int, int, tuple, str]] = []  # (sub_idx, region_id, vl_bbox, text)
+
         # Validation tracking (for log + debug)
         wide_region_flags: list[tuple[int, int, int]] = []  # (sub_idx, width, h_gap)
         same_zone_splits: list[tuple[int, str, int]] = []  # (sub_idx, zone, gap_px)
@@ -660,6 +664,31 @@ class OCRPipeline:
             sub_ms = (time.time() - sub_start) * 1000
             ocr_times.append(sub_ms)
 
+            # Step 2b: Cross-validate VL bboxes vs pixel regions (if available)
+            has_vl_bboxes = any(
+                getattr(vr, "vl_bbox", None) for vr in vlm_regions
+            )
+            if has_vl_bboxes:
+                for vr in vlm_regions:
+                    if not vr.vl_bbox or not vr.text:
+                        continue
+                    vl_cy = (vr.vl_bbox[1] + vr.vl_bbox[3]) / 2
+                    matched_region = next(
+                        (r for r in regions
+                         if r.y1 - 10 <= vl_cy <= r.y2 + 10
+                         and r.region_id == vr.region_id),
+                        None,
+                    )
+                    if matched_region is None:
+                        cv_flagged.append((
+                            sub_image.index,
+                            vr.region_id,
+                            vr.vl_bbox,
+                            vr.text[:40],
+                        ))
+                    else:
+                        cv_aligned += 1
+
             # Step 3: Add to debugger FIRST (so add_unknown_word/add_fix can find it)
             # Generate annotated image for debug regardless of backend type
             if self.config.debug_output or not hasattr(self, '_debug_annotated'):
@@ -852,6 +881,27 @@ class OCRPipeline:
                 f"WARNING: Tiny regions: {len(tiny_regions)}", 0.91
             )
 
+        # Cross-validation summary
+        if cv_aligned > 0 or cv_flagged:
+            cv_total = cv_aligned + len(cv_flagged)
+            self._log_progress(
+                f"Cross-validation: {cv_aligned}/{cv_total} aligned, "
+                f"{len(cv_flagged)} flagged",
+                0.91,
+            )
+            if cv_flagged:
+                for sub_idx, rid, vl_bbox, text in cv_flagged[:5]:
+                    self._log_progress(
+                        f"  FLAGGED [{sub_idx:04d}] region {rid}: "
+                        f"VL bbox {vl_bbox} — {text}",
+                        0.91,
+                    )
+                if len(cv_flagged) > 5:
+                    self._log_progress(
+                        f"  ... and {len(cv_flagged) - 5} more (see debug)",
+                        0.91,
+                    )
+
         # Debug: write full pixel analysis + per-sub detail
         if self.config.debug_output:
             self._save_pixel_analysis_debug(
@@ -863,6 +913,12 @@ class OCRPipeline:
                 dict(line_counts), all_internal_gaps, all_inter_gaps,
                 all_region_widths, all_region_heights,
             )
+
+            # Cross-validation debug
+            if cv_aligned > 0 or cv_flagged:
+                debugger.add_cross_validation_summary(
+                    cv_aligned, cv_flagged
+                )
 
         return ocr_results
 

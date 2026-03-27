@@ -112,6 +112,10 @@ class OCRDebugger:
         self.region_data: dict[int, list[dict]] = {}  # index -> [{region_id, zone, bbox, text}]
         self.positioned_indices: set[int] = set()  # Indices with \pos() tags
 
+        # Cross-validation data (VL bbox vs pixel regions)
+        self.cv_aligned: int = 0
+        self.cv_flagged: list[tuple[int, int, tuple, str]] = []
+
     @property
     def debug_dir(self) -> Path:
         """Get the debug output directory path."""
@@ -207,6 +211,17 @@ class OCRDebugger:
         if has_pos:
             self.positioned_indices.add(index)
 
+    def add_cross_validation_summary(
+        self,
+        aligned: int,
+        flagged: list[tuple[int, int, tuple, str]],
+    ) -> None:
+        """Store cross-validation results (VL bbox vs pixel regions)."""
+        if not self.enabled:
+            return
+        self.cv_aligned = aligned
+        self.cv_flagged = flagged
+
     def save(self):
         """Save all debug output to disk."""
         if not self.enabled:
@@ -243,6 +258,10 @@ class OCRDebugger:
 
         if self.positioned_indices:
             self._save_positioned()
+
+        # Cross-validation results
+        if self.cv_aligned > 0 or self.cv_flagged:
+            self._save_cross_validation()
 
     def _save_summary(self):
         """Save overall summary file."""
@@ -623,6 +642,54 @@ class OCRDebugger:
                 )
 
         (folder / "positioned.txt").write_text("\n".join(lines), encoding="utf-8")
+
+    def _save_cross_validation(self):
+        """Save cross-validation results (VL bbox vs pixel region alignment)."""
+        folder = self.debug_dir / "cross_validation"
+        folder.mkdir(parents=True, exist_ok=True)
+
+        cv_total = self.cv_aligned + len(self.cv_flagged)
+        lines = [
+            "Cross-Validation: VL Bounding Boxes vs Pixel Regions",
+            "=" * 50,
+            "",
+            f"Total lines checked: {cv_total}",
+            f"Aligned: {self.cv_aligned}",
+            f"Flagged: {len(self.cv_flagged)}",
+            "",
+        ]
+
+        if self.cv_flagged:
+            lines.append("Flagged Lines:")
+            lines.append("-" * 50)
+            for sub_idx, region_id, vl_bbox, text in self.cv_flagged:
+                sub = self.subtitles.get(sub_idx)
+                time_str = sub.start_time if sub else "?"
+                lines.append(
+                    f"[{sub_idx:04d}] {time_str} region={region_id} "
+                    f"vl_bbox=({vl_bbox[0]},{vl_bbox[1]})-"
+                    f"({vl_bbox[2]},{vl_bbox[3]}) "
+                    f'text="{text}"'
+                )
+
+                # Save image with both bboxes if available
+                if sub and sub.image is not None:
+                    self._save_image(
+                        sub.image,
+                        folder / f"sub_{sub_idx:04d}.png",
+                    )
+                if sub_idx in self.annotated_images:
+                    self._save_image(
+                        self.annotated_images[sub_idx],
+                        folder / f"sub_{sub_idx:04d}_annotated.png",
+                    )
+            lines.append("")
+        else:
+            lines.append("No flagged lines — all VL positions match pixel regions.")
+
+        (folder / "cross_validation.txt").write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
 
     def _save_image(self, image: np.ndarray, path: Path):
         """Save a numpy image array to disk."""
