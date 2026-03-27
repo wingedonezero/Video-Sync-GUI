@@ -233,8 +233,8 @@ class PaddleOCRVL(VLMBackend):
                         used_vl.add(vl_idx)
                         break
 
-            # Join matched lines with \N (ASS line break)
-            text = "\\N".join(matched_texts) if matched_texts else ""
+            # Join matched lines with newline (ASS writer converts to \N)
+            text = "\n".join(matched_texts) if matched_texts else ""
 
             # Use the first matched bbox for cross-validation
             vl_bbox = matched_bboxes[0] if matched_bboxes else None

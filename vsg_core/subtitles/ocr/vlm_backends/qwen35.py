@@ -170,8 +170,8 @@ class Qwen35Base(VLMBackend):
                 txt = match.group(2).strip()
                 region_texts[current_rid] = txt
             elif current_rid is not None and line.strip():
-                # Continuation line — append to current region with \N
-                region_texts[current_rid] += "\\N" + line.strip()
+                # Continuation line — append with newline (ASS writer converts to \N)
+                region_texts[current_rid] += "\n" + line.strip()
 
         # Map to regions
         for region in regions:
