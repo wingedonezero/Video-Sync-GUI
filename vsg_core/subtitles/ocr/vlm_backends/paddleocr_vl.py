@@ -119,6 +119,8 @@ class PaddleOCRVL(VLMBackend):
         self.llm = None
 
     def load(self) -> None:
+        import os
+
         from llama_cpp import Llama
         from llama_cpp.llama_chat_format import Llava16ChatHandler
 
@@ -135,6 +137,14 @@ class PaddleOCRVL(VLMBackend):
         chat_handler = _PaddleOCRVLHandler(
             clip_model_path=mmproj_path, verbose=False
         )
+
+        # Suppress llama.cpp C-level stderr (~10 lines per inference call).
+        # When running in subprocess with stderr=PIPE, this fills the 64KB
+        # pipe buffer after ~200 subs and deadlocks both processes.
+        self._old_stderr_fd = os.dup(2)
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
 
         self.llm = Llama(
             model_path=model_path,
@@ -244,4 +254,10 @@ class PaddleOCRVL(VLMBackend):
         if self.llm is not None:
             del self.llm
             self.llm = None
+        # Restore stderr
+        if hasattr(self, "_old_stderr_fd") and self._old_stderr_fd is not None:
+            import os
+            os.dup2(self._old_stderr_fd, 2)
+            os.close(self._old_stderr_fd)
+            self._old_stderr_fd = None
         logger.info("PaddleOCR-VL 1.5 GGUF unloaded")
