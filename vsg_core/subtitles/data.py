@@ -173,7 +173,7 @@ class SteppingEventData:
 class OCRMetadata:
     """Document-level OCR metadata and statistics."""
 
-    engine: str = "tesseract"
+    engine: str = "easyocr"
     language: str = "eng"
     source_format: str = "vobsub"  # vobsub, pgs, etc.
     source_file: str = ""
@@ -220,7 +220,7 @@ class OCRMetadata:
     def from_dict(cls, data: dict[str, Any]) -> OCRMetadata:
         stats = data.get("statistics", {}) or {}
         return cls(
-            engine=data.get("engine", "tesseract"),
+            engine=data.get("engine", "easyocr"),
             language=data.get("language", "eng"),
             source_format=data.get("source_format", "vobsub"),
             source_file=data.get("source_file", ""),

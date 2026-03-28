@@ -379,7 +379,7 @@ These settings are "string switches" — they accept only specific values, but a
 | `interlaced_deinterlace_method` | `str` | `"bwdif"`, `"yadif"`, `"yadifmod"`, `"bob"`, `"w3fdif"` | interlaced code |
 | `interlaced_comparison_method` | `str` | `"hash"`, `"ssim"`, `"mse"` | interlaced code |
 | `interlaced_hash_algorithm` | `str` | `"ahash"`, `"phash"`, `"dhash"`, `"whash"` | interlaced code |
-| `ocr_engine` | `str` | `"tesseract"`, `"easyocr"`, `"paddleocr"` | OCR code |
+| `ocr_engine` | `str` | `"easyocr"`, `"paddleocr"`, `"lfm2vl-450m"`, `"qwen35-4b"`, `"paddleocr-vl"` | OCR code |
 | `ocr_output_format` | `str` | `"ass"`, `"srt"` | OCR code |
 | `ocr_binarization_method` | `str` | `"otsu"` (and possibly others) | OCR preprocessing |
 | `corr_anchor_fallback_mode` | `str` | `"use-correlation"`, `"use-median"`, `"abort"` | corr-guided code |

@@ -63,7 +63,7 @@ class VLMBackend(ABC):
     """
     Base class for VLM OCR backends.
 
-    Unlike traditional OCR backends (Tesseract/EasyOCR) that work on
+    Unlike traditional OCR backends (EasyOCR/PaddleOCR) that work on
     preprocessed grayscale line images, VLM backends work on raw RGBA
     images with detected regions.
     """

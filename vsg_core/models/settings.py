@@ -322,7 +322,7 @@ class AppSettings(BaseModel):
     # OCR Settings
     # =========================================================================
     ocr_enabled: bool = True
-    ocr_engine: OcrEngineStr = "tesseract"
+    ocr_engine: OcrEngineStr = "easyocr"
     ocr_language: str = "eng"
     ocr_psm: int = 7
     ocr_char_whitelist: str = ""
