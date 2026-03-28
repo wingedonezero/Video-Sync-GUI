@@ -2,19 +2,27 @@
 """
 PaddleOCR-VL 1.5 backend — runs via llama.cpp GGUF for fast GPU inference.
 
-Uses Spotting mode to get both text and per-line bounding box coordinates.
-The model outputs special <|LOC_xxx|> tokens for positions, which are
-decoded via a monkey-patched detokenizer.
+Two modes:
+    Spotting (default): Full-frame image with "Spotting:" prompt.
+        Returns text + per-line bounding box coordinates (LOC tokens).
+        Used by the main OCR pipeline for cross-validation.
+        239ms/sub avg.
+
+    Crop-OCR (crop_mode=True): Per-line crops with "OCR:" prompt.
+        Splits regions into lines, crops each, sends individually.
+        Faster (112ms/sub avg) but no bounding boxes.
+        Used by the style editor preview.
 
 Benchmarks (RX 7900 GRE, ROCm 7.2, llama.cpp):
-    239ms/sub avg, 82s full episode, ~1.7GB VRAM
-    0 misreads on 344 subtitles, per-line bounding boxes.
+    Spotting: 239ms/sub avg, 82s full episode, ~1.7GB VRAM
+    Crop-OCR: 112ms/sub avg, 38s full episode, same VRAM
+    Both: 0 misreads on 344 subtitles, 100% text match.
 
 Critical notes:
     - Must use custom chat handler (subclass Llava16ChatHandler)
     - Must monkey-patch detokenize for LOC token decoding
     - LOC tokens are at IDs 100297-101300 in the GGUF vocabulary
-    - Sends full-frame image, NOT crops
+    - Stderr suppression via os.dup2 prevents subprocess deadlocks
 """
 
 import base64
@@ -26,7 +34,8 @@ import numpy as np
 from PIL import Image
 
 from . import VLMBackend, VLMRegionResult, get_model_dir, register_vlm_backend
-from ..region_detector import Region
+from ..annotator import crop_region, rgba_to_rgb_on_black
+from ..region_detector import Region, split_region_into_lines
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +123,10 @@ class PaddleOCRVL(VLMBackend):
 
     uses_annotated = False  # Sends full-frame image, not crops or annotated
 
-    def __init__(self, **kwargs):
+    def __init__(self, crop_mode: bool = False, **kwargs):
         self.model_dir = get_model_dir("paddleocr-vl")
         self.llm = None
+        self.crop_mode = crop_mode
 
     def load(self) -> None:
         import os
@@ -179,7 +189,77 @@ class PaddleOCRVL(VLMBackend):
         if self.llm is None:
             raise RuntimeError("Model not loaded. Call load() first.")
 
-        # Use raw image (no annotation) — full frame
+        if self.crop_mode:
+            return self._ocr_crop(image, regions, raw_image)
+        return self._ocr_spotting(image, regions, raw_image)
+
+    def _ocr_crop(
+        self,
+        image: np.ndarray,
+        regions: list[Region],
+        raw_image: np.ndarray | None = None,
+    ) -> list[VLMRegionResult]:
+        """Crop-based OCR: split regions into lines, OCR each line individually.
+
+        Faster than Spotting (no bbox generation), produces same text + line breaks.
+        Used by style editor preview.
+        """
+        source = raw_image if raw_image is not None else image
+        results = []
+
+        for region in regions:
+            # Split region into individual text lines
+            line_regions = split_region_into_lines(source, region)
+
+            # OCR each line crop
+            line_texts = []
+            for line_region in line_regions:
+                line_crop = crop_region(source, line_region, padding=2)
+
+                # Ensure RGB for the model
+                if line_crop.ndim == 3 and line_crop.shape[2] == 4:
+                    line_crop = rgba_to_rgb_on_black(line_crop)
+
+                data_uri = _image_to_data_uri(line_crop)
+
+                result = self.llm.create_chat_completion(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": data_uri}},
+                                {"type": "text", "text": "OCR:"},
+                            ],
+                        }
+                    ],
+                    max_tokens=256,
+                    temperature=0,
+                )
+
+                text = result["choices"][0]["message"]["content"].strip()
+                if text:
+                    line_texts.append(text)
+
+            results.append(
+                VLMRegionResult(
+                    region_id=region.region_id,
+                    text="\n".join(line_texts),
+                    raw_output="\n".join(line_texts),
+                )
+            )
+
+        return results
+
+    def _ocr_spotting(
+        self,
+        image: np.ndarray,
+        regions: list[Region],
+        raw_image: np.ndarray | None = None,
+    ) -> list[VLMRegionResult]:
+        """Spotting mode: full-frame image, returns text + per-line bboxes.
+
+        Used by the main OCR pipeline for cross-validation with pixel regions.
+        """
         source = raw_image if raw_image is not None else image
         frame_h, frame_w = source.shape[:2]
 
