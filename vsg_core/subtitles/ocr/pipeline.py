@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from ..data import SubtitleData
 
 from .debug import OCRDebugger, create_debugger
-from .engine import OCREngine, create_ocr_engine
+from .backends import OCRBackend, create_ocr_engine_v2
 from .output import (
     LineRegion,
     OCRSubtitleResult,
@@ -128,7 +128,7 @@ class OCRPipeline:
 
         # Initialize components (lazily)
         self._preprocessor: ImagePreprocessor | None = None
-        self._engine: OCREngine | None = None
+        self._engine: OCRBackend | None = None
         self._postprocessor: OCRPostProcessor | None = None
         self._vlm_backend = None  # VLM backend (loaded in _process_subtitles_vlm)
         self._extra_engines: list = []  # Additional engines for parallel processing
@@ -163,26 +163,19 @@ class OCRPipeline:
     def _create_single_engine(self):
         """Create a single OCR engine instance."""
         logger = logging.getLogger(__name__)
-        backend = self.settings.get("ocr_engine", "tesseract")
-        if backend in ("easyocr", "paddleocr"):
-            from .engine import create_ocr_engine_v2
-
-            engine = create_ocr_engine_v2(self.settings)
-            logger.info(f"Created OCR backend: {engine.name}")
-        else:
-            engine = create_ocr_engine(self.settings)
-            logger.info("Created OCR backend: tesseract (traditional)")
+        engine = create_ocr_engine_v2(self.settings)
+        logger.info(f"Created OCR backend: {engine.name}")
         return engine
 
     @property
     def engine(self):
         """Lazy initialization of OCR engine.
 
-        Returns either traditional OCREngine or new OCRBackend based on settings.
+        Returns configured OCRBackend based on settings.
         """
         if self._engine is None:
             logger = logging.getLogger(__name__)
-            backend = self.settings.get("ocr_engine", "tesseract")
+            backend = self.settings.get("ocr_engine", "easyocr")
             logger.info(f"OCR engine setting: '{backend}'")
             self._engine = self._create_single_engine()
         return self._engine
@@ -221,7 +214,7 @@ class OCRPipeline:
             self._log_progress("Starting OCR pipeline", 0.0)
 
             # Log which OCR engine is being used
-            backend_setting = self.settings.get("ocr_engine", "tesseract")
+            backend_setting = self.settings.get("ocr_engine", "easyocr")
             is_vlm = backend_setting in _VLM_ENGINES
 
             if is_vlm:
@@ -230,7 +223,7 @@ class OCRPipeline:
                 )
             else:
                 # Access engine property to initialize it and get the actual backend name
-                engine_name = getattr(self.engine, "name", "tesseract")
+                engine_name = getattr(self.engine, "name", "easyocr")
                 self._log_progress(
                     f"Using OCR engine: {engine_name} (setting: {backend_setting})",
                     0.02,
@@ -323,7 +316,7 @@ class OCRPipeline:
             # Create SubtitleData with all OCR metadata
             engine_name = (
                 backend_setting if is_vlm
-                else getattr(self.engine, "name", "tesseract")
+                else getattr(self.engine, "name", "easyocr")
             )
             source_res = (
                 subtitle_images[0].frame_width if subtitle_images else 720,

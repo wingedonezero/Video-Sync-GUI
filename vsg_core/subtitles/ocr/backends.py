@@ -3,9 +3,8 @@
 OCR Engine Backends
 
 Provides abstract interface and implementations for different OCR engines:
-    - Tesseract (traditional, fast, good for clean text)
-    - EasyOCR (deep learning, better for varied fonts)
-    - PaddleOCR (state-of-art, best accuracy) [future]
+    - EasyOCR (deep learning, good for varied fonts)
+    - PaddleOCR (state-of-art, best accuracy)
 
 This abstraction allows easy switching between engines for comparison.
 """
@@ -196,121 +195,6 @@ class OCRBackend(ABC):
                 y1 = max(0, start - padding)
                 y2 = min(image.shape[0], end + padding)
                 lines.append(image[y1:y2, :])
-
-        return lines
-
-
-# =============================================================================
-# Tesseract Backend
-# =============================================================================
-
-
-class TesseractBackend(OCRBackend):
-    """Tesseract OCR backend using pytesseract."""
-
-    name = "tesseract"
-
-    def __init__(self, language: str = "eng", char_blacklist: str = "|"):
-        try:
-            import pytesseract
-
-            self.pytesseract = pytesseract
-            self.Output = pytesseract.Output
-        except ImportError:
-            raise ImportError(
-                "pytesseract is not installed. Install with: pip install pytesseract"
-            )
-
-        self.language = language
-        self.char_blacklist = char_blacklist
-        self._verify_tesseract()
-
-    def _verify_tesseract(self):
-        """Verify Tesseract is installed."""
-        try:
-            self.pytesseract.get_tesseract_version()
-        except Exception as e:
-            raise RuntimeError(f"Tesseract not found: {e}")
-
-    def _build_config(self, psm: int = 6) -> str:
-        """Build Tesseract config string."""
-        parts = [f"--psm {psm}", "--oem 3"]
-        if self.char_blacklist:
-            parts.append(f"-c tessedit_char_blacklist={self.char_blacklist}")
-        parts.append("-c preserve_interword_spaces=1")
-        return " ".join(parts)
-
-    def ocr_image(self, image: np.ndarray) -> OCRResult:
-        """OCR using block mode (PSM 6)."""
-        return self._do_ocr(image, psm=6)
-
-    def ocr_line(self, image: np.ndarray) -> OCRResult:
-        """OCR using single line mode (PSM 7)."""
-        return self._do_ocr(image, psm=7)
-
-    def _do_ocr(self, image: np.ndarray, psm: int) -> OCRResult:
-        """Perform OCR with specified PSM."""
-        result = OCRResult(text="", backend=self.name)
-
-        try:
-            config = self._build_config(psm)
-            data = self.pytesseract.image_to_data(
-                image, lang=self.language, config=config, output_type=self.Output.DICT
-            )
-
-            # Process into lines
-            lines = self._process_data(data)
-            result.lines = lines
-            result.text = "\n".join(line.text for line in lines if line.text.strip())
-
-            if lines:
-                confidences = [l.confidence for l in lines if l.confidence >= 0]
-                if confidences:
-                    result.average_confidence = sum(confidences) / len(confidences)
-                    result.min_confidence = min(confidences)
-                    result.low_confidence = result.average_confidence < 60.0
-
-        except Exception as e:
-            result.error = str(e)
-
-        return result
-
-    def _process_data(self, data: dict) -> list[OCRLineResult]:
-        """Process Tesseract output into line results."""
-        lines = []
-        current_line = None
-        current_line_num = -1
-
-        for i in range(len(data["text"])):
-            text = data["text"][i].strip()
-            conf = float(data["conf"][i])
-            line_num = data["line_num"][i]
-
-            if not text:
-                continue
-
-            if line_num != current_line_num:
-                if current_line is not None:
-                    lines.append(current_line)
-                current_line = OCRLineResult(text="", confidence=0.0, backend=self.name)
-                current_line_num = line_num
-
-            if current_line is not None:
-                if current_line.text:
-                    current_line.text += " "
-                current_line.text += text
-                if conf >= 0:
-                    current_line.word_confidences.append((text, conf))
-
-        if current_line is not None and current_line.text:
-            lines.append(current_line)
-
-        # Calculate line confidences
-        for line in lines:
-            if line.word_confidences:
-                valid = [c for _, c in line.word_confidences if c >= 0]
-                if valid:
-                    line.confidence = sum(valid) / len(valid)
 
         return lines
 
@@ -1029,23 +913,12 @@ class PaddleOCRBackend(OCRBackend):
 
 # Map of available backends
 BACKENDS = {
-    "tesseract": TesseractBackend,
     "easyocr": EasyOCRBackend,
     "paddleocr": PaddleOCRBackend,
 }
 
 # Language code mapping for different backends
 LANGUAGE_MAP = {
-    "tesseract": {
-        "eng": "eng",
-        "jpn": "jpn",
-        "spa": "spa",
-        "fra": "fra",
-        "deu": "deu",
-        "chi_sim": "chi_sim",
-        "chi_tra": "chi_tra",
-        "kor": "kor",
-    },
     "easyocr": {
         "eng": ["en"],
         "jpn": ["ja"],
@@ -1073,15 +946,6 @@ def get_available_backends() -> list[str]:
     """Get list of available OCR backends."""
     available = []
 
-    # Check Tesseract
-    try:
-        import pytesseract
-
-        pytesseract.get_tesseract_version()
-        available.append("tesseract")
-    except Exception:
-        pass
-
     # Check EasyOCR
     try:
         import easyocr
@@ -1106,8 +970,8 @@ def create_backend(backend_name: str, language: str = "eng", **kwargs) -> OCRBac
     Create an OCR backend instance.
 
     Args:
-        backend_name: Name of backend ('tesseract', 'easyocr', 'paddleocr')
-        language: Tesseract-style language code (e.g., 'eng', 'jpn')
+        backend_name: Name of backend ('easyocr', 'paddleocr')
+        language: Language code (e.g., 'eng', 'jpn')
         **kwargs: Additional backend-specific arguments
 
     Returns:
@@ -1124,9 +988,7 @@ def create_backend(backend_name: str, language: str = "eng", **kwargs) -> OCRBac
     lang_map = LANGUAGE_MAP.get(backend_name, {})
     mapped_lang = lang_map.get(language, language)
 
-    if backend_name == "tesseract":
-        return backend_class(language=mapped_lang, **kwargs)
-    elif backend_name == "easyocr":
+    if backend_name == "easyocr":
         langs = mapped_lang if isinstance(mapped_lang, list) else [mapped_lang]
         return backend_class(languages=langs)
     elif backend_name == "paddleocr":
@@ -1138,3 +1000,32 @@ def create_backend(backend_name: str, language: str = "eng", **kwargs) -> OCRBac
         )
 
     return backend_class()
+
+
+def create_ocr_engine_v2(settings_dict: dict) -> OCRBackend:
+    """
+    Create OCR engine using the backend system.
+
+    Args:
+        settings_dict: Application settings
+
+    Returns:
+        Configured OCRBackend instance
+    """
+    backend_name = settings_dict.get("ocr_engine", "easyocr")
+    language = settings_dict.get("ocr_language", "eng")
+
+    available = get_available_backends()
+    if backend_name not in available:
+        if available:
+            logger.warning(
+                f"OCR backend '{backend_name}' not available. "
+                f"Falling back to '{available[0]}'"
+            )
+            backend_name = available[0]
+        else:
+            raise RuntimeError(
+                "No OCR backends available. Install easyocr or paddleocr."
+            )
+
+    return create_backend(backend_name, language=language)

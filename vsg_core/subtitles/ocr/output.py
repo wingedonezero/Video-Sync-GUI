@@ -105,7 +105,7 @@ class OCRSubtitleResult:
 def create_subtitle_data_from_ocr(
     ocr_results: list[OCRSubtitleResult],
     source_file: str,
-    engine: str = "tesseract",
+    engine: str = "easyocr",
     language: str = "eng",
     source_format: str = "vobsub",
     source_resolution: tuple[int, int] = (720, 480),
@@ -253,7 +253,7 @@ def create_subtitle_data_from_ocr(
             event.ocr = ocr_event_data
             data.events.append(event)
 
-        # Traditional line_regions approach (Tesseract/EasyOCR/PaddleOCR)
+        # Traditional line_regions approach (EasyOCR/PaddleOCR)
         # Check if we need to split into multiple events by region
         elif (
             config.preserve_positions

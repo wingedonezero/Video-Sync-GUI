@@ -29,9 +29,6 @@ dependencies = [
     # Unicode Regex Support
     "regex",
 
-    # OCR
-    "pytesseract",
-
     # XML Processing
     "lxml",
 

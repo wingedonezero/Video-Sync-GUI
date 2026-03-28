@@ -2,7 +2,7 @@
 """
 Adaptive Image Preprocessing for OCR
 
-Prepares subtitle images for optimal Tesseract OCR accuracy.
+Prepares subtitle images for optimal OCR accuracy.
 
 Key preprocessing steps:
     1. Convert to grayscale
@@ -41,7 +41,7 @@ class PreprocessingConfig:
     border_color: tuple[int, int, int] = (255, 255, 255)  # White
 
     # Binarization - ALWAYS binarize for subtitle OCR
-    # Pure black on white is optimal for Tesseract
+    # Pure black on white is optimal for OCR
     force_binarization: bool = True
     binarization_method: str = "otsu"  # 'otsu', 'adaptive', 'none'
     adaptive_block_size: int = 11
@@ -192,7 +192,7 @@ class ImagePreprocessor:
         """
         Determine if image should be inverted (white text on black background).
 
-        Tesseract works best with black text on white background.
+        OCR works best with black text on white background.
         After compositing colored VobSub onto white, text should be dark.
         But some DVDs use inverted color schemes.
         """
@@ -228,7 +228,7 @@ class ImagePreprocessor:
         if std_dev < 10:
             return False  # Already nearly uniform
         if std_dev > 80:
-            return False  # Good contrast, Tesseract should handle it
+            return False  # Good contrast, OCR should handle it
 
         # Medium contrast - binarization might help
         return True
@@ -285,7 +285,7 @@ class ImagePreprocessor:
         """
         Add white border around image.
 
-        Tesseract performs better when text isn't at the edge.
+        OCR performs better when text isn't at the edge.
         """
         size = self.config.border_size
         if size <= 0:
@@ -350,21 +350,10 @@ def create_preprocessor(
     Returns:
         Configured ImagePreprocessor
     """
-    # Check which OCR engine is being used
-    ocr_engine = settings_dict.get("ocr_engine", "tesseract")
-
-    # Deep learning OCR engines (EasyOCR, PaddleOCR) work better WITHOUT binarization
+    # Deep learning OCR engines work better WITHOUT binarization
     # They're trained on natural images with anti-aliasing and grayscale gradients
-    # Tesseract (traditional) works best WITH binarization (clean black on white)
-    if ocr_engine in ("easyocr", "paddleocr"):
-        # Skip binarization for deep learning engines
-        force_binarization = False
-        # Also use smaller border - deep learning handles edge text better
-        border_size = settings_dict.get("ocr_border_size", 5)
-    else:
-        # Tesseract: use binarization
-        force_binarization = settings_dict.get("ocr_force_binarization", True)
-        border_size = settings_dict.get("ocr_border_size", 10)
+    force_binarization = False
+    border_size = settings_dict.get("ocr_border_size", 5)
 
     config = PreprocessingConfig(
         auto_detect=settings_dict.get("ocr_preprocess_auto", True),

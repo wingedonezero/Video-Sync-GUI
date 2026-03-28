@@ -139,7 +139,6 @@ class OCRTab(QWidget):
         )
 
         self.widgets["ocr_engine"] = QComboBox()
-        self.widgets["ocr_engine"].addItem("Tesseract (Traditional)", "tesseract")
         self.widgets["ocr_engine"].addItem("EasyOCR (Deep Learning)", "easyocr")
         self.widgets["ocr_engine"].addItem("PaddleOCR (State-of-Art)", "paddleocr")
         self.widgets["ocr_engine"].addItem("LFM2-VL-450M (Fast VLM)", "lfm2vl-450m")
@@ -147,7 +146,6 @@ class OCRTab(QWidget):
         self.widgets["ocr_engine"].addItem("PaddleOCR-VL 1.5 (Fast + Positions)", "paddleocr-vl")
         self.widgets["ocr_engine"].setToolTip(
             "OCR engine to use.\n"
-            "• Tesseract: Fast, traditional OCR. Good for clean text.\n"
             "• EasyOCR: Deep learning based. Better for varied fonts. Requires: pip install easyocr\n"
             "• PaddleOCR: State-of-art accuracy. Requires: pip install paddleocr\n"
             "• LFM2-VL-450M: Fast VLM with positioning (126ms/sub, 0.85GB VRAM). Requires GPU + model download.\n"
@@ -165,7 +163,7 @@ class OCRTab(QWidget):
         self.widgets["ocr_language"].addItem("Chinese (Traditional)", "chi_tra")
         self.widgets["ocr_language"].addItem("Korean", "kor")
         self.widgets["ocr_language"].setToolTip(
-            "Tesseract language pack to use. Requires the corresponding language data to be installed."
+            "OCR language to use for text recognition."
         )
 
         self.widgets["ocr_char_blacklist"] = QLineEdit()

@@ -8,7 +8,7 @@ This module provides a complete OCR pipeline for converting image-based subtitle
 Components:
     - parsers: Extract subtitle images and metadata from VOB/PGS files
     - preprocessing: Adaptive image preprocessing for optimal OCR accuracy
-    - engine: Tesseract OCR wrapper with confidence tracking
+    - backends: OCR engine backends (EasyOCR, PaddleOCR)
     - postprocess: Pattern fixes and dictionary validation
     - report: OCR quality reporting (unknown words, confidence, fixes)
     - output: ASS/SRT generation with position support
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
     from vsg_core.subtitles.data import SubtitleData
 
-from .engine import OCREngine
+from .backends import OCRBackend
 from .pipeline import OCRPipeline
 from .report import LowConfidenceLine, OCRReport, UnknownWord
 from .romaji_dictionary import (
@@ -45,7 +45,7 @@ from .romaji_dictionary import (
 __all__ = [
     "KanaToRomaji",
     "LowConfidenceLine",
-    "OCREngine",
+    "OCRBackend",
     "OCRPipeline",
     "OCRReport",
     "RomajiDictionary",
@@ -69,7 +69,7 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
     def get_val(key: str, default=None):
         return getattr(settings, key, default)
 
-    # Map 3-letter language codes to Tesseract codes
+    # Map 3-letter language codes to OCR backend codes
     lang_map = {
         "eng": "eng",
         "jpn": "jpn",
@@ -83,11 +83,11 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         "rus": "rus",
     }
 
-    tesseract_lang = lang_map.get(lang, lang)
+    ocr_lang = lang_map.get(lang, lang)
 
     return {
         # Language
-        "ocr_language": tesseract_lang,
+        "ocr_language": ocr_lang,
         # Preprocessing
         "ocr_preprocess_auto": get_val("ocr_preprocess_auto", True),
         "ocr_force_binarization": get_val("ocr_force_binarization", False),
@@ -97,7 +97,7 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         "ocr_binarization_method": get_val("ocr_binarization_method", "otsu"),
         "ocr_denoise": get_val("ocr_denoise", False),
         # OCR engine
-        "ocr_engine": get_val("ocr_engine", "tesseract"),
+        "ocr_engine": get_val("ocr_engine", "easyocr"),
         "ocr_psm": get_val("ocr_psm", 7),
         "ocr_char_whitelist": get_val("ocr_char_whitelist", ""),
         "ocr_char_blacklist": get_val("ocr_char_blacklist", "|"),
@@ -125,20 +125,17 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
 
 def check_ocr_available() -> tuple[bool, str]:
     """
-    Check if OCR is available (Tesseract installed).
+    Check if any OCR backend is available.
 
     Returns:
         Tuple of (is_available, message)
     """
-    try:
-        import pytesseract
+    from .backends import get_available_backends
 
-        version = pytesseract.get_tesseract_version()
-        return True, f"Tesseract {version} available"
-    except ImportError:
-        return False, "pytesseract not installed (pip install pytesseract)"
-    except Exception as e:
-        return False, f"Tesseract not found: {e}"
+    available = get_available_backends()
+    if available:
+        return True, f"OCR available: {', '.join(available)}"
+    return False, "No OCR backends available. Install easyocr or paddleocr."
 
 
 def run_ocr_unified(
@@ -256,7 +253,7 @@ def run_ocr_unified(
 
     except ImportError as e:
         runner._log_message(f"[OCR] ERROR: Missing dependency: {e}")
-        runner._log_message("[OCR] Please install: pip install pytesseract")
+        runner._log_message("[OCR] Please install an OCR backend: pip install easyocr")
         return None
     except Exception as e:
         runner._log_message(f"[OCR] ERROR: Failed to perform OCR: {e}")
@@ -314,15 +311,15 @@ def run_preview_ocr(
         log(f"[Preview OCR] ERROR: Unsupported format: {suffix}")
         return None
 
-    # Determine OCR engine - prefer EasyOCR for speed, fallback to Tesseract
+    # Determine OCR engine - prefer EasyOCR, fallback to PaddleOCR
     available = get_available_backends()
     if "easyocr" in available:
         ocr_engine = "easyocr"
-    elif "tesseract" in available:
-        ocr_engine = "tesseract"
-        log("[Preview OCR] EasyOCR not available, using Tesseract")
+    elif "paddleocr" in available:
+        ocr_engine = "paddleocr"
+        log("[Preview OCR] EasyOCR not available, using PaddleOCR")
     else:
-        log("[Preview OCR] ERROR: No OCR backend available (need EasyOCR or Tesseract)")
+        log("[Preview OCR] ERROR: No OCR backend available (need EasyOCR or PaddleOCR)")
         return None
 
     log(f"[Preview OCR] Starting preview OCR with {ocr_engine}...")
