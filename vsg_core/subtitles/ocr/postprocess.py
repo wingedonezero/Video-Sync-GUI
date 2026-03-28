@@ -181,7 +181,9 @@ class OCRPostProcessor:
             elif rule.rule_type == "regex":
                 try:
                     pattern = re.compile(rule.pattern)
-                    self.regex_patterns[rule.pattern] = (pattern, rule.replacement)
+                    # Convert .NET/SE replacement syntax ($1, $2) to Python (\1, \2)
+                    replacement = re.sub(r'\$(\d+)', r'\\\1', rule.replacement)
+                    self.regex_patterns[rule.pattern] = (pattern, replacement)
                 except re.error as e:
                     logger.warning(f"Invalid regex pattern '{rule.pattern}': {e}")
 

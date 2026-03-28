@@ -725,7 +725,9 @@ class SubtitleEditCorrector:
         for rule in se_dicts.regex_rules:
             try:
                 pattern = re.compile(rule.from_text)
-                self._compiled_regex.append((pattern, rule.to_text))
+                # Convert .NET/SE replacement syntax ($1, $2) to Python (\1, \2)
+                replacement = re.sub(r'\$(\d+)', r'\\\1', rule.to_text)
+                self._compiled_regex.append((pattern, replacement))
             except re.error as e:
                 # Check if this is a Unicode property pattern (\p{...})
                 if "\\p{" in rule.from_text or r"\p{" in rule.from_text:
