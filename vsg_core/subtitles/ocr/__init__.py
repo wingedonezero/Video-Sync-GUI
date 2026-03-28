@@ -311,18 +311,27 @@ def run_preview_ocr(
         log(f"[Preview OCR] ERROR: Unsupported format: {suffix}")
         return None
 
-    # Determine OCR engine
-    available = get_available_backends()
-    if "easyocr" in available:
-        ocr_engine = "easyocr"
-    elif available:
-        ocr_engine = available[0]
-        log(f"[Preview OCR] EasyOCR not available, using {ocr_engine}")
-    else:
-        log("[Preview OCR] ERROR: No OCR backend available (need EasyOCR)")
-        return None
+    # Determine OCR engine — prefer PaddleOCR-VL crop mode (fastest + best accuracy)
+    from .vlm_backends import is_model_available
 
-    log(f"[Preview OCR] Starting preview OCR with {ocr_engine}...")
+    use_crop_mode = False
+    if is_model_available("paddleocr-vl"):
+        ocr_engine = "paddleocr-vl"
+        use_crop_mode = True
+    else:
+        # Fall back to traditional backends
+        available = get_available_backends()
+        if "easyocr" in available:
+            ocr_engine = "easyocr"
+        elif available:
+            ocr_engine = available[0]
+            log(f"[Preview OCR] PaddleOCR-VL and EasyOCR not available, using {ocr_engine}")
+        else:
+            log("[Preview OCR] ERROR: No OCR backend available")
+            return None
+
+    log(f"[Preview OCR] Starting preview OCR with {ocr_engine}"
+        f"{' (crop mode)' if use_crop_mode else ''}...")
 
     # Map language code
     lang_map = {
@@ -343,6 +352,7 @@ def run_preview_ocr(
     preview_settings = {
         "ocr_language": ocr_lang,
         "ocr_engine": ocr_engine,
+        "ocr_crop_mode": use_crop_mode,
         "ocr_preprocess_auto": True,
         "ocr_force_binarization": False,
         "ocr_upscale_threshold": 40,

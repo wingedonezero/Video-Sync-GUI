@@ -175,3 +175,71 @@ def detect_regions_pixel(
         regions.append(r)
 
     return regions
+
+
+def split_region_into_lines(
+    image: np.ndarray,
+    region: Region,
+    min_line_height: int = 5,
+) -> list[Region]:
+    """
+    Split a region into individual text lines via horizontal projection.
+
+    Scans rows within the region for text pixels, groups contiguous rows
+    into lines. Returns sub-Region objects in frame coordinates (so
+    crop_region() works directly on them).
+
+    Args:
+        image: RGBA, RGB, or grayscale numpy array (full frame)
+        region: Parent region to split
+        min_line_height: Minimum pixel height for a valid line
+
+    Returns:
+        List of Region objects for each line, top-to-bottom order.
+        Each line Region inherits the parent's region_id.
+        Falls back to [region] if no lines detected.
+    """
+    crop = image[region.y1:region.y2, region.x1:region.x2]
+
+    # Get mask from appropriate channel (same logic as detect_regions_pixel)
+    if crop.ndim == 3 and crop.shape[2] == 4:
+        mask = crop[:, :, 3]
+    elif crop.ndim == 3:
+        mask = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    else:
+        mask = crop
+
+    # Row-level text detection
+    row_has_text = np.any(mask > 10, axis=1)
+
+    # Walk rows to find contiguous text spans
+    lines: list[tuple[int, int]] = []
+    in_line = False
+    line_start = 0
+
+    for y, has_text in enumerate(row_has_text):
+        if has_text and not in_line:
+            line_start = y
+            in_line = True
+        elif not has_text and in_line:
+            if y - line_start >= min_line_height:
+                lines.append((line_start, y))
+            in_line = False
+
+    if in_line and len(row_has_text) - line_start >= min_line_height:
+        lines.append((line_start, len(row_has_text)))
+
+    if not lines:
+        return [region]
+
+    # Convert to frame coordinates, keep full region width
+    result = []
+    for ly1, ly2 in lines:
+        result.append(Region(
+            x1=region.x1,
+            y1=region.y1 + ly1,
+            x2=region.x2,
+            y2=region.y1 + ly2,
+            region_id=region.region_id,
+        ))
+    return result

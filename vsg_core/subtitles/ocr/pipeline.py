@@ -424,7 +424,8 @@ class OCRPipeline:
         # ── Load model ────────────────────────────────────────────────
         self._log_progress(f"Loading model: {engine_name}", 0.10)
         load_start = time.time()
-        backend = get_vlm_backend(engine_name)
+        crop_mode = self.settings.get("ocr_crop_mode", False)
+        backend = get_vlm_backend(engine_name, crop_mode=crop_mode)
         backend.load()
         self._vlm_backend = backend
         load_time = time.time() - load_start
