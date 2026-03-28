@@ -140,14 +140,12 @@ class OCRTab(QWidget):
 
         self.widgets["ocr_engine"] = QComboBox()
         self.widgets["ocr_engine"].addItem("EasyOCR (Deep Learning)", "easyocr")
-        self.widgets["ocr_engine"].addItem("PaddleOCR (State-of-Art)", "paddleocr")
         self.widgets["ocr_engine"].addItem("LFM2-VL-450M (Fast VLM)", "lfm2vl-450m")
         self.widgets["ocr_engine"].addItem("Qwen3.5-4B (Archival VLM)", "qwen35-4b")
         self.widgets["ocr_engine"].addItem("PaddleOCR-VL 1.5 (Fast + Positions)", "paddleocr-vl")
         self.widgets["ocr_engine"].setToolTip(
             "OCR engine to use.\n"
             "• EasyOCR: Deep learning based. Better for varied fonts. Requires: pip install easyocr\n"
-            "• PaddleOCR: State-of-art accuracy. Requires: pip install paddleocr\n"
             "• LFM2-VL-450M: Fast VLM with positioning (126ms/sub, 0.85GB VRAM). Requires GPU + model download.\n"
             "• Qwen3.5-4B: Archival quality VLM with positioning (828ms/sub, 8.55GB VRAM). Requires GPU + model download.\n"
             "• PaddleOCR-VL 1.5: Fast VLM via llama.cpp with positions + cross-validation (239ms/sub, 1.7GB VRAM). Requires GPU + model download."
