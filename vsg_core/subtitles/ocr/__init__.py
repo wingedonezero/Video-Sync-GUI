@@ -311,15 +311,15 @@ def run_preview_ocr(
         log(f"[Preview OCR] ERROR: Unsupported format: {suffix}")
         return None
 
-    # Determine OCR engine - prefer EasyOCR, fallback to PaddleOCR
+    # Determine OCR engine
     available = get_available_backends()
     if "easyocr" in available:
         ocr_engine = "easyocr"
-    elif "paddleocr" in available:
-        ocr_engine = "paddleocr"
-        log("[Preview OCR] EasyOCR not available, using PaddleOCR")
+    elif available:
+        ocr_engine = available[0]
+        log(f"[Preview OCR] EasyOCR not available, using {ocr_engine}")
     else:
-        log("[Preview OCR] ERROR: No OCR backend available (need EasyOCR or PaddleOCR)")
+        log("[Preview OCR] ERROR: No OCR backend available (need EasyOCR)")
         return None
 
     log(f"[Preview OCR] Starting preview OCR with {ocr_engine}...")

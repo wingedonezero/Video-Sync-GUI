@@ -108,11 +108,6 @@ OPTIONAL_DEPS = {
         "packages": ["easyocr"],
         "check": "easyocr",
     },
-    "ocr-paddle": {
-        "label": "PaddleOCR",
-        "packages": ["paddleocr"],
-        "check": "paddleocr",
-    },
     "ocr-vlm": {
         "label": "VLM OCR (transformers)",
         "packages": ["transformers>=5.0", "huggingface-hub", "accelerate"],
@@ -131,10 +126,6 @@ OPTIONAL_DEPS = {
         "check": "audio_separator",
     },
 }
-
-# PaddleOCR compatible versions
-PADDLE_VERSION = "3.2.0"
-PADDLEOCR_VERSION = "3.3.0"
 
 # ROCm PyTorch index URLs
 ROCM_OPTIONS: list[tuple[str, str, bool]] = [
@@ -1126,49 +1117,6 @@ except Exception as e:
         ]
         self._run_chain(steps)
 
-    def download_paddleocr_models(self) -> None:
-        """Install PaddleOCR and download its models."""
-        self.window.clear_log()
-        model_dir = PROJECT_DIR / ".config" / "ocr" / "paddleocr_models"
-        env = {
-            "PADDLEX_HOME": str(model_dir),
-            "PADDLEOCR_HOME": str(model_dir),
-            "HF_HOME": str(model_dir / "huggingface"),
-        }
-
-        script = f"""
-import sys, os
-model_dir = {str(model_dir)!r}
-os.makedirs(model_dir, exist_ok=True)
-print(f"Downloading models to: {{model_dir}}")
-try:
-    from paddleocr import PaddleOCR
-    print("Initializing PaddleOCR (this downloads models)...")
-    ocr = PaddleOCR(use_textline_orientation=False, lang='en', device='cpu')
-    print("OK PaddleOCR models downloaded and verified!")
-except Exception as e:
-    print(f"ERROR {{e}}", file=sys.stderr)
-    sys.exit(1)
-"""
-        steps: list[tuple[str, list[str], dict[str, str] | None]] = [
-            (
-                f"Installing PaddlePaddle {PADDLE_VERSION}...",
-                pip_cmd("install", f"paddlepaddle=={PADDLE_VERSION}"),
-                None,
-            ),
-            (
-                f"Installing PaddleOCR {PADDLEOCR_VERSION}...",
-                pip_cmd("install", f"paddleocr=={PADDLEOCR_VERSION}"),
-                None,
-            ),
-            (
-                "Downloading PaddleOCR models...",
-                [str(VENV_PYTHON), "-c", script],
-                env,
-            ),
-        ]
-        self._run_chain(steps)
-
     def fix_qt_kde_theme(self) -> None:
         """Patch venv activate script for KDE/Breeze Qt theming."""
         self.window.clear_log()
@@ -1184,28 +1132,6 @@ except Exception as e:
                 "Could not apply fix. Check that the venv exists "
                 "and /usr/lib/qt6/plugins is available."
             )
-
-    def fix_paddleocr(self) -> None:
-        """Fix PaddleOCR version compatibility."""
-        self.window.clear_log()
-        self.window.log_info(
-            f"Installing compatible versions: "
-            f"PaddlePaddle {PADDLE_VERSION}, PaddleOCR {PADDLEOCR_VERSION}"
-        )
-
-        steps: list[tuple[str, list[str], dict[str, str] | None]] = [
-            (
-                f"Installing PaddlePaddle {PADDLE_VERSION}...",
-                pip_cmd("install", f"paddlepaddle=={PADDLE_VERSION}"),
-                None,
-            ),
-            (
-                f"Installing PaddleOCR {PADDLEOCR_VERSION}...",
-                pip_cmd("install", f"paddleocr=={PADDLEOCR_VERSION}"),
-                None,
-            ),
-        ]
-        self._run_chain(steps)
 
     def fix_rocm_pytorch(self) -> None:
         """Remove NVIDIA packages and reinstall PyTorch with ROCm."""
@@ -1411,7 +1337,6 @@ class SetupWindow(QMainWindow):
             [
                 ("ISC Weights (Neural Match)", self.controller.download_isc_model),
                 ("EasyOCR Models", self.controller.download_easyocr_models),
-                ("PaddleOCR Models", self.controller.download_paddleocr_models),
                 (
                     "LFM2-VL-450M (Fast VLM OCR)",
                     lambda: self.controller.download_ocr_vlm_model("LFM2-VL-450M"),
@@ -1442,10 +1367,6 @@ class SetupWindow(QMainWindow):
                     lambda: self.controller.install_optional_dep("ocr-easyocr"),
                 ),
                 (
-                    "Install: PaddleOCR",
-                    lambda: self.controller.install_optional_dep("ocr-paddle"),
-                ),
-                (
                     "Install: Audio Sep",
                     lambda: self.controller.install_optional_dep("ai-audio"),
                 ),
@@ -1462,7 +1383,6 @@ class SetupWindow(QMainWindow):
             "Fixes",
             [
                 ("Fix Qt/KDE Theme", self.controller.fix_qt_kde_theme),
-                ("Fix PaddleOCR Versions", self.controller.fix_paddleocr),
                 ("Fix ROCm / PyTorch", self.controller.fix_rocm_pytorch),
             ],
         )
