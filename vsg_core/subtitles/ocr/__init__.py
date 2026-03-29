@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
     from vsg_core.subtitles.data import SubtitleData
 
-from .backends import OCRBackend
 from .pipeline import OCRPipeline
 from .report import LowConfidenceLine, OCRReport, UnknownWord
 from .romaji_dictionary import (
@@ -45,7 +44,6 @@ from .romaji_dictionary import (
 __all__ = [
     "KanaToRomaji",
     "LowConfidenceLine",
-    "OCRBackend",
     "OCRPipeline",
     "OCRReport",
     "RomajiDictionary",
@@ -97,7 +95,7 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         "ocr_binarization_method": get_val("ocr_binarization_method", "otsu"),
         "ocr_denoise": get_val("ocr_denoise", False),
         # OCR engine
-        "ocr_engine": get_val("ocr_engine", "easyocr"),
+        "ocr_engine": get_val("ocr_engine", "paddleocr-vl"),
         "ocr_psm": get_val("ocr_psm", 7),
         "ocr_char_whitelist": get_val("ocr_char_whitelist", ""),
         "ocr_char_blacklist": get_val("ocr_char_blacklist", "|"),
@@ -130,12 +128,11 @@ def check_ocr_available() -> tuple[bool, str]:
     Returns:
         Tuple of (is_available, message)
     """
-    from .backends import get_available_backends
+    from .vlm_backends import is_model_available
 
-    available = get_available_backends()
-    if available:
-        return True, f"OCR available: {', '.join(available)}"
-    return False, "No OCR backends available. Install easyocr or paddleocr."
+    if is_model_available("paddleocr-vl"):
+        return True, "OCR available: paddleocr-vl"
+    return False, "No OCR backends available. PaddleOCR-VL model not found."
 
 
 def run_ocr_unified(
@@ -285,8 +282,6 @@ def run_preview_ocr(
     """
     import time
 
-    from .backends import get_available_backends
-
     sub_path = Path(subtitle_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -311,27 +306,16 @@ def run_preview_ocr(
         log(f"[Preview OCR] ERROR: Unsupported format: {suffix}")
         return None
 
-    # Determine OCR engine — prefer PaddleOCR-VL crop mode (fastest + best accuracy)
+    # Determine OCR engine — PaddleOCR-VL crop mode (fastest + best accuracy)
     from .vlm_backends import is_model_available
 
-    use_crop_mode = False
-    if is_model_available("paddleocr-vl"):
-        ocr_engine = "paddleocr-vl"
-        use_crop_mode = True
-    else:
-        # Fall back to traditional backends
-        available = get_available_backends()
-        if "easyocr" in available:
-            ocr_engine = "easyocr"
-        elif available:
-            ocr_engine = available[0]
-            log(f"[Preview OCR] PaddleOCR-VL and EasyOCR not available, using {ocr_engine}")
-        else:
-            log("[Preview OCR] ERROR: No OCR backend available")
-            return None
+    if not is_model_available("paddleocr-vl"):
+        log("[Preview OCR] ERROR: PaddleOCR-VL model not found")
+        return None
 
-    log(f"[Preview OCR] Starting preview OCR with {ocr_engine}"
-        f"{' (crop mode)' if use_crop_mode else ''}...")
+    ocr_engine = "paddleocr-vl"
+    use_crop_mode = True
+    log(f"[Preview OCR] Starting preview OCR with {ocr_engine} (crop mode)...")
 
     # Map language code
     lang_map = {

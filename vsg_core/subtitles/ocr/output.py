@@ -105,7 +105,7 @@ class OCRSubtitleResult:
 def create_subtitle_data_from_ocr(
     ocr_results: list[OCRSubtitleResult],
     source_file: str,
-    engine: str = "easyocr",
+    engine: str = "paddleocr-vl",
     language: str = "eng",
     source_format: str = "vobsub",
     source_resolution: tuple[int, int] = (720, 480),
@@ -227,21 +227,14 @@ def create_subtitle_data_from_ocr(
             dominant_color=result.dominant_color,
         )
 
-        # VLM zone-based positioning (takes precedence over line_regions)
-        if result.zone:
+        # VLM positioning — all lines get \pos() at exact location
+        if result.pos_x > 0 or result.pos_y > 0:
             text = result.text.replace("\n", "\\N")
-            if result.zone == "bot-C":
-                style = "Default"
-            elif result.zone == "top-C":
-                style = "Top"
-                positioned_count += 1
-            else:
-                # Non-standard position — Default style with \an5\pos() override
-                # \an5 = center-center anchor (matches our center coordinates)
-                # Coordinates are in source resolution space, same as PlayRes
-                style = "Default"
-                text = f"{{\\an5\\pos({result.pos_x},{result.pos_y})}}{text}"
-                positioned_count += 1
+            # \an5 = center-center anchor, \pos() places at bbox center
+            # Coordinates are in source resolution space, same as PlayRes
+            style = "Default"
+            text = f"{{\\an5\\pos({result.pos_x},{result.pos_y})}}{text}"
+            positioned_count += 1
 
             event = SubtitleEvent(
                 start_ms=float(result.start_ms),

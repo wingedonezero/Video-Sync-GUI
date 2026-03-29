@@ -107,14 +107,16 @@ class OCRDebugger:
         self.fix_indices: set[int] = set()
         self.low_confidence_indices: set[int] = set()
 
-        # VLM region data (annotated images, region info, positioned subs)
+        # VLM region data (annotated images, region info)
         self.annotated_images: dict[int, np.ndarray] = {}
-        self.region_data: dict[int, list[dict]] = {}  # index -> [{region_id, zone, bbox, text}]
-        self.positioned_indices: set[int] = set()  # Indices with \pos() tags
+        self.region_data: dict[int, list[dict]] = {}  # index -> [{line_id, bbox, text}]
 
-        # Cross-validation data (VL bbox vs pixel regions)
-        self.cv_aligned: int = 0
-        self.cv_flagged: list[tuple[int, int, tuple, str]] = []
+        # Pixel verification results
+        # status: "clean" | "empty" | "paddle_empty" | "outside" | "bleed"
+        self.verification_results: dict[int, dict] = {}  # index -> {status, details}
+        self.verification_counts: dict[str, int] = {
+            "clean": 0, "empty": 0, "paddle_empty": 0, "outside": 0, "bleed": 0,
+        }
 
     @property
     def debug_dir(self) -> Path:
@@ -195,32 +197,38 @@ class OCRDebugger:
         self,
         index: int,
         regions: list[dict],
-        has_pos: bool = False,
     ) -> None:
-        """
-        Store region detection data for a subtitle.
+        """Store line detection data for a subtitle.
 
         Args:
             index: Subtitle index
-            regions: List of dicts with region_id, zone, bbox, text, needs_pos
-            has_pos: Whether any region needs \\pos() tag
+            regions: List of dicts with line_id, bbox, text
         """
         if not self.enabled:
             return
         self.region_data[index] = regions
-        if has_pos:
-            self.positioned_indices.add(index)
 
-    def add_cross_validation_summary(
+    def add_verification_result(
         self,
-        aligned: int,
-        flagged: list[tuple[int, int, tuple, str]],
+        index: int,
+        status: str,
+        details: dict | None = None,
     ) -> None:
-        """Store cross-validation results (VL bbox vs pixel regions)."""
+        """Store pixel verification result for a subtitle.
+
+        Args:
+            index: Subtitle index
+            status: One of "clean", "empty", "paddle_empty", "outside", "bleed"
+            details: Optional dict with extra info (e.g., outside_pixels, max_pixel)
+        """
         if not self.enabled:
             return
-        self.cv_aligned = aligned
-        self.cv_flagged = flagged
+        self.verification_results[index] = {
+            "status": status,
+            **(details or {}),
+        }
+        if status in self.verification_counts:
+            self.verification_counts[status] += 1
 
     def save(self):
         """Save all debug output to disk."""
@@ -252,16 +260,13 @@ class OCRDebugger:
         if self.low_confidence_indices:
             self._save_low_confidence()
 
-        # Save VLM-specific debug data
+        # Save annotated images (backend line bboxes drawn on raw image)
         if self.annotated_images:
             self._save_annotated_images()
 
-        if self.positioned_indices:
-            self._save_positioned()
-
-        # Cross-validation results
-        if self.cv_aligned > 0 or self.cv_flagged:
-            self._save_cross_validation()
+        # Save pixel verification results
+        if self.verification_results:
+            self._save_verification()
 
     def _save_summary(self):
         """Save overall summary file."""
@@ -296,12 +301,20 @@ class OCRDebugger:
             )
         if self.annotated_images:
             lines.append(
-                f"  annotated/ - {len(self.annotated_images)} images (region boxes)"
+                f"  annotated/ - {len(self.annotated_images)} images (line bboxes)"
             )
-        if self.positioned_indices:
-            lines.append(
-                f"  positioned/ - {len(self.positioned_indices)} subs with \\pos() tags"
-            )
+        if self.verification_results:
+            vc = self.verification_counts
+            lines.append(f"  verification/ - pixel verification results")
+            for status in ("clean", "empty", "paddle_empty", "outside", "bleed"):
+                if vc.get(status, 0) > 0:
+                    lines.append(f"    {status}: {vc[status]}")
+            # Count issues (non-clean, non-empty)
+            issues = sum(vc.get(s, 0) for s in ("paddle_empty", "outside", "bleed"))
+            if issues:
+                lines.append(f"    paddle_empty/ - {vc.get('paddle_empty', 0)} images")
+                lines.append(f"    outside/ - {vc.get('outside', 0)} images")
+                lines.append(f"    bleed/ - {vc.get('bleed', 0)} images")
 
         summary_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -594,102 +607,92 @@ class OCRDebugger:
             img = self.annotated_images[idx]
             self._save_image(img, folder / f"sub_{idx:04d}.png")
 
-    def _save_positioned(self):
-        """Save positioned subtitle debug info (subs with \\pos() tags)."""
-        folder = self.debug_dir / "positioned"
-        folder.mkdir(parents=True, exist_ok=True)
+    def _save_verification(self):
+        """Save pixel verification results organized by status category."""
+        base = self.debug_dir / "verification"
+        base.mkdir(parents=True, exist_ok=True)
 
-        lines = [
-            "Positioned Subtitles (\\pos() tags)",
+        vc = self.verification_counts
+        total = sum(vc.values())
+
+        def pct(n: int) -> str:
+            return f"{n / max(total, 1) * 100:.2f}%"
+
+        # Summary file
+        summary_lines = [
+            "Pixel Verification Summary",
             "=" * 50,
             "",
-            "These subtitles have non-standard positions (not bottom-center or top-center)",
-            "and use \\pos() tags for exact placement.",
+            f"Total subtitles verified: {total}",
             "",
+            f"  {'Status':<15} {'Count':>6}  {'%':>8}",
+            f"  {'-'*15} {'-'*6}  {'-'*8}",
         ]
+        for status in ("clean", "empty", "paddle_empty", "outside", "bleed"):
+            c = vc.get(status, 0)
+            summary_lines.append(f"  {status:<15} {c:>6}  {pct(c):>8}")
 
-        for idx in sorted(self.positioned_indices):
-            sub = self.subtitles.get(idx)
-            regions = self.region_data.get(idx, [])
-
-            lines.append("-" * 50)
-            lines.append(f"Index: {idx}")
-            if sub:
-                lines.append(f"Time: {sub.start_time} -> {sub.end_time}")
-                lines.append(f"Text: {sub.raw_text}")
-
-            if regions:
-                lines.append(f"Regions: {len(regions)}")
-                for rd in regions:
-                    bbox = rd.get("bbox", [0, 0, 0, 0])
-                    lines.append(
-                        f"  R{rd.get('region_id', '?')}: "
-                        f"zone={rd.get('zone', '?')} "
-                        f"bbox=[{bbox[0]},{bbox[1]}]-[{bbox[2]},{bbox[3]}] "
-                        f"pos={rd.get('needs_pos', False)} "
-                        f'"{rd.get("text", "")[:60]}"'
-                    )
-            lines.append("")
-
-            # Save image if available
-            if sub and sub.image is not None:
-                self._save_image(sub.image, folder / f"sub_{idx:04d}.png")
-            # Also save annotated version if available
-            if idx in self.annotated_images:
-                self._save_image(
-                    self.annotated_images[idx],
-                    folder / f"sub_{idx:04d}_annotated.png",
-                )
-
-        (folder / "positioned.txt").write_text("\n".join(lines), encoding="utf-8")
-
-    def _save_cross_validation(self):
-        """Save cross-validation results (VL bbox vs pixel region alignment)."""
-        folder = self.debug_dir / "cross_validation"
-        folder.mkdir(parents=True, exist_ok=True)
-
-        cv_total = self.cv_aligned + len(self.cv_flagged)
-        lines = [
-            "Cross-Validation: VL Bounding Boxes vs Pixel Regions",
-            "=" * 50,
+        summary_lines.extend([
             "",
-            f"Total lines checked: {cv_total}",
-            f"Aligned: {self.cv_aligned}",
-            f"Flagged: {len(self.cv_flagged)}",
-            "",
-        ]
-
-        if self.cv_flagged:
-            lines.append("Flagged Lines:")
-            lines.append("-" * 50)
-            for sub_idx, region_id, vl_bbox, text in self.cv_flagged:
-                sub = self.subtitles.get(sub_idx)
-                time_str = sub.start_time if sub else "?"
-                lines.append(
-                    f"[{sub_idx:04d}] {time_str} region={region_id} "
-                    f"vl_bbox=({vl_bbox[0]},{vl_bbox[1]})-"
-                    f"({vl_bbox[2]},{vl_bbox[3]}) "
-                    f'text="{text}"'
-                )
-
-                # Save image with both bboxes if available
-                if sub and sub.image is not None:
-                    self._save_image(
-                        sub.image,
-                        folder / f"sub_{sub_idx:04d}.png",
-                    )
-                if sub_idx in self.annotated_images:
-                    self._save_image(
-                        self.annotated_images[sub_idx],
-                        folder / f"sub_{sub_idx:04d}_annotated.png",
-                    )
-            lines.append("")
-        else:
-            lines.append("No flagged lines — all VL positions match pixel regions.")
-
-        (folder / "cross_validation.txt").write_text(
-            "\n".join(lines), encoding="utf-8"
+            "Status definitions:",
+            "  clean        — paddle lines cover all visible pixels",
+            "  empty        — no pixels at all (blank sub / timing marker)",
+            "  paddle_empty — paddle returned nothing but pixels exist",
+            "  outside      — pixels found outside all paddle bboxes",
+            "  bleed        — outside pixels touch a paddle bbox edge (character overflow)",
+        ])
+        (base / "verification_summary.txt").write_text(
+            "\n".join(summary_lines), encoding="utf-8"
         )
+
+        # Save issue categories with images
+        for status in ("paddle_empty", "outside", "bleed"):
+            indices = [
+                idx for idx, vr in self.verification_results.items()
+                if vr["status"] == status
+            ]
+            if not indices:
+                continue
+
+            folder = base / status
+            folder.mkdir(parents=True, exist_ok=True)
+
+            detail_lines = [
+                f"Verification: {status}",
+                "=" * 50,
+                f"Count: {len(indices)}",
+                "",
+            ]
+
+            for idx in sorted(indices):
+                sub = self.subtitles.get(idx)
+                vr = self.verification_results[idx]
+
+                detail_lines.append("-" * 50)
+                detail_lines.append(f"Index: {idx}")
+                if sub:
+                    detail_lines.append(f"Time: {sub.start_time} -> {sub.end_time}")
+                    detail_lines.append(f"Text: {sub.raw_text}")
+
+                # Show verification details
+                for k, v in vr.items():
+                    if k != "status":
+                        detail_lines.append(f"  {k}: {v}")
+                detail_lines.append("")
+
+                # Save raw image
+                if sub and sub.image is not None:
+                    self._save_image(sub.image, folder / f"sub_{idx:04d}.png")
+                # Save annotated image (with paddle bboxes drawn)
+                if idx in self.annotated_images:
+                    self._save_image(
+                        self.annotated_images[idx],
+                        folder / f"sub_{idx:04d}_annotated.png",
+                    )
+
+            (folder / f"{status}.txt").write_text(
+                "\n".join(detail_lines), encoding="utf-8"
+            )
 
     def _save_image(self, image: np.ndarray, path: Path):
         """Save a numpy image array to disk."""

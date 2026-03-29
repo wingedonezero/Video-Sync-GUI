@@ -250,6 +250,44 @@ class PaddleOCRVL(VLMBackend):
 
         return results
 
+    def spotting_direct(
+        self,
+        image: np.ndarray,
+    ) -> list[dict]:
+        """Run Spotting on a full-frame image, return raw lines with bboxes.
+
+        Returns list of dicts with 'text' and 'bbox' (x1,y1,x2,y2) keys.
+        This is the source-of-truth detection — no pixel regions needed.
+        """
+        if self.llm is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        # Ensure RGB
+        if image.ndim == 3 and image.shape[2] == 4:
+            source = rgba_to_rgb_on_black(image)
+        else:
+            source = image
+
+        frame_h, frame_w = source.shape[:2]
+        data_uri = _image_to_data_uri(source)
+
+        result = self.llm.create_chat_completion(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                        {"type": "text", "text": "Spotting:"},
+                    ],
+                }
+            ],
+            max_tokens=512,
+            temperature=0,
+        )
+
+        raw_output = result["choices"][0]["message"]["content"].strip()
+        return _parse_spotting_output(raw_output, frame_w, frame_h)
+
     def _ocr_spotting(
         self,
         image: np.ndarray,
