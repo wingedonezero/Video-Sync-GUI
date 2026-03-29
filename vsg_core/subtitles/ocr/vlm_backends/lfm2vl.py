@@ -45,7 +45,7 @@ class LFM2VLBase(VLMBackend):
         self.processor = AutoProcessor.from_pretrained(model_path)
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_path,
-            dtype=torch.bfloat16,
+            dtype=torch.float16,
             low_cpu_mem_usage=True,
             attn_implementation="sdpa",
             device_map="cpu",

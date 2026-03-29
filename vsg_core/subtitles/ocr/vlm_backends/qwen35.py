@@ -63,7 +63,7 @@ class Qwen35Base(VLMBackend):
         # CPU-first loading to avoid VRAM spikes
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_path,
-            dtype=torch.bfloat16,
+            dtype=torch.float16,
             trust_remote_code=True,
             low_cpu_mem_usage=True,
             attn_implementation="sdpa",
