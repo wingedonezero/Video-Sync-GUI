@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from . import VLMBackend, VLMRegionResult, get_model_dir, register_vlm_backend
+from . import VLMBackend, VLMRegionResult, _apply_torch_gpu_limits, get_model_dir, register_vlm_backend
 from ..annotator import crop_region
 from ..region_detector import Region
 
@@ -37,6 +37,8 @@ class LFM2VLBase(VLMBackend):
     def load(self) -> None:
         from transformers import AutoModelForImageTextToText, AutoProcessor
 
+        _apply_torch_gpu_limits()
+
         model_path = str(self.model_dir)
         logger.info(f"Loading LFM2-VL-{self.variant} from {model_path}")
 
@@ -44,6 +46,7 @@ class LFM2VLBase(VLMBackend):
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_path,
             dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
             attn_implementation="sdpa",
             device_map="cpu",
         )

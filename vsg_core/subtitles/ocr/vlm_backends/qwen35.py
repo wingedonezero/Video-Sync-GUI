@@ -25,7 +25,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from . import VLMBackend, VLMRegionResult, get_model_dir, register_vlm_backend
+from . import VLMBackend, VLMRegionResult, _apply_torch_gpu_limits, get_model_dir, register_vlm_backend
 from ..region_detector import Region
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,8 @@ class Qwen35Base(VLMBackend):
 
     def load(self) -> None:
         from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        _apply_torch_gpu_limits()
 
         model_path = str(self.model_dir)
         logger.info(f"Loading Qwen3.5-{self.model_size} from {model_path}")

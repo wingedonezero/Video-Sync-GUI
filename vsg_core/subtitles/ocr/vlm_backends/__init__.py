@@ -18,6 +18,7 @@ Usage:
 """
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,18 @@ import numpy as np
 from ..region_detector import Region
 
 logger = logging.getLogger(__name__)
+
+# ── ROCm / PyTorch environment setup ──────────────────────────────────────
+# Must be set BEFORE torch is imported (happens when backends load below).
+# Inherited by subprocesses via os.environ.
+
+# Prevent VRAM fragmentation — limits internal block splitting so PyTorch
+# reuses large allocations instead of fragmenting into many small ones.
+os.environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "max_split_size_mb:512")
+
+# Auto-tune GEMM kernels for this specific GPU. First inference is slower
+# while it benchmarks kernel variants; results are cached for future runs.
+os.environ.setdefault("PYTORCH_TUNABLEOP_ENABLED", "1")
 
 # Project root for model storage
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent
@@ -59,6 +72,24 @@ class VLMResult:
         return "\n".join(r.text for r in self.regions if r.text)
 
 
+def _apply_torch_gpu_limits() -> None:
+    """Apply VRAM usage limit for PyTorch backends.
+
+    Caps PyTorch to ~13.5GB of 16GB VRAM (84%), leaving headroom for the
+    desktop compositor and display. Must be called in the process that runs
+    inference, before any GPU allocation.
+
+    Safe to call multiple times — only applies on first call.
+    """
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.set_per_process_memory_fraction(0.84)
+    except Exception:
+        pass  # Not critical — best-effort limit
+
+
 class VLMBackend(ABC):
     """
     Base class for VLM OCR backends.
@@ -66,6 +97,12 @@ class VLMBackend(ABC):
     Unlike traditional OCR backends (EasyOCR/PaddleOCR) that work on
     preprocessed grayscale line images, VLM backends work on raw RGBA
     images with detected regions.
+
+    PyTorch loading checklist (all PyTorch backends must follow):
+        - low_cpu_mem_usage=True (halves RAM during loading)
+        - device_map="cpu" then .to("cuda") (prevents 2x VRAM spike)
+        - attn_implementation="sdpa" (efficient attention on ROCm)
+        - Call _apply_torch_gpu_limits() before first GPU allocation
     """
 
     name: str = "base"
