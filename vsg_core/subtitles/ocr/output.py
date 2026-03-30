@@ -357,6 +357,17 @@ def create_subtitle_data_from_ocr(
     return data
 
 
+def _strip_pos_tag(text: str) -> str:
+    """Strip \\an5\\pos() tag from text for comparison purposes.
+
+    Paddle's normalized coordinates round differently per-frame (±1px),
+    so the same logical line can produce \\pos(359,159) vs \\pos(359,158).
+    Stripping the tag lets us compare the actual text content.
+    """
+    import re
+    return re.sub(r"\{\\an\d+\\pos\(\d+,\d+\)\}", "", text)
+
+
 def _merge_consecutive_duplicate_events(events: list) -> None:
     """
     Merge consecutive events of the same style that have identical text.
@@ -370,6 +381,9 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
     Merges in-place: extends the first event's end_ms to cover all
     consecutive duplicates, then removes the duplicates.
 
+    Compares text with \\pos() tags stripped since paddle bbox rounding
+    can shift coordinates by ±1px for the same logical line.
+
     Uses a max gap of 200ms — anything larger likely means the text
     actually disappeared and reappeared.
     """
@@ -382,6 +396,7 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
             continue
 
         style = events[i].style
+        text_i = _strip_pos_tag(events[i].text)
 
         # Look ahead for consecutive duplicates of the same style
         j = i + 1
@@ -391,9 +406,10 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
                 j += 1
                 continue
 
+            text_j = _strip_pos_tag(events[j].text)
             if (
                 events[j].style == style
-                and events[j].text == events[i].text
+                and text_j == text_i
                 and events[j].start_ms - events[i].end_ms <= max_gap_ms
             ):
                 # Extend the first event to cover this duplicate
