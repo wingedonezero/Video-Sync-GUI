@@ -357,13 +357,17 @@ def create_subtitle_data_from_ocr(
     return data
 
 
-def _strip_pos_tag(text: str) -> str:
-    """Strip \\an5\\pos() tag from text for comparison purposes.
+def _extract_pos(text: str) -> tuple[int, int] | None:
+    """Extract (x,y) from \\pos() tag in ASS text."""
+    import re
+    m = re.search(r"\\pos\((\d+),(\d+)\)", text)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
 
-    Paddle's normalized coordinates round differently per-frame (±1px),
-    so the same logical line can produce \\pos(359,159) vs \\pos(359,158).
-    Stripping the tag lets us compare the actual text content.
-    """
+
+def _strip_pos_tag(text: str) -> str:
+    """Strip \\an5\\pos() tag from text for content comparison."""
     import re
     return re.sub(r"\{\\an\d+\\pos\(\d+,\d+\)\}", "", text)
 
@@ -381,13 +385,19 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
     Merges in-place: extends the first event's end_ms to cover all
     consecutive duplicates, then removes the duplicates.
 
-    Compares text with \\pos() tags stripped since paddle bbox rounding
-    can shift coordinates by ±1px for the same logical line.
+    Guards:
+    - Must be different original_index (different VobSub image) — same
+      index means same image, different speakers stacked vertically.
+    - \\pos() coordinates must be within 3px tolerance — paddle's
+      normalized 0-1000 coords can round ±1-2px for the same line.
+      Cross-speaker gaps are 30+px so 3px is safe.
+    - Text compared with \\pos() tags stripped.
 
     Uses a max gap of 200ms — anything larger likely means the text
     actually disappeared and reappeared.
     """
     max_gap_ms = 200.0
+    pos_tolerance = 3
     to_remove: list[int] = []
     merged: set[int] = set()  # Track already-merged indices
 
@@ -397,6 +407,7 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
 
         style = events[i].style
         text_i = _strip_pos_tag(events[i].text)
+        pos_i = _extract_pos(events[i].text)
 
         # Look ahead for consecutive duplicates of the same style
         j = i + 1
@@ -407,9 +418,22 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
                 continue
 
             text_j = _strip_pos_tag(events[j].text)
+            pos_j = _extract_pos(events[j].text)
+
+            # Check pos tolerance
+            pos_ok = True
+            if pos_i is not None and pos_j is not None:
+                if (abs(pos_i[0] - pos_j[0]) > pos_tolerance
+                        or abs(pos_i[1] - pos_j[1]) > pos_tolerance):
+                    pos_ok = False
+            elif pos_i is not None or pos_j is not None:
+                pos_ok = False  # One has pos, other doesn't
+
             if (
                 events[j].style == style
                 and text_j == text_i
+                and events[j].original_index != events[i].original_index
+                and pos_ok
                 and events[j].start_ms - events[i].end_ms <= max_gap_ms
             ):
                 # Extend the first event to cover this duplicate
