@@ -921,7 +921,9 @@ class OCRPipeline:
                 region_text = "\n".join(line_processed)
                 raw_region = "\n".join(ln.text for ln in reg.lines)
 
-                # Region-level pixel position
+                # Position: only pos regions get \pos() tags.
+                # Bot/top use Default/Top styles with margin-based positioning.
+                use_pos = reg.zone == "pos"
                 ocr_result = OCRSubtitleResult(
                     index=sub_image.index,
                     start_ms=float(sub_image.start_ms),
@@ -939,8 +941,8 @@ class OCRPipeline:
                     frame_height=frame_h,
                     is_forced=sub_image.is_forced,
                     zone=reg.zone,
-                    pos_x=reg.left_x,  # Left pixel edge (an4 anchor)
-                    pos_y=reg.center_y,  # Vertical center of region
+                    pos_x=reg.left_x if use_pos else 0,
+                    pos_y=reg.center_y if use_pos else 0,
                 )
                 ocr_results.append(ocr_result)
 

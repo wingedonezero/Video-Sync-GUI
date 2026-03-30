@@ -296,6 +296,66 @@ class OCRDebugger:
         if self.verification_results:
             self._save_verification()
 
+        # Save region grouping results
+        if self.grouping_data:
+            self._save_grouping()
+
+    def _save_grouping(self):
+        """Save detailed region grouping decisions for every subtitle."""
+        import json
+
+        base = self.debug_dir / "grouping"
+        base.mkdir(parents=True, exist_ok=True)
+
+        # Per-sub detail file (JSON for machine reading)
+        with open(base / "grouping_detail.json", "w", encoding="utf-8") as f:
+            json.dump(self.grouping_data, f, indent=2, default=str)
+
+        # Human-readable summary
+        lines = [
+            "Region Grouping Detail",
+            "=" * 60,
+            "",
+            f"Total subs with grouping: {len(self.grouping_data)}",
+            f"Total regions: {sum(self.grouping_counts.values())}",
+            f"  bot: {self.grouping_counts.get('bot', 0)}",
+            f"  top: {self.grouping_counts.get('top', 0)}",
+            f"  pos: {self.grouping_counts.get('pos', 0)}",
+            "",
+        ]
+
+        # Multi-line regions (most interesting for debugging)
+        multi_count = 0
+        for idx in sorted(self.grouping_data.keys()):
+            for reg in self.grouping_data[idx]:
+                if reg.get("line_count", 0) >= 2:
+                    multi_count += 1
+        lines.append(f"Multi-line regions (2+ lines): {multi_count}")
+        lines.append("")
+
+        # Show every sub's grouping decision
+        for idx in sorted(self.grouping_data.keys()):
+            regs = self.grouping_data[idx]
+            total_lines = sum(r.get("line_count", 0) for r in regs)
+            if total_lines <= 1 and len(regs) <= 1:
+                # Single-line single-region — compact format
+                r = regs[0]
+                lines.append(f"[{idx:04d}] {r['zone']} 1L bbox={r.get('bbox', [])}")
+            else:
+                # Multi-line or multi-region — show details
+                lines.append(f"[{idx:04d}] {total_lines}L → {len(regs)}R:")
+                for r in regs:
+                    lines.append(
+                        f"  {r['zone']}: {r['line_count']}L "
+                        f"ids={r.get('line_ids', [])} "
+                        f"bbox={r.get('bbox', [])} "
+                        f"conf={r.get('confidence', 0):.2f}"
+                    )
+                    for reason in r.get("reasons", []):
+                        lines.append(f"    {reason}")
+
+        (base / "grouping_summary.txt").write_text("\n".join(lines), encoding="utf-8")
+
     def _save_summary(self):
         """Save overall summary file."""
         summary_path = self.debug_dir / "summary.txt"
