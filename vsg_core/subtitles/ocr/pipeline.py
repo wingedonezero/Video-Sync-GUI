@@ -540,17 +540,33 @@ class OCRPipeline:
                 status = "clean"
                 debugger.add_verification_result(sub_image.index, status)
 
-            # ── Step 3: Create Line objects from paddle bboxes ────────
-            # Used for annotated images and pos_x/pos_y calculation
-            # Already sorted by reading order (y1, x1) from Step 1
+            # ── Step 3: Create Line objects — pixel-refined from paddle bboxes
+            # Paddle gives approximate bboxes (0-1000 normalized → rounded).
+            # Pixel scan within each bbox finds the true text boundaries.
+            # Used for: pos_x/pos_y, annotated debug images, alignment.
+            # Already sorted by reading order (y1, x1) from Step 1.
             lines = []
             for line_idx, vl in enumerate(vl_lines):
                 if not vl["text"]:
                     continue
                 if vl["bbox"]:
                     bx1, by1, bx2, by2 = vl["bbox"]
+                    # Pixel-refine: scan raw image within paddle bbox
+                    roi = pixel_mask[by1:by2, bx1:bx2]
+                    if roi.size > 0 and np.any(roi):
+                        cols = np.any(roi, axis=0)
+                        rows = np.any(roi, axis=1)
+                        ci = np.where(cols)[0]
+                        ri = np.where(rows)[0]
+                        real_x1 = bx1 + int(ci[0])
+                        real_x2 = bx1 + int(ci[-1]) + 1
+                        real_y1 = by1 + int(ri[0])
+                        real_y2 = by1 + int(ri[-1]) + 1
+                    else:
+                        # No pixels found in bbox — use paddle coords
+                        real_x1, real_y1, real_x2, real_y2 = bx1, by1, bx2, by2
                     lines.append(Line(
-                        x1=bx1, y1=by1, x2=bx2, y2=by2,
+                        x1=real_x1, y1=real_y1, x2=real_x2, y2=real_y2,
                         line_id=line_idx + 1, text=vl["text"],
                     ))
                 else:
@@ -648,8 +664,8 @@ class OCRPipeline:
                     frame_width=frame_w,
                     frame_height=frame_h,
                     is_forced=sub_image.is_forced,
-                    pos_x=ln.center_x,
-                    pos_y=ln.center_y,
+                    pos_x=ln.x1,        # Left pixel edge (an4 anchor)
+                    pos_y=ln.center_y,  # Vertical center of pixel height
                 )
                 ocr_results.append(ocr_result)
 

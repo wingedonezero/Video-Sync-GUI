@@ -95,8 +95,8 @@ class OCRSubtitleResult:
     # VLM region classification (set by VLM pipeline, empty for traditional OCR)
     zone: str = ""  # e.g., "bot-C", "top-C", "mid-L" — from region_detector
     needs_pos: bool = False  # True if \pos() tag needed in ASS
-    pos_x: int = 0  # Center X for \pos() tag
-    pos_y: int = 0  # Center Y for \pos() tag
+    pos_x: int = 0  # Left pixel edge X for \pos() tag (an4 anchor)
+    pos_y: int = 0  # Vertical center Y for \pos() tag
 
     # Debug image reference
     debug_image: str = ""  # e.g., "sub_0000.png"
@@ -227,13 +227,13 @@ def create_subtitle_data_from_ocr(
             dominant_color=result.dominant_color,
         )
 
-        # VLM positioning — all lines get \pos() at exact location
+        # VLM positioning — all lines get \pos() at exact pixel location
         if result.pos_x > 0 or result.pos_y > 0:
             text = result.text.replace("\n", "\\N")
-            # \an5 = center-center anchor, \pos() places at bbox center
-            # Coordinates are in source resolution space, same as PlayRes
+            # \an4 = middle-left anchor, \pos() at pixel left edge + vertical center
+            # Coordinates are pixel-refined from raw image, in source resolution space
             style = "Default"
-            text = f"{{\\an5\\pos({result.pos_x},{result.pos_y})}}{text}"
+            text = f"{{\\an4\\pos({result.pos_x},{result.pos_y})}}{text}"
             positioned_count += 1
 
             event = SubtitleEvent(
@@ -367,7 +367,7 @@ def _extract_pos(text: str) -> tuple[int, int] | None:
 
 
 def _strip_pos_tag(text: str) -> str:
-    """Strip \\an5\\pos() tag from text for content comparison."""
+    """Strip \\an\\pos() tag from text for content comparison."""
     import re
     return re.sub(r"\{\\an\d+\\pos\(\d+,\d+\)\}", "", text)
 
