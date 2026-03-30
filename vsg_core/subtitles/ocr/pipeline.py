@@ -577,36 +577,40 @@ class OCRPipeline:
                 ]
                 debugger.add_region_data(sub_image.index, line_dicts)
 
-            # ── Step 5: Build OCRSubtitleResult per line ─────────────
-            # Join all lines into one result with \pos() at combined center
-            all_texts_raw = []
-            all_texts_processed = []
-            all_fixes: dict = {}
-            all_unknown: list[str] = []
+            # ── Step 5: Add subtitle to debugger FIRST ──────────────
+            # Must happen before add_unknown_word/add_fix which check
+            # if the subtitle exists in the debugger
+            full_raw = "\n".join(vl["text"] for vl in vl_lines if vl["text"])
+            if self.config.debug_output:
+                debugger.add_subtitle(
+                    sub_image.index, sub_image.start_time,
+                    sub_image.end_time, full_raw, 90.0,
+                    sub_image.image, raw_ocr_text=full_raw,
+                )
 
-            for vl in vl_lines:
-                if not vl["text"]:
-                    continue
+            # ── Step 6: Build one OCRSubtitleResult per line ─────────
+            # Each line gets its own \pos() at its own bbox center
+            if not lines:
+                continue
 
-                raw_text = vl["text"]
-                all_texts_raw.append(raw_text)
+            for ln in lines:
+                raw_text = ln.text
 
-                # Post-process each line
+                # Post-process
+                processed_text = raw_text
+                fixes = {}
+                unknown = []
                 try:
                     post_result = self.postprocessor.process(
                         raw_text,
                         confidence=90.0,
                         timestamp=sub_image.start_time,
                     )
-                    all_texts_processed.append(post_result.text)
-
-                    for fix_name, fix_count in post_result.fixes_applied.items():
-                        all_fixes[fix_name] = (
-                            all_fixes.get(fix_name, 0) + fix_count
-                        )
+                    processed_text = post_result.text
+                    fixes = post_result.fixes_applied
+                    unknown = post_result.unknown_words
 
                     for word in post_result.unknown_words:
-                        all_unknown.append(word)
                         report.add_unknown_word(
                             word=word,
                             context=post_result.text[:50],
@@ -623,73 +627,44 @@ class OCRPipeline:
                                 f"Applied {fix_count} time(s)",
                                 original_text=raw_text,
                             )
-
                 except Exception as e:
                     logger.debug(
                         f"Post-processing error on sub {sub_image.index}: {e}"
                     )
-                    all_texts_processed.append(raw_text)
 
-            if not all_texts_processed:
-                continue
-
-            combined_raw = "\n".join(all_texts_raw)
-            combined_text = "\n".join(all_texts_processed)
-
-            # Calculate combined bbox center for \pos()
-            if lines:
-                all_x1 = min(ln.x1 for ln in lines)
-                all_y1 = min(ln.y1 for ln in lines)
-                all_x2 = max(ln.x2 for ln in lines)
-                all_y2 = max(ln.y2 for ln in lines)
-                pos_x = (all_x1 + all_x2) // 2
-                pos_y = (all_y1 + all_y2) // 2
-            else:
-                pos_x = frame_w // 2
-                pos_y = frame_h // 2
-
-            # Add to debugger
-            if self.config.debug_output:
-                debugger.add_subtitle(
-                    sub_image.index, sub_image.start_time,
-                    sub_image.end_time, combined_text, 90.0,
-                    sub_image.image, raw_ocr_text=combined_raw,
-                )
-
-            ocr_result = OCRSubtitleResult(
-                index=sub_image.index,
-                start_ms=float(sub_image.start_ms),
-                end_ms=float(sub_image.end_ms),
-                text=combined_text,
-                confidence=90.0,
-                raw_ocr_text=combined_raw,
-                fixes_applied=all_fixes,
-                unknown_words=all_unknown,
-                x=lines[0].x1 if lines else 0,
-                y=lines[0].y1 if lines else 0,
-                width=(all_x2 - all_x1) if lines else frame_w,
-                height=(all_y2 - all_y1) if lines else frame_h,
-                frame_width=frame_w,
-                frame_height=frame_h,
-                is_forced=sub_image.is_forced,
-                pos_x=pos_x,
-                pos_y=pos_y,
-            )
-            ocr_results.append(ocr_result)
-
-            # Report tracking
-            report.add_subtitle_result(
-                SubtitleOCRResult(
+                ocr_result = OCRSubtitleResult(
                     index=sub_image.index,
-                    timestamp_start=sub_image.start_time,
-                    timestamp_end=sub_image.end_time,
-                    text=combined_text,
+                    start_ms=float(sub_image.start_ms),
+                    end_ms=float(sub_image.end_ms),
+                    text=processed_text,
                     confidence=90.0,
-                    fixes_applied=all_fixes if isinstance(all_fixes, dict) else {},
-                    unknown_words=all_unknown if isinstance(all_unknown, list) else [],
-                    is_positioned=True,
+                    raw_ocr_text=raw_text,
+                    fixes_applied=fixes,
+                    unknown_words=unknown,
+                    x=ln.x1,
+                    y=ln.y1,
+                    width=ln.x2 - ln.x1,
+                    height=ln.y2 - ln.y1,
+                    frame_width=frame_w,
+                    frame_height=frame_h,
+                    is_forced=sub_image.is_forced,
+                    pos_x=ln.center_x,
+                    pos_y=ln.center_y,
                 )
-            )
+                ocr_results.append(ocr_result)
+
+                report.add_subtitle_result(
+                    SubtitleOCRResult(
+                        index=sub_image.index,
+                        timestamp_start=sub_image.start_time,
+                        timestamp_end=sub_image.end_time,
+                        text=processed_text,
+                        confidence=90.0,
+                        fixes_applied=fixes if isinstance(fixes, dict) else {},
+                        unknown_words=unknown if isinstance(unknown, list) else [],
+                        is_positioned=True,
+                    )
+                )
 
         # ── Summary ───────────────────────────────────────────────────
         total_time = time.time() - ocr_start
