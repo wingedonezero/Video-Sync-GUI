@@ -35,7 +35,6 @@ from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     FilteringMethodStr,
     FrameComparisonMethodStr,
     FrameHashAlgorithmStr,
-    OcrBinarizationMethodStr,
     OcrEngineStr,
     OcrOutputFormatStr,
     ResampleEngineStr,
@@ -322,30 +321,10 @@ class AppSettings(BaseModel):
     # OCR Settings
     # =========================================================================
     ocr_enabled: bool = True
-    ocr_engine: OcrEngineStr = "easyocr"
+    ocr_engine: OcrEngineStr = "paddleocr-vl"
     ocr_language: str = "eng"
-    ocr_psm: int = 7
-    ocr_char_whitelist: str = ""
-    ocr_char_blacklist: str = "|"
     ocr_low_confidence_threshold: float = 60.0
-    ocr_multi_pass: bool = True
     ocr_output_format: OcrOutputFormatStr = "ass"
-
-    # OCR Preprocessing
-    ocr_preprocess_auto: bool = True
-    ocr_upscale_threshold: int = 40
-    ocr_target_height: int = 80
-    ocr_border_size: int = 5
-    ocr_force_binarization: bool = False
-    ocr_binarization_method: OcrBinarizationMethodStr = "otsu"
-    ocr_denoise: bool = False
-    ocr_save_debug_images: bool = False
-
-    # OCR Output & Position
-    ocr_preserve_positions: bool = True
-    ocr_bottom_threshold: float = 75.0
-    ocr_video_width: int = 0  # 0 = use source resolution
-    ocr_video_height: int = 0  # 0 = use source resolution
 
     # OCR Post-Processing
     ocr_cleanup_enabled: bool = True
@@ -356,7 +335,6 @@ class AppSettings(BaseModel):
     ocr_run_in_subprocess: bool = True
     ocr_font_size_ratio: float = 5.80
     ocr_generate_report: bool = True
-    ocr_max_workers: int = 1
 
     # =========================================================================
     # Class-level constants (excluded from serialization)

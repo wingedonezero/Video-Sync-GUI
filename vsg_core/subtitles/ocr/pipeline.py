@@ -47,10 +47,6 @@ class PipelineConfig:
     language: str = "eng"
     output_format: str = "ass"
 
-    # Position handling
-    preserve_positions: bool = True
-    bottom_threshold_percent: float = 75.0
-
     # Confidence
     low_confidence_threshold: float = 60.0
 
@@ -125,8 +121,6 @@ class OCRPipeline:
         return PipelineConfig(
             language=self.settings.get("ocr_language", "eng"),
             output_format=self.settings.get("ocr_output_format", "ass"),
-            preserve_positions=self.settings.get("ocr_preserve_positions", True),
-            bottom_threshold_percent=self.settings.get("ocr_bottom_threshold", 75.0),
             low_confidence_threshold=self.settings.get(
                 "ocr_low_confidence_threshold", 60.0
             ),
