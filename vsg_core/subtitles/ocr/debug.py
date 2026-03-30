@@ -115,8 +115,16 @@ class OCRDebugger:
         # status: "clean" | "empty" | "paddle_empty" | "outside" | "bleed"
         self.verification_results: dict[int, dict] = {}  # index -> {status, details}
         self.verification_counts: dict[str, int] = {
-            "clean": 0, "empty": 0, "paddle_empty": 0, "outside": 0, "bleed": 0,
+            "clean": 0,
+            "empty": 0,
+            "paddle_empty": 0,
+            "outside": 0,
+            "bleed": 0,
         }
+
+        # Region grouping results
+        self.grouping_data: dict[int, list[dict]] = {}
+        self.grouping_counts: dict[str, int] = {"bot": 0, "top": 0, "pos": 0}
 
     @property
     def debug_dir(self) -> Path:
@@ -230,6 +238,26 @@ class OCRDebugger:
         if status in self.verification_counts:
             self.verification_counts[status] += 1
 
+    def add_grouping_data(
+        self,
+        index: int,
+        regions: list[dict],
+    ) -> None:
+        """Store region grouping results for a subtitle.
+
+        Args:
+            index: Subtitle index
+            regions: List of dicts with zone, line_count, line_ids,
+                     bbox, confidence, reasons
+        """
+        if not self.enabled:
+            return
+        self.grouping_data[index] = regions
+        for reg in regions:
+            zone = reg.get("zone", "pos")
+            if zone in self.grouping_counts:
+                self.grouping_counts[zone] += 1
+
     def save(self):
         """Save all debug output to disk."""
         if not self.enabled:
@@ -315,6 +343,24 @@ class OCRDebugger:
                 lines.append(f"    paddle_empty/ - {vc.get('paddle_empty', 0)} images")
                 lines.append(f"    outside/ - {vc.get('outside', 0)} images")
                 lines.append(f"    bleed/ - {vc.get('bleed', 0)} images")
+
+        if self.grouping_data:
+            gc = self.grouping_counts
+            g_total = sum(gc.values())
+            lines.append("")
+            lines.append("Region grouping:")
+            lines.append(f"  Total regions: {g_total}")
+            for zone in ("bot", "top", "pos"):
+                if gc.get(zone, 0) > 0:
+                    lines.append(f"    {zone}: {gc[zone]}")
+            multi = sum(
+                1
+                for gd_list in self.grouping_data.values()
+                for gd in gd_list
+                if gd.get("line_count", 0) >= 2
+            )
+            if multi:
+                lines.append(f"  Multi-line regions (2+): {multi}")
 
         summary_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -626,21 +672,23 @@ class OCRDebugger:
             f"Total subtitles verified: {total}",
             "",
             f"  {'Status':<15} {'Count':>6}  {'%':>8}",
-            f"  {'-'*15} {'-'*6}  {'-'*8}",
+            f"  {'-' * 15} {'-' * 6}  {'-' * 8}",
         ]
         for status in ("clean", "empty", "paddle_empty", "outside", "bleed"):
             c = vc.get(status, 0)
             summary_lines.append(f"  {status:<15} {c:>6}  {pct(c):>8}")
 
-        summary_lines.extend([
-            "",
-            "Status definitions:",
-            "  clean        — paddle lines cover all visible pixels",
-            "  empty        — no pixels at all (blank sub / timing marker)",
-            "  paddle_empty — paddle returned nothing but pixels exist",
-            "  outside      — pixels found outside all paddle bboxes",
-            "  bleed        — outside pixels touch a paddle bbox edge (character overflow)",
-        ])
+        summary_lines.extend(
+            [
+                "",
+                "Status definitions:",
+                "  clean        — paddle lines cover all visible pixels",
+                "  empty        — no pixels at all (blank sub / timing marker)",
+                "  paddle_empty — paddle returned nothing but pixels exist",
+                "  outside      — pixels found outside all paddle bboxes",
+                "  bleed        — outside pixels touch a paddle bbox edge (character overflow)",
+            ]
+        )
         (base / "verification_summary.txt").write_text(
             "\n".join(summary_lines), encoding="utf-8"
         )
@@ -648,7 +696,8 @@ class OCRDebugger:
         # Save issue categories with images
         for status in ("paddle_empty", "outside", "bleed"):
             indices = [
-                idx for idx, vr in self.verification_results.items()
+                idx
+                for idx, vr in self.verification_results.items()
                 if vr["status"] == status
             ]
             if not indices:
