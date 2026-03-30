@@ -139,16 +139,10 @@ class OCRTab(QWidget):
         )
 
         self.widgets["ocr_engine"] = QComboBox()
-        self.widgets["ocr_engine"].addItem("EasyOCR (Deep Learning)", "easyocr")
-        self.widgets["ocr_engine"].addItem("LFM2-VL-450M (Fast VLM)", "lfm2vl-450m")
-        self.widgets["ocr_engine"].addItem("Qwen3.5-4B (Archival VLM)", "qwen35-4b")
-        self.widgets["ocr_engine"].addItem("PaddleOCR-VL 1.5 (Fast + Positions)", "paddleocr-vl")
+        self.widgets["ocr_engine"].addItem("PaddleOCR-VL 1.5 (Spotting + Positions)", "paddleocr-vl")
         self.widgets["ocr_engine"].setToolTip(
             "OCR engine to use.\n"
-            "• EasyOCR: Deep learning based. Better for varied fonts. Requires: pip install easyocr\n"
-            "• LFM2-VL-450M: Fast VLM with positioning (126ms/sub, 0.85GB VRAM). Requires GPU + model download.\n"
-            "• Qwen3.5-4B: Archival quality VLM with positioning (828ms/sub, 8.55GB VRAM). Requires GPU + model download.\n"
-            "• PaddleOCR-VL 1.5: Fast VLM via llama.cpp with positions + cross-validation (239ms/sub, 1.7GB VRAM). Requires GPU + model download."
+            "• PaddleOCR-VL 1.5: Fast VLM via llama.cpp with line detection + positions (239ms/sub, 1.7GB VRAM)."
         )
 
         self.widgets["ocr_language"] = QComboBox()
@@ -164,54 +158,10 @@ class OCRTab(QWidget):
             "OCR language to use for text recognition."
         )
 
-        self.widgets["ocr_char_blacklist"] = QLineEdit()
-        self.widgets["ocr_char_blacklist"].setToolTip(
-            "Characters to exclude from OCR results (e.g., '|/_~')."
-        )
-
-        self.widgets["ocr_max_workers"] = QSpinBox()
-        self.widgets["ocr_max_workers"].setRange(1, 24)
-        self.widgets["ocr_max_workers"].setSuffix(" workers")
-        self.widgets["ocr_max_workers"].setToolTip(
-            "Number of parallel OCR workers. Higher values use more CPU cores\n"
-            "and RAM but process subtitles faster. Each worker loads its own\n"
-            "OCR engine instance. Set to 1 to disable parallel processing."
-        )
-
         ocr_layout.addRow(self.widgets["ocr_enabled"])
         ocr_layout.addRow("OCR Engine:", self.widgets["ocr_engine"])
         ocr_layout.addRow("Language:", self.widgets["ocr_language"])
-        ocr_layout.addRow("Character Blacklist:", self.widgets["ocr_char_blacklist"])
-        ocr_layout.addRow("Parallel Workers:", self.widgets["ocr_max_workers"])
         main_layout.addWidget(ocr_group)
-
-        # --- Preprocessing Group ---
-        preprocess_group = QGroupBox("Preprocessing")
-        preprocess_layout = QFormLayout(preprocess_group)
-
-        self.widgets["ocr_preprocess_auto"] = QCheckBox("Auto-detect optimal settings")
-        self.widgets["ocr_preprocess_auto"].setToolTip(
-            "Automatically determine best preprocessing for each subtitle image."
-        )
-
-        self.widgets["ocr_force_binarization"] = QCheckBox("Force binarization")
-        self.widgets["ocr_force_binarization"].setToolTip(
-            "Always apply binary thresholding. May help with low-contrast subtitles."
-        )
-
-        self.widgets["ocr_upscale_threshold"] = QSpinBox()
-        self.widgets["ocr_upscale_threshold"].setRange(20, 100)
-        self.widgets["ocr_upscale_threshold"].setSuffix(" px")
-        self.widgets["ocr_upscale_threshold"].setToolTip(
-            "Upscale subtitle images if height is below this threshold."
-        )
-
-        preprocess_layout.addRow(self.widgets["ocr_preprocess_auto"])
-        preprocess_layout.addRow(self.widgets["ocr_force_binarization"])
-        preprocess_layout.addRow(
-            "Upscale Threshold:", self.widgets["ocr_upscale_threshold"]
-        )
-        main_layout.addWidget(preprocess_group)
 
         # --- Post-Processing Group ---
         postprocess_group = QGroupBox("Post-Processing")
@@ -277,50 +227,28 @@ class OCRTab(QWidget):
             self._update_font_preview
         )
 
-        self.widgets["ocr_preserve_positions"] = QCheckBox(
-            "Preserve subtitle positions (non-bottom only)"
-        )
-        self.widgets["ocr_preserve_positions"].setToolTip(
-            "Keep original position for subtitles not at the bottom of the screen."
-        )
-
-        self.widgets["ocr_bottom_threshold"] = QDoubleSpinBox()
-        self.widgets["ocr_bottom_threshold"].setRange(50.0, 95.0)
-        self.widgets["ocr_bottom_threshold"].setSuffix(" %")
-        self.widgets["ocr_bottom_threshold"].setToolTip(
-            "Y position threshold. Subtitles above this are considered 'not bottom' and will have position preserved."
-        )
-
         self.widgets["ocr_generate_report"] = QCheckBox("Generate detailed OCR report")
         self.widgets["ocr_generate_report"].setToolTip(
             "Save a JSON report with unknown words, confidence scores, and applied fixes."
         )
 
-        self.widgets["ocr_save_debug_images"] = QCheckBox(
-            "Save debug images (for troubleshooting)"
-        )
-        self.widgets["ocr_save_debug_images"].setToolTip(
-            "Save preprocessed images to temp folder for debugging OCR issues."
-        )
-
         self.widgets["ocr_debug_output"] = QCheckBox(
-            "Debug VobSub OCR (analyze issues)"
+            "Debug OCR output (analyze issues)"
         )
         self.widgets["ocr_debug_output"].setToolTip(
             "Save debug output organized by issue type:\n"
-            "• unknown_words/ - Images and text for subtitles with unknown words\n"
-            "• fixes_applied/ - Images showing what fixes were made\n"
-            "• low_confidence/ - Images for low confidence OCR results\n\n"
+            "• all_subtitles/ - All images and OCR text for verification\n"
+            "• annotated/ - Images with line bboxes drawn\n"
+            "• verification/ - Pixel verification results (empty, missed, bleed)\n"
+            "• unknown_words/ - Images with unknown words\n"
+            "• fixes_applied/ - Images showing what fixes were made\n\n"
             "Creates a folder in logs with the same name as the report."
         )
 
         output_layout.addRow("Output Format:", self.widgets["ocr_output_format"])
         output_layout.addRow("Font Size Ratio:", self.widgets["ocr_font_size_ratio"])
         output_layout.addRow("", self._font_preview_label)
-        output_layout.addRow(self.widgets["ocr_preserve_positions"])
-        output_layout.addRow("Bottom Threshold:", self.widgets["ocr_bottom_threshold"])
         output_layout.addRow(self.widgets["ocr_generate_report"])
-        output_layout.addRow(self.widgets["ocr_save_debug_images"])
         output_layout.addRow(self.widgets["ocr_debug_output"])
         main_layout.addWidget(output_group)
 

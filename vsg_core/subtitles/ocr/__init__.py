@@ -86,38 +86,19 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
     return {
         # Language
         "ocr_language": ocr_lang,
-        # Preprocessing
-        "ocr_preprocess_auto": get_val("ocr_preprocess_auto", True),
-        "ocr_force_binarization": get_val("ocr_force_binarization", False),
-        "ocr_upscale_threshold": get_val("ocr_upscale_threshold", 40),
-        "ocr_target_height": get_val("ocr_target_height", 80),
-        "ocr_border_size": get_val("ocr_border_size", 5),
-        "ocr_binarization_method": get_val("ocr_binarization_method", "otsu"),
-        "ocr_denoise": get_val("ocr_denoise", False),
         # OCR engine
         "ocr_engine": get_val("ocr_engine", "paddleocr-vl"),
-        "ocr_psm": get_val("ocr_psm", 7),
-        "ocr_char_whitelist": get_val("ocr_char_whitelist", ""),
-        "ocr_char_blacklist": get_val("ocr_char_blacklist", "|"),
-        "ocr_multi_pass": get_val("ocr_multi_pass", True),
         "ocr_low_confidence_threshold": get_val("ocr_low_confidence_threshold", 60.0),
         # Post-processing
         "ocr_cleanup_enabled": get_val("ocr_cleanup_enabled", True),
         "ocr_custom_wordlist_path": get_val("ocr_custom_wordlist_path", ""),
         # Output
         "ocr_output_format": get_val("ocr_output_format", "ass"),
-        "ocr_preserve_positions": get_val("ocr_preserve_positions", True),
-        "ocr_bottom_threshold": get_val("ocr_bottom_threshold", 75.0),
-        "ocr_video_width": get_val("ocr_video_width", 0),
-        "ocr_video_height": get_val("ocr_video_height", 0),
         "ocr_font_size_ratio": get_val("ocr_font_size_ratio", 5.80),
         # Reporting
         "ocr_generate_report": get_val("ocr_generate_report", True),
-        "ocr_save_debug_images": get_val("ocr_save_debug_images", False),
         # Debug output - saves images and text files for problem subtitles
         "ocr_debug_output": get_val("ocr_debug_output", False),
-        # Parallel processing
-        "ocr_max_workers": get_val("ocr_max_workers", 1),
     }
 
 
@@ -337,20 +318,12 @@ def run_preview_ocr(
         "ocr_language": ocr_lang,
         "ocr_engine": ocr_engine,
         "ocr_crop_mode": use_crop_mode,
-        "ocr_preprocess_auto": True,
-        "ocr_force_binarization": False,
-        "ocr_upscale_threshold": 40,
-        "ocr_denoise": False,
-        "ocr_char_blacklist": "",
         "ocr_low_confidence_threshold": 60.0,
         "ocr_cleanup_enabled": True,
         "ocr_custom_wordlist_path": "",
         "ocr_output_format": "ass",
-        "ocr_preserve_positions": True,
-        "ocr_bottom_threshold": 75.0,
         # Disable reports and debug for speed
         "ocr_generate_report": False,
-        "ocr_save_debug_images": False,
         "ocr_debug_output": False,
     }
 
