@@ -102,7 +102,9 @@ class OCRPipeline:
         self.settings = settings_dict
         self.work_dir = Path(work_dir)
         self.logs_dir = Path(logs_dir)
-        self.debug_output_dir = Path(debug_output_dir) if debug_output_dir else self.logs_dir
+        self.debug_output_dir = (
+            Path(debug_output_dir) if debug_output_dir else self.logs_dir
+        )
         self.progress_callback = progress_callback
 
         # Use work_dir directly (caller already provides ocr-specific dir)
@@ -164,9 +166,7 @@ class OCRPipeline:
             # Log which OCR engine is being used
             backend_setting = self.settings.get("ocr_engine", "paddleocr-vl")
             is_vlm = backend_setting in _VLM_ENGINES
-            self._log_progress(
-                f"Using OCR engine: {backend_setting}", 0.02
-            )
+            self._log_progress(f"Using OCR engine: {backend_setting}", 0.02)
 
             # Step 1: Detect and create parser (raw for VLM)
             self._log_progress("Parsing subtitle file", 0.05)
@@ -335,6 +335,7 @@ class OCRPipeline:
         class Line:
             """A single detected text line with bbox. Separate from Region
             (which will be used for grouping lines later)."""
+
             x1: int
             y1: int
             x2: int
@@ -354,6 +355,213 @@ class OCRPipeline:
             @property
             def center_y(self) -> int:
                 return (self.y1 + self.y2) // 2
+
+            @property
+            def height(self) -> int:
+                return self.y2 - self.y1
+
+            @property
+            def width(self) -> int:
+                return self.x2 - self.x1
+
+        @dataclass
+        class GroupedRegion:
+            """A group of lines forming one ASS event.
+
+            zone: "bot" (bottom dialogue), "top" (top dialogue),
+                  "pos" (positioned sign/title).
+            lines: Pixel-refined Line objects in reading order.
+            confidence: 0.0-1.0 grouping confidence (product of checks).
+            reasons: Human-readable grouping decision log.
+            """
+
+            zone: str
+            lines: list  # list[Line]
+            confidence: float = 1.0
+            reasons: list = field(default_factory=list)  # list[str]
+
+            @property
+            def text_joined(self) -> str:
+                return "\\N".join(ln.text for ln in self.lines)
+
+            @property
+            def top_y(self) -> int:
+                return min(ln.y1 for ln in self.lines)
+
+            @property
+            def bot_y(self) -> int:
+                return max(ln.y2 for ln in self.lines)
+
+            @property
+            def left_x(self) -> int:
+                return min(ln.x1 for ln in self.lines)
+
+            @property
+            def right_x(self) -> int:
+                return max(ln.x2 for ln in self.lines)
+
+            @property
+            def center_x(self) -> int:
+                return (self.left_x + self.right_x) // 2
+
+            @property
+            def center_y(self) -> int:
+                return (self.top_y + self.bot_y) // 2
+
+        # ── Region grouping thresholds ──
+        # Derived from analysis of 51,145 subs across 8 shows (267 tracks).
+        GRP_MAX_BOT_EDGE = 80  # Anchor y2 within this of frame bottom
+        GRP_MAX_TOP_EDGE = 110  # Anchor y1 within this of frame top
+        GRP_MAX_GAP = 25  # Max px gap between consecutive lines
+        GRP_MAX_H_DIFF = 8  # Max bbox height diff
+        GRP_MAX_CX_DIFF = 50.0  # Max center diff between lines
+        GRP_MAX_CX_OFF = 50.0  # Max px from frame horizontal center
+        GRP_MIN_OVERLAP = -2  # Worse = horizontal split
+
+        def _can_group(
+            line_a: Line,
+            line_b: Line,
+        ) -> tuple[bool, float, str]:
+            """Check if two adjacent lines can group (a=upper, b=lower)."""
+            gap = line_b.y1 - line_a.y2
+            if gap < GRP_MIN_OVERLAP:
+                return False, 0.0, f"overlap={gap}px"
+            if gap > GRP_MAX_GAP:
+                return False, 0.0, f"gap={gap}px>{GRP_MAX_GAP}"
+            h_diff = abs(line_a.height - line_b.height)
+            if h_diff > GRP_MAX_H_DIFF:
+                return False, 0.0, f"h_diff={h_diff}px>{GRP_MAX_H_DIFF}"
+            cx_diff = abs(line_a.center_x - line_b.center_x)
+            if cx_diff > GRP_MAX_CX_DIFF:
+                return False, 0.0, f"cx_diff={cx_diff:.0f}>{GRP_MAX_CX_DIFF}"
+            # Confidence: 1.0 when perfect, decays toward thresholds
+            gap_c = max(0.0, 1.0 - gap / GRP_MAX_GAP) if GRP_MAX_GAP else 1.0
+            h_c = max(0.0, 1.0 - h_diff / GRP_MAX_H_DIFF) if GRP_MAX_H_DIFF else 1.0
+            cx_c = max(0.0, 1.0 - cx_diff / GRP_MAX_CX_DIFF) if GRP_MAX_CX_DIFF else 1.0
+            return True, gap_c * h_c * cx_c, f"gap={gap} h={h_diff} cx={cx_diff:.0f}"
+
+        def _group_lines(
+            lines_in: list,
+            fw: int,
+            fh: int,
+        ) -> list:
+            """Group pixel-refined lines into regions. Deterministic."""
+            if not lines_in:
+                return []
+            n = len(lines_in)
+            mid_y = fh / 2.0
+            cx_frame = fw / 2.0
+
+            if n == 1:
+                ln = lines_in[0]
+                cxo = abs(ln.center_x - cx_frame)
+                ok_b = (fh - ln.y2) <= GRP_MAX_BOT_EDGE and cxo <= GRP_MAX_CX_OFF
+                ok_t = ln.y1 <= GRP_MAX_TOP_EDGE and cxo <= GRP_MAX_CX_OFF
+                z = "bot" if ok_b else ("top" if ok_t else "pos")
+                return [
+                    GroupedRegion(
+                        zone=z, lines=[ln], confidence=1.0, reasons=[f"single→{z}"]
+                    )
+                ]
+
+            grouped: set[int] = set()
+            regions: list = []
+
+            # ── Bottom ──
+            anc = lines_in[n - 1]
+            if (fh - anc.y2) <= GRP_MAX_BOT_EDGE and abs(
+                anc.center_x - cx_frame
+            ) <= GRP_MAX_CX_OFF:
+                bi = [n - 1]
+                bc = 1.0
+                br = [f"bot-anchor: L{anc.line_id} y2={anc.y2} dist={fh - anc.y2}"]
+                for i in range(n - 2, -1, -1):
+                    ln = lines_in[i]
+                    if ln.y1 < mid_y:
+                        br.append(f"stop: L{ln.line_id} y1={ln.y1}<mid")
+                        break
+                    if abs(ln.center_x - cx_frame) > GRP_MAX_CX_OFF:
+                        br.append(f"stop: L{ln.line_id} off-center")
+                        break
+                    ok, c, r = _can_group(ln, lines_in[bi[-1]])
+                    if ok:
+                        bi.append(i)
+                        bc = min(bc, c)
+                        br.append(f"add: L{ln.line_id} {r} c={c:.2f}")
+                    else:
+                        br.append(f"stop: L{ln.line_id} {r}")
+                        break
+                bi.reverse()
+                regions.append(
+                    GroupedRegion(
+                        zone="bot",
+                        lines=[lines_in[i] for i in bi],
+                        confidence=bc,
+                        reasons=br,
+                    )
+                )
+                grouped.update(bi)
+
+            # ── Top ──
+            ti_start = -1
+            for i in range(n):
+                if i not in grouped:
+                    ti_start = i
+                    break
+            if ti_start >= 0:
+                ln = lines_in[ti_start]
+                if (
+                    ln.y1 <= GRP_MAX_TOP_EDGE
+                    and abs(ln.center_x - cx_frame) <= GRP_MAX_CX_OFF
+                ):
+                    ti = [ti_start]
+                    tc = 1.0
+                    tr = [f"top-anchor: L{ln.line_id} y1={ln.y1}"]
+                    for i in range(ti_start + 1, n):
+                        if i in grouped:
+                            break
+                        ln = lines_in[i]
+                        if ln.y2 > mid_y:
+                            tr.append(f"stop: L{ln.line_id} y2={ln.y2}>mid")
+                            break
+                        if abs(ln.center_x - cx_frame) > GRP_MAX_CX_OFF:
+                            tr.append(f"stop: L{ln.line_id} off-center")
+                            break
+                        ok, c, r = _can_group(lines_in[ti[-1]], ln)
+                        if ok:
+                            ti.append(i)
+                            tc = min(tc, c)
+                            tr.append(f"add: L{ln.line_id} {r} c={c:.2f}")
+                        else:
+                            tr.append(f"stop: L{ln.line_id} {r}")
+                            break
+                    regions.append(
+                        GroupedRegion(
+                            zone="top",
+                            lines=[lines_in[i] for i in ti],
+                            confidence=tc,
+                            reasons=tr,
+                        )
+                    )
+                    grouped.update(ti)
+
+            # ── Remaining → pos ──
+            for i in range(n):
+                if i not in grouped:
+                    ln = lines_in[i]
+                    regions.append(
+                        GroupedRegion(
+                            zone="pos",
+                            lines=[ln],
+                            confidence=1.0,
+                            reasons=[f"ungrouped→pos: L{ln.line_id}"],
+                        )
+                    )
+
+            # Deterministic sort: top, pos by y, bot
+            _zo = {"top": 0, "pos": 1, "bot": 2}
+            regions.sort(key=lambda r: (_zo.get(r.zone, 1), r.top_y))
+            return regions
 
         logger = logging.getLogger(__name__)
         total = len(subtitle_images)
@@ -379,6 +587,7 @@ class OCRPipeline:
         else:
             # Legacy path for non-paddle backends
             from .region_detector import detect_regions_pixel
+
             rgb0 = rgba_to_rgb_on_black(sub0.image)
             regions0 = detect_regions_pixel(sub0.image)
             if regions0:
@@ -407,8 +616,7 @@ class OCRPipeline:
                 eta = (total - i) * avg_ms / 1000
                 progress = 0.18 + (0.72 * i / total)
                 self._log_progress(
-                    f"OCR {i+1}/{total} "
-                    f"({avg_ms:.0f}ms/sub, ETA {eta:.0f}s)",
+                    f"OCR {i + 1}/{total} ({avg_ms:.0f}ms/sub, ETA {eta:.0f}s)",
                     progress,
                 )
 
@@ -422,6 +630,7 @@ class OCRPipeline:
             else:
                 # Legacy: pixel regions → backend.ocr()
                 from .region_detector import detect_regions_pixel
+
                 rgb = rgba_to_rgb_on_black(sub_image.image)
                 px_regions = detect_regions_pixel(sub_image.image)
                 if not px_regions:
@@ -431,19 +640,22 @@ class OCRPipeline:
                     vlm_results = backend.ocr(ann, px_regions)
                     vl_lines = [
                         {"text": vr.text, "bbox": vr.vl_bbox}
-                        for vr in vlm_results if vr.text
+                        for vr in vlm_results
+                        if vr.text
                     ]
                 else:
                     vlm_results = backend.ocr(rgb, px_regions, raw_image=rgb)
                     vl_lines = [
                         {"text": vr.text, "bbox": vr.vl_bbox}
-                        for vr in vlm_results if vr.text
+                        for vr in vlm_results
+                        if vr.text
                     ]
 
             # Sort lines by reading order: top→bottom, then left→right
             vl_lines.sort(
-                key=lambda vl: (vl["bbox"][1], vl["bbox"][0])
-                if vl.get("bbox") else (9999, 9999)
+                key=lambda vl: (
+                    (vl["bbox"][1], vl["bbox"][0]) if vl.get("bbox") else (9999, 9999)
+                )
             )
 
             sub_ms = (time.time() - sub_start) * 1000
@@ -455,6 +667,7 @@ class OCRPipeline:
                 mask = sub_image.image[:, :, 3]
             elif sub_image.image.ndim == 3:
                 import cv2 as _cv2
+
                 mask = _cv2.cvtColor(sub_image.image, _cv2.COLOR_RGB2GRAY)
             else:
                 mask = sub_image.image
@@ -471,8 +684,12 @@ class OCRPipeline:
                 )
                 if self.config.debug_output:
                     debugger.add_subtitle(
-                        sub_image.index, sub_image.start_time,
-                        sub_image.end_time, "", 0.0, sub_image.image,
+                        sub_image.index,
+                        sub_image.start_time,
+                        sub_image.end_time,
+                        "",
+                        0.0,
+                        sub_image.image,
                     )
                 continue
 
@@ -481,13 +698,17 @@ class OCRPipeline:
                 status = "paddle_empty"
                 total_pixels = int(np.sum(mask > PIXEL_THRESHOLD))
                 debugger.add_verification_result(
-                    sub_image.index, status,
+                    sub_image.index,
+                    status,
                     {"total_pixels": total_pixels, "max_pixel": max_pixel},
                 )
                 if self.config.debug_output:
                     debugger.add_subtitle(
-                        sub_image.index, sub_image.start_time,
-                        sub_image.end_time, "[paddle_empty]", 0.0,
+                        sub_image.index,
+                        sub_image.start_time,
+                        sub_image.end_time,
+                        "[paddle_empty]",
+                        0.0,
                         sub_image.image,
                     )
                     # Save annotated (will show empty — no boxes)
@@ -533,7 +754,8 @@ class OCRPipeline:
 
                 status = "bleed" if is_bleed else "outside"
                 debugger.add_verification_result(
-                    sub_image.index, status,
+                    sub_image.index,
+                    status,
                     {"outside_pixels": outside_count},
                 )
             else:
@@ -565,21 +787,37 @@ class OCRPipeline:
                     else:
                         # No pixels found in bbox — use paddle coords
                         real_x1, real_y1, real_x2, real_y2 = bx1, by1, bx2, by2
-                    lines.append(Line(
-                        x1=real_x1, y1=real_y1, x2=real_x2, y2=real_y2,
-                        line_id=line_idx + 1, text=vl["text"],
-                    ))
+                    lines.append(
+                        Line(
+                            x1=real_x1,
+                            y1=real_y1,
+                            x2=real_x2,
+                            y2=real_y2,
+                            line_id=line_idx + 1,
+                            text=vl["text"],
+                        )
+                    )
                 else:
                     # No bbox from backend — use full frame as fallback
-                    lines.append(Line(
-                        x1=0, y1=0, x2=frame_w, y2=frame_h,
-                        line_id=line_idx + 1, text=vl["text"],
-                    ))
+                    lines.append(
+                        Line(
+                            x1=0,
+                            y1=0,
+                            x2=frame_w,
+                            y2=frame_h,
+                            line_id=line_idx + 1,
+                            text=vl["text"],
+                        )
+                    )
 
-            # ── Step 4: Debug — annotated image + line data ──────────
+            # ── Step 3.5: Region grouping ──────────────────────────
+            # Group pixel-refined lines into regions (bot/top/pos).
+            # Must happen AFTER pixel refinement so we use true boundaries.
+            regions = _group_lines(lines, frame_w, frame_h)
+
+            # ── Step 4: Debug — annotated image + line/region data ──
             if self.config.debug_output:
                 rgb_debug = rgba_to_rgb_on_black(sub_image.image)
-                # annotate_image reads .region_id, .x1/.y1/.x2/.y2 — Line is compatible
                 annotated_img = annotate_image(rgb_debug, lines)
                 debugger.add_annotated_image(sub_image.index, annotated_img)
 
@@ -593,79 +831,116 @@ class OCRPipeline:
                 ]
                 debugger.add_region_data(sub_image.index, line_dicts)
 
+                # Region grouping debug
+                grouping_data = []
+                for reg in regions:
+                    grouping_data.append(
+                        {
+                            "zone": reg.zone,
+                            "line_count": len(reg.lines),
+                            "line_ids": [ln.line_id for ln in reg.lines],
+                            "bbox": [reg.left_x, reg.top_y, reg.right_x, reg.bot_y],
+                            "confidence": round(reg.confidence, 3),
+                            "reasons": reg.reasons,
+                        }
+                    )
+                debugger.add_grouping_data(sub_image.index, grouping_data)
+
             # ── Step 5: Add subtitle to debugger FIRST ──────────────
-            # Must happen before add_unknown_word/add_fix which check
-            # if the subtitle exists in the debugger
             full_raw = "\n".join(vl["text"] for vl in vl_lines if vl["text"])
             if self.config.debug_output:
                 debugger.add_subtitle(
-                    sub_image.index, sub_image.start_time,
-                    sub_image.end_time, full_raw, 90.0,
-                    sub_image.image, raw_ocr_text=full_raw,
+                    sub_image.index,
+                    sub_image.start_time,
+                    sub_image.end_time,
+                    full_raw,
+                    90.0,
+                    sub_image.image,
+                    raw_ocr_text=full_raw,
                 )
 
-            # ── Step 6: Build one OCRSubtitleResult per line ─────────
-            # Each line gets its own \pos() at its own bbox center
-            if not lines:
+            # ── Step 6: Build OCRSubtitleResult per region ───────────
+            # Bot/top with 2+ lines → one result with \N-joined text
+            # Pos → one result per line (individual \pos())
+            if not regions:
                 continue
 
-            for ln in lines:
-                raw_text = ln.text
+            for reg in regions:
+                # Post-process each line individually, then join
+                line_processed: list[str] = []
+                all_fixes: dict = {}
+                all_unknown: list[str] = []
 
-                # Post-process
-                processed_text = raw_text
-                fixes = {}
-                unknown = []
-                try:
-                    post_result = self.postprocessor.process(
-                        raw_text,
-                        confidence=90.0,
-                        timestamp=sub_image.start_time,
-                    )
-                    processed_text = post_result.text
-                    fixes = post_result.fixes_applied
-                    unknown = post_result.unknown_words
-
-                    for word in post_result.unknown_words:
-                        report.add_unknown_word(
-                            word=word,
-                            context=post_result.text[:50],
-                            timestamp=sub_image.start_time,
+                for ln in reg.lines:
+                    raw_text = ln.text
+                    processed_text = raw_text
+                    fixes: dict = {}
+                    unknown: list[str] = []
+                    try:
+                        post_result = self.postprocessor.process(
+                            raw_text,
                             confidence=90.0,
+                            timestamp=sub_image.start_time,
                         )
-                        debugger.add_unknown_word(sub_image.index, word)
+                        processed_text = post_result.text
+                        fixes = post_result.fixes_applied
+                        unknown = post_result.unknown_words
 
-                    if post_result.was_modified:
-                        for fix_name, fix_count in post_result.fixes_applied.items():
-                            debugger.add_fix(
-                                sub_image.index,
-                                fix_name,
-                                f"Applied {fix_count} time(s)",
-                                original_text=raw_text,
+                        for word in post_result.unknown_words:
+                            report.add_unknown_word(
+                                word=word,
+                                context=post_result.text[:50],
+                                timestamp=sub_image.start_time,
+                                confidence=90.0,
                             )
-                except Exception as e:
-                    logger.debug(
-                        f"Post-processing error on sub {sub_image.index}: {e}"
-                    )
+                            debugger.add_unknown_word(sub_image.index, word)
 
+                        if post_result.was_modified:
+                            for (
+                                fix_name,
+                                fix_count,
+                            ) in post_result.fixes_applied.items():
+                                debugger.add_fix(
+                                    sub_image.index,
+                                    fix_name,
+                                    f"Applied {fix_count} time(s)",
+                                    original_text=raw_text,
+                                )
+                    except Exception as e:
+                        logger.debug(
+                            f"Post-processing error on sub {sub_image.index}: {e}"
+                        )
+
+                    line_processed.append(processed_text)
+                    for k, v in fixes.items():
+                        all_fixes[k] = all_fixes.get(k, 0) + (
+                            v if isinstance(v, int) else 1
+                        )
+                    all_unknown.extend(unknown)
+
+                region_text = "\n".join(line_processed)
+                raw_region = "\n".join(ln.text for ln in reg.lines)
+
+                # Region-level pixel position
                 ocr_result = OCRSubtitleResult(
                     index=sub_image.index,
                     start_ms=float(sub_image.start_ms),
                     end_ms=float(sub_image.end_ms),
-                    text=processed_text,
-                    confidence=90.0,
-                    raw_ocr_text=raw_text,
-                    fixes_applied=fixes,
-                    unknown_words=unknown,
-                    x=ln.x1,
-                    y=ln.y1,
-                    width=ln.x2 - ln.x1,
-                    height=ln.y2 - ln.y1,
+                    text=region_text,
+                    confidence=90.0 * reg.confidence,
+                    raw_ocr_text=raw_region,
+                    fixes_applied=all_fixes,
+                    unknown_words=all_unknown,
+                    x=reg.left_x,
+                    y=reg.top_y,
+                    width=reg.right_x - reg.left_x,
+                    height=reg.bot_y - reg.top_y,
                     frame_width=frame_w,
                     frame_height=frame_h,
                     is_forced=sub_image.is_forced,
-                    pos_x=ln.x1,        # Left pixel edge (an4 anchor)
-                    pos_y=ln.center_y,  # Vertical center of pixel height
+                    zone=reg.zone,
+                    pos_x=reg.left_x,  # Left pixel edge (an4 anchor)
+                    pos_y=reg.center_y,  # Vertical center of region
                 )
                 ocr_results.append(ocr_result)
 
@@ -674,10 +949,12 @@ class OCRPipeline:
                         index=sub_image.index,
                         timestamp_start=sub_image.start_time,
                         timestamp_end=sub_image.end_time,
-                        text=processed_text,
-                        confidence=90.0,
-                        fixes_applied=fixes if isinstance(fixes, dict) else {},
-                        unknown_words=unknown if isinstance(unknown, list) else [],
+                        text=region_text,
+                        confidence=90.0 * reg.confidence,
+                        fixes_applied=all_fixes if isinstance(all_fixes, dict) else {},
+                        unknown_words=all_unknown
+                        if isinstance(all_unknown, list)
+                        else [],
                         is_positioned=True,
                     )
                 )
@@ -704,6 +981,18 @@ class OCRPipeline:
                 f"{vc.get('outside', 0)} outside, "
                 f"{vc.get('bleed', 0)} bleed",
                 0.91,
+            )
+
+        # Region grouping summary
+        gc = debugger.grouping_counts
+        g_total = sum(gc.values())
+        if g_total > 0:
+            self._log_progress(
+                f"Grouping: {gc.get('bot', 0)} bot, "
+                f"{gc.get('top', 0)} top, "
+                f"{gc.get('pos', 0)} pos "
+                f"({g_total} regions → {len(ocr_results)} events)",
+                0.92,
             )
 
         return ocr_results
