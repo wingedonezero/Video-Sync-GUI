@@ -773,7 +773,9 @@ class OCRPipeline:
                 continue
 
             if has_pixels and not has_lines:
-                # Paddle returned nothing but pixels exist
+                # Paddle Spotting returned nothing but pixels exist.
+                # Recovery: send full image with "OCR:" prompt (text only, no bboxes).
+                # Use pixel-derived bbox for positioning.
                 status = "paddle_empty"
                 total_pixels = int(np.sum(mask > PIXEL_THRESHOLD))
                 debugger.add_verification_result(
@@ -781,19 +783,59 @@ class OCRPipeline:
                     status,
                     {"total_pixels": total_pixels, "max_pixel": max_pixel},
                 )
-                if self.config.debug_output:
-                    debugger.add_subtitle(
-                        sub_image.index,
-                        sub_image.start_time,
-                        sub_image.end_time,
-                        "[paddle_empty]",
-                        0.0,
-                        sub_image.image,
-                    )
-                    # Save raw image (no boxes — paddle found nothing)
-                    rgb_debug = rgba_to_rgb_on_black(sub_image.image)
-                    debugger.add_paddle_line_image(sub_image.index, rgb_debug)
-                continue
+
+                # Attempt OCR recovery if backend supports it
+                recovered_text = ""
+                if has_spotting_direct and hasattr(backend, "ocr_single"):
+                    try:
+                        recovered_text = backend.ocr_single(sub_image.image)
+                    except Exception as e:
+                        logger.debug(f"Sub {sub_image.index}: OCR recovery failed: {e}")
+
+                if not recovered_text:
+                    # Recovery failed or not available — skip
+                    if self.config.debug_output:
+                        debugger.add_subtitle(
+                            sub_image.index,
+                            sub_image.start_time,
+                            sub_image.end_time,
+                            "[paddle_empty]",
+                            0.0,
+                            sub_image.image,
+                        )
+                        rgb_debug = rgba_to_rgb_on_black(sub_image.image)
+                        debugger.add_paddle_line_image(sub_image.index, rgb_debug)
+                    continue
+
+                # Recovery succeeded — build pixel bbox from the mask
+                px_mask = mask > PIXEL_THRESHOLD
+                rows = np.any(px_mask, axis=1)
+                cols = np.any(px_mask, axis=0)
+                ri = np.where(rows)[0]
+                ci = np.where(cols)[0]
+                px_x1 = int(ci[0])
+                px_y1 = int(ri[0])
+                px_x2 = int(ci[-1]) + 1
+                px_y2 = int(ri[-1]) + 1
+
+                # Create a single Line from pixel bbox + recovered text
+                vl_lines = [
+                    {"text": recovered_text, "bbox": [px_x1, px_y1, px_x2, px_y2]}
+                ]
+                # Fall through to normal processing below
+                # (pixel refinement, region grouping, etc.)
+                logger.debug(
+                    f"Sub {sub_image.index}: paddle_empty recovered "
+                    f"'{recovered_text[:40]}' at [{px_x1},{px_y1},{px_x2},{px_y2}]"
+                )
+
+                # TODO: Future — handle "outside" case where paddle found SOME
+                # lines but pixels exist outside bboxes. Would need to:
+                # 1. Mask out paddle-covered pixels
+                # 2. Find contours in remaining pixels
+                # 3. Crop each contour region, send to ocr_single()
+                # 4. Merge recovered lines with paddle lines in reading order
+                # Currently outside/bleed is handled by bbox expansion (BLEED_DISTANCE)
 
             # Has lines — check if pixels are covered by bboxes
             # Build coverage mask from all line bboxes
