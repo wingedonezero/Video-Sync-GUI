@@ -227,7 +227,7 @@ def create_subtitle_data_from_ocr(
             dominant_color=result.dominant_color,
         )
 
-        # VLM positioning — all lines get \pos() at exact pixel location
+        # VLM positioning — pos regions get \an4\pos() at exact pixel location
         if result.pos_x > 0 or result.pos_y > 0:
             text = result.text.replace("\n", "\\N")
             # \an4 = middle-left anchor, \pos() at pixel left edge + vertical center
@@ -236,6 +236,20 @@ def create_subtitle_data_from_ocr(
             text = f"{{\\an4\\pos({result.pos_x},{result.pos_y})}}{text}"
             positioned_count += 1
 
+            event = SubtitleEvent(
+                start_ms=float(result.start_ms),
+                end_ms=float(result.end_ms),
+                text=text,
+                style=style,
+                original_index=result.index,
+            )
+            event.ocr = ocr_event_data
+            data.events.append(event)
+
+        # VLM region grouping — bot/top use styles, no \pos()
+        elif result.zone in ("bot", "top"):
+            text = result.text.replace("\n", "\\N")
+            style = "Top" if result.zone == "top" else "Default"
             event = SubtitleEvent(
                 start_ms=float(result.start_ms),
                 end_ms=float(result.end_ms),
@@ -360,6 +374,7 @@ def create_subtitle_data_from_ocr(
 def _extract_pos(text: str) -> tuple[int, int] | None:
     """Extract (x,y) from \\pos() tag in ASS text."""
     import re
+
     m = re.search(r"\\pos\((\d+),(\d+)\)", text)
     if m:
         return int(m.group(1)), int(m.group(2))
@@ -369,6 +384,7 @@ def _extract_pos(text: str) -> tuple[int, int] | None:
 def _strip_pos_tag(text: str) -> str:
     """Strip \\an\\pos() tag from text for content comparison."""
     import re
+
     return re.sub(r"\{\\an\d+\\pos\(\d+,\d+\)\}", "", text)
 
 
@@ -423,8 +439,10 @@ def _merge_consecutive_duplicate_events(events: list) -> None:
             # Check pos tolerance
             pos_ok = True
             if pos_i is not None and pos_j is not None:
-                if (abs(pos_i[0] - pos_j[0]) > pos_tolerance
-                        or abs(pos_i[1] - pos_j[1]) > pos_tolerance):
+                if (
+                    abs(pos_i[0] - pos_j[0]) > pos_tolerance
+                    or abs(pos_i[1] - pos_j[1]) > pos_tolerance
+                ):
                     pos_ok = False
             elif pos_i is not None or pos_j is not None:
                 pos_ok = False  # One has pos, other doesn't
