@@ -194,6 +194,10 @@ class OCRMetadata:
     fixes_by_type: dict[str, int] = field(default_factory=dict)
     unknown_words: list[dict[str, Any]] = field(default_factory=list)
 
+    # Pixel verification results
+    # Keys: clean, empty, paddle_empty, paddle_empty_recovered, outside, bleed
+    pixel_verification: dict[str, int] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "engine": self.engine,
@@ -214,6 +218,7 @@ class OCRMetadata:
             },
             "fixes_by_type": self.fixes_by_type,
             "unknown_words": self.unknown_words,
+            "pixel_verification": self.pixel_verification,
         }
 
     @classmethod
@@ -236,6 +241,7 @@ class OCRMetadata:
             positioned_subtitles=int(stats.get("positioned_subtitles", 0)),
             fixes_by_type=data.get("fixes_by_type", {}) or {},
             unknown_words=data.get("unknown_words", []) or [],
+            pixel_verification=data.get("pixel_verification", {}) or {},
         )
 
 

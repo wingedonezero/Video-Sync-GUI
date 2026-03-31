@@ -107,11 +107,15 @@ class SubtitleFormatsAuditor(BaseAuditor):
             else:
                 track_label = track_name
 
-            # --- THE FIX: Skip OCR checks for preserved tracks ---
+            # --- Skip OCR checks for preserved tracks ---
             if not plan_item.is_preserved:
                 # Check 1: OCR conversion
                 if plan_item.perform_ocr:
                     issues += self._verify_ocr(final_track, track_label)
+
+                # Check 1b: Pixel verification issues
+                if plan_item.perform_ocr:
+                    issues += self._check_pixel_verification(plan_item, track_label)
 
                 # Check 2: ASS conversion
                 if plan_item.convert_to_ass:
@@ -129,6 +133,44 @@ class SubtitleFormatsAuditor(BaseAuditor):
 
         if issues == 0:
             self.log("✅ All subtitle processing verified correctly.")
+
+        return issues
+
+    def _check_pixel_verification(self, plan_item, track_name: str) -> int:
+        """Check pixel verification results for OCR issues that need review."""
+        issues = 0
+
+        # Get pixel verification from plan item (stored by OCR wrapper)
+        pv = getattr(plan_item, "pixel_verification", None)
+        if not pv:
+            return 0
+
+        paddle_empty = pv.get("paddle_empty", 0)
+        recovered = pv.get("paddle_empty_recovered", 0)
+        outside = pv.get("outside", 0)
+        lost = paddle_empty - recovered
+
+        if lost > 0:
+            self.log(
+                f"[WARNING] OCR '{track_name}': {lost} subtitle(s) had content "
+                f"but OCR engine returned nothing (paddle_empty, not recovered)"
+            )
+            self.log("          Check debug/pixel_verification/ for images")
+            issues += 1
+
+        if recovered > 0:
+            self.log(
+                f"  ✓ OCR '{track_name}': {recovered} paddle_empty sub(s) "
+                f"recovered via OCR fallback"
+            )
+
+        if outside > 0:
+            self.log(
+                f"[WARNING] OCR '{track_name}': {outside} subtitle(s) had content "
+                f"outside OCR detection boxes (possible missed text)"
+            )
+            self.log("          Check debug/pixel_verification/ for images")
+            issues += 1
 
         return issues
 
