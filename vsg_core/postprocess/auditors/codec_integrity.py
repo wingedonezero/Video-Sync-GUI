@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/codec_integrity.py
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -45,14 +44,10 @@ class CodecIntegrityAuditor(BaseAuditor):
                     # This is a preserved original, so the expected codec IS the original codec.
                     # No change is needed to expected_codec.
                     pass
-                else:
-                    # This is the main, processed track.
-                    # If OCR was performed, the intermediate format is SRT
-                    if plan_item.perform_ocr:
-                        expected_codec = "S_TEXT/UTF8"
-                    # If it was then converted to ASS, that is the final expected format
-                    if plan_item.convert_to_ass:
-                        expected_codec = "S_TEXT/ASS"
+                # This is the main, processed track.
+                # OCR always produces ASS output directly
+                elif plan_item.perform_ocr or plan_item.convert_to_ass:
+                    expected_codec = "S_TEXT/ASS"
 
             # Now, perform the comparison with the true expected codec
             if self._codecs_match(expected_codec, actual_codec):
