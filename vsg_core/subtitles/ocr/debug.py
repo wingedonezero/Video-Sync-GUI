@@ -411,16 +411,19 @@ class OCRDebugger:
             )
         if self.verification_results:
             vc = self.verification_counts
-            lines.append("  pixel_verification/ - pixel verification results")
-            for status in ("clean", "empty", "paddle_empty", "outside", "bleed"):
-                if vc.get(status, 0) > 0:
-                    lines.append(f"    {status}: {vc[status]}")
-            # Count issues (non-clean, non-empty)
+            total_v = sum(vc.values())
             issues = sum(vc.get(s, 0) for s in ("paddle_empty", "outside", "bleed"))
+            lines.append("")
+            lines.append("Pixel verification:")
+            lines.append(f"  Total verified: {total_v}")
+            for status in ("clean", "empty", "paddle_empty", "outside", "bleed"):
+                c = vc.get(status, 0)
+                if c > 0:
+                    pct = f"{c / max(total_v, 1) * 100:.1f}%"
+                    lines.append(f"    {status}: {c} ({pct})")
             if issues:
-                lines.append(f"    paddle_empty/ - {vc.get('paddle_empty', 0)} images")
-                lines.append(f"    outside/ - {vc.get('outside', 0)} images")
-                lines.append(f"    bleed/ - {vc.get('bleed', 0)} images")
+                lines.append(f"  Issues: {issues} subs need attention")
+            lines.append("  pixel_verification/ - detail files + images")
 
         if self.grouping_data:
             gc = self.grouping_counts
