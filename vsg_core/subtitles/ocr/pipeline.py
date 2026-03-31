@@ -563,6 +563,85 @@ class OCRPipeline:
             regions.sort(key=lambda r: (_zo.get(r.zone, 1), r.top_y))
             return regions
 
+        def _draw_region_debug(
+            rgb: np.ndarray,
+            regs: list,
+            fw: int,
+            fh: int,
+        ) -> np.ndarray:
+            """Draw color-coded region grouping on image.
+
+            Green = bot, Blue = top, Red = pos.
+            Shows group outline, zone label, and gap measurements.
+            """
+            import cv2
+
+            ZONE_COLORS = {
+                "bot": (0, 200, 0),  # Green (BGR)
+                "top": (200, 100, 0),  # Blue
+                "pos": (0, 0, 200),  # Red
+            }
+            img = rgb.copy()
+            pad = 3
+
+            for reg in regs:
+                color = ZONE_COLORS.get(reg.zone, (128, 128, 128))
+                n_lines = len(reg.lines)
+
+                # Draw group outline (enclosing all lines)
+                gx1 = max(0, reg.left_x - pad)
+                gy1 = max(0, reg.top_y - pad)
+                gx2 = min(fw, reg.right_x + pad)
+                gy2 = min(fh, reg.bot_y + pad)
+                thickness = 2 if n_lines >= 2 else 1
+                cv2.rectangle(img, (gx1, gy1), (gx2, gy2), color, thickness)
+
+                # Per-line thin dashed boxes (dotted via short segments)
+                for ln in reg.lines:
+                    lx1 = max(0, ln.x1 - 1)
+                    ly1 = max(0, ln.y1 - 1)
+                    lx2 = min(fw, ln.x2 + 1)
+                    ly2 = min(fh, ln.y2 + 1)
+                    cv2.rectangle(img, (lx1, ly1), (lx2, ly2), color, 1)
+
+                # Zone label
+                label = f"{reg.zone}"
+                if n_lines >= 2:
+                    label += f" {n_lines}L"
+                if reg.confidence < 1.0:
+                    label += f" {reg.confidence:.0%}"
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                sc = 0.4
+                (tw, th), _ = cv2.getTextSize(label, font, sc, 1)
+                lx = gx1
+                ly = gy1 - 4 if gy1 > th + 8 else gy1 + th + 4
+                cv2.rectangle(img, (lx, ly - th - 2), (lx + tw + 4, ly + 2), color, -1)
+                cv2.putText(img, label, (lx + 2, ly), font, sc, (0, 0, 0), 1)
+
+                # Gap measurements between lines
+                if n_lines >= 2:
+                    for i in range(n_lines - 1):
+                        la = reg.lines[i]
+                        lb = reg.lines[i + 1]
+                        gap = lb.y1 - la.y2
+                        mid_gap_y = (la.y2 + lb.y1) // 2
+                        gap_label = f"{gap}px"
+                        (gw, gh), _ = cv2.getTextSize(gap_label, font, 0.35, 1)
+                        gx = gx2 + 4
+                        if gx + gw > fw:
+                            gx = gx1 - gw - 4
+                        cv2.putText(
+                            img,
+                            gap_label,
+                            (gx, mid_gap_y + gh // 2),
+                            font,
+                            0.35,
+                            color,
+                            1,
+                        )
+
+            return img
+
         logger = logging.getLogger(__name__)
         total = len(subtitle_images)
 
@@ -711,9 +790,9 @@ class OCRPipeline:
                         0.0,
                         sub_image.image,
                     )
-                    # Save annotated (will show empty — no boxes)
+                    # Save raw image (no boxes — paddle found nothing)
                     rgb_debug = rgba_to_rgb_on_black(sub_image.image)
-                    debugger.add_annotated_image(sub_image.index, rgb_debug)
+                    debugger.add_paddle_line_image(sub_image.index, rgb_debug)
                 continue
 
             # Has lines — check if pixels are covered by bboxes
@@ -765,14 +844,25 @@ class OCRPipeline:
             # ── Step 3: Create Line objects — pixel-refined from paddle bboxes
             # Paddle gives approximate bboxes (0-1000 normalized → rounded).
             # Pixel scan within each bbox finds the true text boundaries.
-            # Used for: pos_x/pos_y, annotated debug images, alignment.
+            # Used for: pos_x/pos_y, debug images, alignment.
             # Already sorted by reading order (y1, x1) from Step 1.
-            lines = []
+            paddle_lines = []  # Raw paddle coords (for debug)
+            lines = []  # Pixel-refined (for everything else)
             for line_idx, vl in enumerate(vl_lines):
                 if not vl["text"]:
                     continue
                 if vl["bbox"]:
                     bx1, by1, bx2, by2 = vl["bbox"]
+                    paddle_lines.append(
+                        Line(
+                            x1=bx1,
+                            y1=by1,
+                            x2=bx2,
+                            y2=by2,
+                            line_id=line_idx + 1,
+                            text=vl["text"],
+                        )
+                    )
                     # Pixel-refine: scan raw image within paddle bbox
                     roi = pixel_mask[by1:by2, bx1:bx2]
                     if roi.size > 0 and np.any(roi):
@@ -799,27 +889,37 @@ class OCRPipeline:
                     )
                 else:
                     # No bbox from backend — use full frame as fallback
-                    lines.append(
-                        Line(
-                            x1=0,
-                            y1=0,
-                            x2=frame_w,
-                            y2=frame_h,
-                            line_id=line_idx + 1,
-                            text=vl["text"],
-                        )
+                    fb = Line(
+                        x1=0,
+                        y1=0,
+                        x2=frame_w,
+                        y2=frame_h,
+                        line_id=line_idx + 1,
+                        text=vl["text"],
                     )
+                    paddle_lines.append(fb)
+                    lines.append(fb)
 
             # ── Step 3.5: Region grouping ──────────────────────────
             # Group pixel-refined lines into regions (bot/top/pos).
             # Must happen AFTER pixel refinement so we use true boundaries.
             regions = _group_lines(lines, frame_w, frame_h)
 
-            # ── Step 4: Debug — annotated image + line/region data ──
+            # ── Step 4: Debug images + line/region data ──────────
             if self.config.debug_output:
                 rgb_debug = rgba_to_rgb_on_black(sub_image.image)
-                annotated_img = annotate_image(rgb_debug, lines)
-                debugger.add_annotated_image(sub_image.index, annotated_img)
+
+                # Paddle lines — raw model bboxes
+                paddle_img = annotate_image(rgb_debug, paddle_lines)
+                debugger.add_paddle_line_image(sub_image.index, paddle_img)
+
+                # Pixel lines — refined bboxes from raw pixel scan
+                pixel_img = annotate_image(rgb_debug, lines)
+                debugger.add_pixel_line_image(sub_image.index, pixel_img)
+
+                # Region image — color-coded bot/top/pos groups
+                region_img = _draw_region_debug(rgb_debug, regions, frame_w, frame_h)
+                debugger.add_region_image(sub_image.index, region_img)
 
                 line_dicts = [
                     {
