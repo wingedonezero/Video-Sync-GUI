@@ -33,9 +33,9 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
-from . import VLMBackend, VLMRegionResult, get_model_dir, register_vlm_backend
 from ..annotator import crop_region, rgba_to_rgb_on_black
 from ..region_detector import Region, split_region_into_lines
+from . import VLMBackend, VLMRegionResult, get_model_dir, register_vlm_backend
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +71,11 @@ _CHAT_FORMAT = (
     "Assistant:\n{{ message.content }}{{ eos_token }}"
     "{% endif %}"
     "{% endfor %}"
-    '{% if add_generation_prompt %}Assistant:\n{% endif %}'
+    "{% if add_generation_prompt %}Assistant:\n{% endif %}"
 )
 
 
-def _parse_spotting_output(
-    text: str, frame_w: int, frame_h: int
-) -> list[dict]:
+def _parse_spotting_output(text: str, frame_w: int, frame_h: int) -> list[dict]:
     """Parse Spotting output into lines with text and pixel bboxes.
 
     The model outputs lines like:
@@ -144,9 +142,7 @@ class PaddleOCRVL(VLMBackend):
             DEFAULT_SYSTEM_MESSAGE = None
             CHAT_FORMAT = _CHAT_FORMAT
 
-        chat_handler = _PaddleOCRVLHandler(
-            clip_model_path=mmproj_path, verbose=False
-        )
+        chat_handler = _PaddleOCRVLHandler(clip_model_path=mmproj_path, verbose=False)
 
         # Suppress llama.cpp C-level stderr (~10 lines per inference call).
         # When running in subprocess with stderr=PIPE, this fills the 64KB
@@ -250,6 +246,44 @@ class PaddleOCRVL(VLMBackend):
 
         return results
 
+    def ocr_single(self, image: np.ndarray) -> str:
+        """OCR a single image, return text only (no bboxes).
+
+        Used for paddle_empty recovery — pixel verification found content
+        but Spotting returned no lines. Send full image with "OCR:" prompt.
+
+        Args:
+            image: RGBA or RGB image (full frame or crop)
+
+        Returns:
+            OCR text, or empty string if nothing detected.
+        """
+        if self.llm is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        if image.ndim == 3 and image.shape[2] == 4:
+            source = rgba_to_rgb_on_black(image)
+        else:
+            source = image
+
+        data_uri = _image_to_data_uri(source)
+
+        result = self.llm.create_chat_completion(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                        {"type": "text", "text": "OCR:"},
+                    ],
+                }
+            ],
+            max_tokens=256,
+            temperature=0,
+        )
+
+        return result["choices"][0]["message"]["content"].strip()
+
     def spotting_direct(
         self,
         image: np.ndarray,
@@ -327,7 +361,6 @@ class PaddleOCRVL(VLMBackend):
         used_vl = set()
 
         for region in regions:
-            region_cy = (region.y1 + region.y2) / 2
             margin = max(15, region.height * 0.5)
 
             # Find all VL lines whose Y center falls within this region
@@ -342,14 +375,13 @@ class PaddleOCRVL(VLMBackend):
                         matched_texts.append(vl["text"])
                         matched_bboxes.append(vl["bbox"])
                         used_vl.add(vl_idx)
-                else:
-                    # No bbox — try text match by position in output order
-                    # This handles edge cases where LOC tokens weren't generated
-                    if not any(v["bbox"] for v in vl_lines):
-                        # No bboxes at all — fall back to sequential mapping
-                        matched_texts.append(vl["text"])
-                        used_vl.add(vl_idx)
-                        break
+                # No bbox — try text match by position in output order
+                # This handles edge cases where LOC tokens weren't generated
+                elif not any(v["bbox"] for v in vl_lines):
+                    # No bboxes at all — fall back to sequential mapping
+                    matched_texts.append(vl["text"])
+                    used_vl.add(vl_idx)
+                    break
 
             # Join matched lines with newline (ASS writer converts to \N)
             text = "\n".join(matched_texts) if matched_texts else ""
@@ -375,6 +407,7 @@ class PaddleOCRVL(VLMBackend):
         # Restore stderr
         if hasattr(self, "_old_stderr_fd") and self._old_stderr_fd is not None:
             import os
+
             os.dup2(self._old_stderr_fd, 2)
             os.close(self._old_stderr_fd)
             self._old_stderr_fd = None
