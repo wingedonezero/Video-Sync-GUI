@@ -295,8 +295,7 @@ def run_preview_ocr(
         return None
 
     ocr_engine = "paddleocr-vl"
-    use_crop_mode = True
-    log(f"[Preview OCR] Starting preview OCR with {ocr_engine} (crop mode)...")
+    log(f"[Preview OCR] Starting preview OCR with {ocr_engine}...")
 
     # Map language code
     lang_map = {
@@ -317,7 +316,6 @@ def run_preview_ocr(
     preview_settings = {
         "ocr_language": ocr_lang,
         "ocr_engine": ocr_engine,
-        "ocr_crop_mode": use_crop_mode,
         "ocr_low_confidence_threshold": 60.0,
         "ocr_cleanup_enabled": True,
         "ocr_custom_wordlist_path": "",
