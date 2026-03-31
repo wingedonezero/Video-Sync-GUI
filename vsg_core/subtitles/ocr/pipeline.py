@@ -410,7 +410,7 @@ class OCRPipeline:
 
         # ── Region grouping thresholds ──
         # Derived from analysis of 51,145 subs across 8 shows (267 tracks).
-        GRP_MAX_BOT_EDGE = 80  # Anchor y2 within this of frame bottom
+        GRP_MAX_BOT_EDGE = 120  # Anchor y2 within this of frame bottom
         GRP_MAX_TOP_EDGE = 110  # Anchor y1 within this of frame top
         GRP_MAX_GAP = 25  # Max px gap between consecutive lines
         GRP_MAX_H_DIFF = 8  # Max bbox height diff
