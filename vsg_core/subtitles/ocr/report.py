@@ -85,9 +85,7 @@ class SubtitleOCRResult:
     position_x: int = 0
     position_y: int = 0
     is_positioned: bool = False  # True if not at default bottom
-    line_regions: list[str] = field(
-        default_factory=list
-    )  # Per-line: "top"/"bottom"
+    line_regions: list[str] = field(default_factory=list)  # Per-line: "top"/"bottom"
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -134,6 +132,10 @@ class OCRReport:
     positioned_subtitles: int = 0  # Non-bottom positioned
     top_positioned: int = 0
     split_subtitles: int = 0  # Subtitles with both top and bottom text
+
+    # Pixel verification stats (from pipeline verification layer)
+    pixel_verification: dict[str, int] = field(default_factory=dict)
+    # Keys: clean, empty, paddle_empty, paddle_empty_recovered, outside, bleed
 
     def add_subtitle_result(self, result: SubtitleOCRResult):
         """Add a subtitle result and update statistics."""
@@ -248,6 +250,7 @@ class OCRReport:
                 "total_fixes_applied": self.total_fixes_applied,
                 "positioned_subtitles": self.positioned_subtitles,
             },
+            "pixel_verification": self.pixel_verification,
             "fixes_by_type": self.fixes_by_type,
             "unknown_words": [w.to_dict() for w in self.unknown_words],
             "low_confidence_lines": [l.to_dict() for l in self.low_confidence_lines],
@@ -270,6 +273,7 @@ class OCRReport:
             "low_confidence_count": len(self.low_confidence_lines),
             "positioned_subtitles": self.positioned_subtitles,
             "top_unknown_words": [w.word for w in self.unknown_words[:10]],
+            "pixel_verification": self.pixel_verification,
         }
 
     def save(self, output_path: Path):

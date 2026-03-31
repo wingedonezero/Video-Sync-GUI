@@ -229,7 +229,8 @@ class OCRPipeline:
                 subtitle_images, backend_setting, report, debugger
             )
 
-            # Step 5: Finalize report
+            # Step 5: Finalize report — include pixel verification stats
+            report.pixel_verification = dict(debugger.verification_counts)
             report.finalize()
             report.duration_seconds = time.time() - start_time
 
@@ -266,6 +267,7 @@ class OCRPipeline:
                 source_resolution=source_res,
                 output_resolution=output_res,
                 config=output_config,
+                pixel_verification=dict(debugger.verification_counts),
             )
             result.subtitle_data = subtitle_data
             result.output_path = output_path  # Caller will save later
@@ -798,7 +800,7 @@ class OCRPipeline:
                         logger.debug(f"Sub {sub_image.index}: OCR recovery failed: {e}")
 
                 if not recovered_text:
-                    # Recovery failed or not available — skip
+                    # Recovery failed or not available — skip (stays paddle_empty)
                     if self.config.debug_output:
                         debugger.add_subtitle(
                             sub_image.index,
@@ -829,6 +831,10 @@ class OCRPipeline:
                 ]
                 # Fall through to normal processing below
                 # (pixel refinement, region grouping, etc.)
+                # Track recovery success
+                debugger.verification_counts["paddle_empty_recovered"] = (
+                    debugger.verification_counts.get("paddle_empty_recovered", 0) + 1
+                )
                 logger.debug(
                     f"Sub {sub_image.index}: paddle_empty recovered "
                     f"'{recovered_text[:40]}' at [{px_x1},{px_y1},{px_x2},{px_y2}]"

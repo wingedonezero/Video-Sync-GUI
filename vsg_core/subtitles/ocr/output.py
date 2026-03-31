@@ -112,6 +112,7 @@ def create_subtitle_data_from_ocr(
     output_resolution: tuple[int, int] = (1920, 1080),
     master_palette: list[list[int]] | None = None,
     config: OutputConfig | None = None,
+    pixel_verification: dict[str, int] | None = None,
 ) -> "SubtitleData":
     """
     Create SubtitleData from OCR results.
@@ -358,6 +359,7 @@ def create_subtitle_data_from_ocr(
         positioned_subtitles=positioned_count,
         fixes_by_type=fixes_by_type,
         unknown_words=list(unknown_words_map.values()),
+        pixel_verification=pixel_verification or {},
     )
 
     # Merge consecutive duplicate events to prevent flickering.

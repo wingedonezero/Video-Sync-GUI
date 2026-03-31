@@ -103,6 +103,10 @@ def process_ocr_with_preservation(
     )
     items_to_add.append(preserved_item)
 
+    # Store pixel verification data on item for auditor access
+    if subtitle_data.ocr_metadata and subtitle_data.ocr_metadata.pixel_verification:
+        item.pixel_verification = subtitle_data.ocr_metadata.pixel_verification
+
     # Update item to reflect OCR output
     item.extracted_path = item.extracted_path.with_suffix(".ass")
     item.track = Track(
