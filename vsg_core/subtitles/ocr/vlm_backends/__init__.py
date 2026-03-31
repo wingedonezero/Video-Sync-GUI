@@ -10,10 +10,10 @@ Two approaches are supported:
 Usage:
     from vsg_core.subtitles.ocr.vlm_backends import get_vlm_backend, is_model_available
 
-    if is_model_available("lfm2vl-450m"):
-        backend = get_vlm_backend("lfm2vl-450m")
+    if is_model_available("paddleocr-vl"):
+        backend = get_vlm_backend("paddleocr-vl")
         backend.load()
-        results = backend.ocr(image, regions)
+        results = backend.spotting_direct(image)
         backend.unload()
 """
 
@@ -181,10 +181,6 @@ def list_vlm_backends() -> list[str]:
 
 # Maps backend name -> HuggingFace repo ID and local directory name
 _MODEL_REGISTRY: dict[str, dict] = {
-    "lfm2vl-450m": {
-        "repo_id": "LiquidAI/LFM2-VL-450M",
-        "dir_name": "LFM2-VL-450M",
-    },
     "qwen35-4b": {
         "repo_id": "Qwen/Qwen3.5-4B",
         "dir_name": "Qwen3.5-4B",
@@ -226,16 +222,11 @@ def get_model_repo_id(name: str) -> str | None:
 # These imports must be at the bottom to avoid circular imports.
 
 try:
-    from . import lfm2vl  # noqa: F401
-except ImportError as e:
-    logger.debug(f"LFM2-VL backend not available: {e}")
-
-try:
-    from . import qwen35  # noqa: F401
+    from . import qwen35
 except ImportError as e:
     logger.debug(f"Qwen3.5 backend not available: {e}")
 
 try:
-    from . import paddleocr_vl  # noqa: F401
+    from . import paddleocr_vl
 except ImportError as e:
     logger.debug(f"PaddleOCR-VL backend not available: {e}")

@@ -361,7 +361,6 @@ class PaddleOCRVL(VLMBackend):
         used_vl = set()
 
         for region in regions:
-            region_cy = (region.y1 + region.y2) / 2
             margin = max(15, region.height * 0.5)
 
             # Find all VL lines whose Y center falls within this region

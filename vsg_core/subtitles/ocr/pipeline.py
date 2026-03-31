@@ -36,7 +36,7 @@ from .postprocess import OCRPostProcessor, create_postprocessor
 from .report import OCRReport, SubtitleOCRResult, create_report
 
 # VLM engine names that use the VLM pipeline (spotting + pixel verification)
-_VLM_ENGINES = {"lfm2vl-450m", "qwen35-4b", "paddleocr-vl"}
+_VLM_ENGINES = {"qwen35-4b", "paddleocr-vl"}
 
 
 @dataclass(slots=True)
@@ -707,7 +707,12 @@ class OCRPipeline:
             if has_spotting_direct:
                 vl_lines = backend.spotting_direct(sub_image.image)
             else:
-                # Legacy: pixel regions → backend.ocr()
+                # Legacy path: pixel regions → backend.ocr()
+                # Used by Qwen3.5 (no spotting_direct method).
+                # TODO: Qwen doesn't set vl_bbox on results, so pixel
+                # verification / refinement / region grouping won't work.
+                # To fix: use px_region coords as bbox fallback, e.g.:
+                #   bbox = vr.vl_bbox or (region.x1, region.y1, region.x2, region.y2)
                 from .region_detector import detect_regions_pixel
 
                 rgb = rgba_to_rgb_on_black(sub_image.image)
