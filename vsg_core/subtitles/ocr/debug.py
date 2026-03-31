@@ -11,23 +11,15 @@ Folder structure:
     {report_name}_debug/
         summary.txt                 # Quick overview
         raw_ocr.txt                 # Complete raw OCR output for all subtitles
-        all_subtitles/
-            all_subtitles.txt       # All subtitles with OCR text
-            sub_0001.png            # All preprocessed images for verification
-            sub_0002.png
-            ...
-        unknown_words/
-            unknown_words.txt       # Timecodes, text, unknown words
-            sub_0001.png            # Images for subtitles with unknown words
-            ...
-        fixes_applied/
-            fixes_applied.txt       # Timecodes, original, fixed text
-            sub_0010.png
-            ...
-        low_confidence/
-            low_confidence.txt      # Timecodes, text, confidence scores
-            sub_0020.png
-            ...
+        all_subtitles/              # Raw images + OCR text for all subs
+        paddle_lines/               # Raw paddle bbox rectangles on image
+        pixel_lines/                # Pixel-refined bbox rectangles on image
+        regions/                    # Color-coded region grouping (bot/top/pos)
+        pixel_verification/         # Pixel verification catches (paddle_empty/bleed)
+        grouping/                   # Region grouping text summaries + JSON
+        unknown_words/              # Subs with unrecognized words
+        fixes_applied/              # Subs where dictionary fixes were applied
+        low_confidence/             # Low confidence OCR results
 """
 
 from dataclasses import dataclass, field
@@ -107,8 +99,10 @@ class OCRDebugger:
         self.fix_indices: set[int] = set()
         self.low_confidence_indices: set[int] = set()
 
-        # VLM region data (annotated images, region info)
-        self.annotated_images: dict[int, np.ndarray] = {}
+        # VLM line/region debug images and data
+        self.paddle_line_images: dict[int, np.ndarray] = {}  # raw paddle bboxes
+        self.pixel_line_images: dict[int, np.ndarray] = {}  # pixel-refined bboxes
+        self.region_images: dict[int, np.ndarray] = {}  # color-coded region groups
         self.region_data: dict[int, list[dict]] = {}  # index -> [{line_id, bbox, text}]
 
         # Pixel verification results
@@ -195,11 +189,23 @@ class OCRDebugger:
                 self.subtitles[index].original_text = original_text
             self.fix_indices.add(index)
 
-    def add_annotated_image(self, index: int, image: np.ndarray) -> None:
-        """Store an annotated image (with region boxes drawn) for debug output."""
+    def add_paddle_line_image(self, index: int, image: np.ndarray) -> None:
+        """Store image with raw paddle bboxes drawn."""
         if not self.enabled:
             return
-        self.annotated_images[index] = image
+        self.paddle_line_images[index] = image
+
+    def add_pixel_line_image(self, index: int, image: np.ndarray) -> None:
+        """Store image with pixel-refined bboxes drawn."""
+        if not self.enabled:
+            return
+        self.pixel_line_images[index] = image
+
+    def add_region_image(self, index: int, image: np.ndarray) -> None:
+        """Store image with color-coded region grouping."""
+        if not self.enabled:
+            return
+        self.region_images[index] = image
 
     def add_region_data(
         self,
@@ -288,9 +294,13 @@ class OCRDebugger:
         if self.low_confidence_indices:
             self._save_low_confidence()
 
-        # Save annotated images (backend line bboxes drawn on raw image)
-        if self.annotated_images:
-            self._save_annotated_images()
+        # Save line detection images
+        if self.paddle_line_images:
+            self._save_line_images(self.paddle_line_images, "paddle_lines")
+        if self.pixel_line_images:
+            self._save_line_images(self.pixel_line_images, "pixel_lines")
+        if self.region_images:
+            self._save_line_images(self.region_images, "regions")
 
         # Save pixel verification results
         if self.verification_results:
@@ -387,13 +397,21 @@ class OCRDebugger:
             lines.append(
                 f"  low_confidence/ - {len(self.low_confidence_indices)} images"
             )
-        if self.annotated_images:
+        if self.paddle_line_images:
             lines.append(
-                f"  annotated/ - {len(self.annotated_images)} images (line bboxes)"
+                f"  paddle_lines/ - {len(self.paddle_line_images)} images (raw paddle bboxes)"
+            )
+        if self.pixel_line_images:
+            lines.append(
+                f"  pixel_lines/ - {len(self.pixel_line_images)} images (pixel-refined bboxes)"
+            )
+        if self.region_images:
+            lines.append(
+                f"  regions/ - {len(self.region_images)} images (bot/top/pos grouping)"
             )
         if self.verification_results:
             vc = self.verification_counts
-            lines.append(f"  verification/ - pixel verification results")
+            lines.append("  pixel_verification/ - pixel verification results")
             for status in ("clean", "empty", "paddle_empty", "outside", "bleed"):
                 if vc.get(status, 0) > 0:
                     lines.append(f"    {status}: {vc[status]}")
@@ -704,18 +722,17 @@ class OCRDebugger:
 
         (folder / "low_confidence.txt").write_text("\n".join(lines), encoding="utf-8")
 
-    def _save_annotated_images(self):
-        """Save annotated images with region boxes drawn."""
-        folder = self.debug_dir / "annotated"
+    def _save_line_images(self, images: dict[int, np.ndarray], folder_name: str):
+        """Save debug images to a named subfolder."""
+        folder = self.debug_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
 
-        for idx in sorted(self.annotated_images.keys()):
-            img = self.annotated_images[idx]
-            self._save_image(img, folder / f"sub_{idx:04d}.png")
+        for idx in sorted(images.keys()):
+            self._save_image(images[idx], folder / f"sub_{idx:04d}.png")
 
     def _save_verification(self):
         """Save pixel verification results organized by status category."""
-        base = self.debug_dir / "verification"
+        base = self.debug_dir / "pixel_verification"
         base.mkdir(parents=True, exist_ok=True)
 
         vc = self.verification_counts
@@ -792,11 +809,11 @@ class OCRDebugger:
                 # Save raw image
                 if sub and sub.image is not None:
                     self._save_image(sub.image, folder / f"sub_{idx:04d}.png")
-                # Save annotated image (with paddle bboxes drawn)
-                if idx in self.annotated_images:
+                # Save paddle line image (with paddle bboxes drawn)
+                if idx in self.paddle_line_images:
                     self._save_image(
-                        self.annotated_images[idx],
-                        folder / f"sub_{idx:04d}_annotated.png",
+                        self.paddle_line_images[idx],
+                        folder / f"sub_{idx:04d}_paddle.png",
                     )
 
             (folder / f"{status}.txt").write_text(
