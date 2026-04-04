@@ -120,6 +120,10 @@ class OCRDebugger:
         self.grouping_data: dict[int, list[dict]] = {}
         self.grouping_counts: dict[str, int] = {"bot": 0, "top": 0, "pos": 0}
 
+        # PGS object classification data (only populated for PGS subtitles)
+        # index -> [{pgs_x, pgs_y, obj_w, obj_h, zone}]
+        self.pgs_object_data: dict[int, list[dict]] = {}
+
     @property
     def debug_dir(self) -> Path:
         """Get the debug output directory path."""
@@ -264,6 +268,25 @@ class OCRDebugger:
             if zone in self.grouping_counts:
                 self.grouping_counts[zone] += 1
 
+    def add_pgs_object_data(
+        self,
+        index: int,
+        objects: list[dict],
+    ) -> None:
+        """Store PGS composition object classification data.
+
+        Only called for PGS subtitles. Each dict contains:
+            pgs_x, pgs_y, obj_w, obj_h: object position/size
+            zone: classified zone (bot/top/pos)
+
+        Args:
+            index: Subtitle index
+            objects: List of PGS object dicts with zone classification
+        """
+        if not self.enabled:
+            return
+        self.pgs_object_data[index] = objects
+
     def save(self):
         """Save all debug output to disk."""
         if not self.enabled:
@@ -309,6 +332,10 @@ class OCRDebugger:
         # Save region grouping results
         if self.grouping_data:
             self._save_grouping()
+
+        # Save PGS object classification data
+        if self.pgs_object_data:
+            self._save_pgs_objects()
 
     def _save_grouping(self):
         """Save detailed region grouping decisions for every subtitle."""
@@ -365,6 +392,41 @@ class OCRDebugger:
                         lines.append(f"    {reason}")
 
         (base / "grouping_summary.txt").write_text("\n".join(lines), encoding="utf-8")
+
+    def _save_pgs_objects(self):
+        """Save PGS composition object classification data."""
+        import json
+
+        base = self.debug_dir / "pgs_objects"
+        base.mkdir(parents=True, exist_ok=True)
+
+        # Per-sub detail file
+        with open(base / "pgs_objects.json", "w", encoding="utf-8") as f:
+            json.dump(self.pgs_object_data, f, indent=2, default=str)
+
+        # Summary: count objects by zone
+        zone_counts: dict[str, int] = {"bot": 0, "top": 0, "pos": 0}
+        total_objects = 0
+        for objects in self.pgs_object_data.values():
+            for obj in objects:
+                zone = obj.get("zone", "pos")
+                zone_counts[zone] = zone_counts.get(zone, 0) + 1
+                total_objects += 1
+
+        lines = [
+            "PGS Object Classification",
+            "=" * 60,
+            "",
+            f"Total display sets with objects: {len(self.pgs_object_data)}",
+            f"Total objects: {total_objects}",
+            f"  bot: {zone_counts.get('bot', 0)}",
+            f"  top: {zone_counts.get('top', 0)}",
+            f"  pos: {zone_counts.get('pos', 0)}",
+        ]
+
+        (base / "pgs_objects_summary.txt").write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
 
     def _save_summary(self):
         """Save overall summary file."""
