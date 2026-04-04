@@ -85,6 +85,9 @@ class PlanItem:
     # Clamping info for negative timestamp warnings
     clamping_info: dict | None = None
 
+    # OCR pixel verification results (for auditor access)
+    pixel_verification: dict | None = None
+
     # Video-verified sync mode stats (for bitmap subtitles)
     video_verified_bitmap: bool = False
     video_verified_details: dict | None = None
