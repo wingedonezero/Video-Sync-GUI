@@ -59,8 +59,15 @@ def process_ocr_with_preservation(
             debug_output_dir=debug_output_dir,
         )
     else:
+        # Determine subtitle path: .idx for VobSub, .sup for PGS
+        ext = item.extracted_path.suffix.lower()
+        ocr_sub_path = (
+            item.extracted_path
+            if ext == ".sup"
+            else item.extracted_path.with_suffix(".idx")
+        )
         subtitle_data = run_ocr_unified(
-            str(item.extracted_path.with_suffix(".idx")),
+            str(ocr_sub_path),
             item.track.props.lang,
             runner,
             ctx.tool_paths,
@@ -150,12 +157,19 @@ def _run_ocr_subprocess(
         return None
 
     # Build subprocess command
+    # Determine subtitle path: .idx for VobSub, .sup for PGS
+    ext = item.extracted_path.suffix.lower()
+    sub_ocr_path = (
+        item.extracted_path
+        if ext == ".sup"
+        else item.extracted_path.with_suffix(".idx")
+    )
     cmd = [
         sys.executable,
         "-m",
         "vsg_core.subtitles.ocr.unified_subprocess",
         "--subtitle-path",
-        str(item.extracted_path.with_suffix(".idx")),
+        str(sub_ocr_path),
         "--lang",
         item.track.props.lang,
         "--config-json",
