@@ -336,6 +336,12 @@ class AppSettings(BaseModel):
     ocr_font_size_ratio: float = 5.80
     ocr_generate_report: bool = True
 
+    # PGS (Blu-ray) specific
+    ocr_pgs_save_object_crops: bool = False
+    ocr_pgs_keep_bot_colors: bool = False
+    ocr_pgs_keep_top_colors: bool = False
+    ocr_pgs_keep_pos_colors: bool = False
+
     # =========================================================================
     # Class-level constants (excluded from serialization)
     # =========================================================================
