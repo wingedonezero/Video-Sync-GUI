@@ -250,7 +250,51 @@ class OCRTab(QWidget):
         output_layout.addRow("", self._font_preview_label)
         output_layout.addRow(self.widgets["ocr_generate_report"])
         output_layout.addRow(self.widgets["ocr_debug_output"])
+
+        # PGS-specific settings
+        pgs_group = QGroupBox("PGS (Blu-ray) Settings")
+        pgs_layout = QFormLayout(pgs_group)
+
+        self.widgets["ocr_pgs_save_object_crops"] = QCheckBox(
+            "Save raw PGS object crops in debug output"
+        )
+        self.widgets["ocr_pgs_save_object_crops"].setToolTip(
+            "Save individual PGS composition object bitmaps before compositing.\n"
+            "Useful for analyzing how PGS objects map to regions.\n"
+            "Requires debug output to be enabled."
+        )
+
+        self.widgets["ocr_pgs_keep_bot_colors"] = QCheckBox(
+            "Keep bottom dialogue colors"
+        )
+        self.widgets["ocr_pgs_keep_bot_colors"].setToolTip(
+            "Preserve original subtitle colors for bottom (dialogue) lines.\n"
+            "Extracts the dominant color from each line's pixels and applies\n"
+            "it as a color override in the ASS output."
+        )
+
+        self.widgets["ocr_pgs_keep_top_colors"] = QCheckBox(
+            "Keep top dialogue colors"
+        )
+        self.widgets["ocr_pgs_keep_top_colors"].setToolTip(
+            "Preserve original subtitle colors for top (title card) lines."
+        )
+
+        self.widgets["ocr_pgs_keep_pos_colors"] = QCheckBox(
+            "Keep positioned (sign) colors"
+        )
+        self.widgets["ocr_pgs_keep_pos_colors"].setToolTip(
+            "Preserve original subtitle colors for positioned (sign) lines.\n"
+            "Signs often use distinctive colors that should be kept."
+        )
+
+        pgs_layout.addRow(self.widgets["ocr_pgs_save_object_crops"])
+        pgs_layout.addRow(self.widgets["ocr_pgs_keep_bot_colors"])
+        pgs_layout.addRow(self.widgets["ocr_pgs_keep_top_colors"])
+        pgs_layout.addRow(self.widgets["ocr_pgs_keep_pos_colors"])
+
         main_layout.addWidget(output_group)
+        main_layout.addWidget(pgs_group)
 
         main_layout.addStretch(1)
 

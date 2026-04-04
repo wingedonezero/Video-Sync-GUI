@@ -228,13 +228,20 @@ def create_subtitle_data_from_ocr(
             dominant_color=result.dominant_color,
         )
 
+        # Build color override tag if color data is present
+        _color_tag = ""
+        if result.dominant_color and len(result.dominant_color) >= 3:
+            r, g, b = result.dominant_color[:3]
+            # ASS color format: &HBBGGRR& (BGR, reversed from RGB)
+            _color_tag = f"\\1c&H{b:02X}{g:02X}{r:02X}&"
+
         # VLM positioning — pos regions get \an4\pos() at exact pixel location
         if result.pos_x > 0 or result.pos_y > 0:
             text = result.text.replace("\n", "\\N")
             # \an4 = middle-left anchor, \pos() at pixel left edge + vertical center
             # Coordinates are pixel-refined from raw image, in source resolution space
             style = "Default"
-            text = f"{{\\an4\\pos({result.pos_x},{result.pos_y})}}{text}"
+            text = f"{{\\an4\\pos({result.pos_x},{result.pos_y}){_color_tag}}}{text}"
             positioned_count += 1
 
             event = SubtitleEvent(
@@ -250,6 +257,8 @@ def create_subtitle_data_from_ocr(
         # VLM region grouping — bot/top use styles, no \pos()
         elif result.zone in ("bot", "top"):
             text = result.text.replace("\n", "\\N")
+            if _color_tag:
+                text = f"{{{_color_tag}}}{text}"
             style = "Top" if result.zone == "top" else "Default"
             event = SubtitleEvent(
                 start_ms=float(result.start_ms),

@@ -333,6 +333,32 @@ class OCRPipeline:
         from .annotator import annotate_image, rgba_to_rgb_on_black
         from .vlm_backends import get_vlm_backend
 
+        def _extract_line_dominant_color(
+            image: np.ndarray, x1: int, y1: int, x2: int, y2: int
+        ) -> list[int]:
+            """Extract dominant RGB color from a line's pixel region.
+
+            Scans the RGBA image within the bbox, finds the most common
+            non-transparent color using median of opaque pixels.
+
+            Returns:
+                [R, G, B] list, or empty list if no opaque pixels found.
+            """
+            if image.ndim != 3 or image.shape[2] != 4:
+                return []
+            crop = image[y1:y2, x1:x2]
+            if crop.size == 0:
+                return []
+            # Get opaque pixels (alpha > threshold)
+            alpha = crop[:, :, 3]
+            opaque_mask = alpha > 30
+            if not np.any(opaque_mask):
+                return []
+            rgb_pixels = crop[:, :, :3][opaque_mask]
+            # Use median for robustness against outlines/shadows
+            median_rgb = np.median(rgb_pixels, axis=0).astype(int)
+            return median_rgb.tolist()
+
         @dataclass
         class Line:
             """A single detected text line with bbox. Separate from Region
@@ -1175,6 +1201,14 @@ class OCRPipeline:
                         pgs_debug.append({**obj, "zone": zone})
                     debugger.add_pgs_object_data(sub_image.index, pgs_debug)
 
+                    # Save raw PGS object crops (optional)
+                    if self.settings.get("ocr_pgs_save_object_crops", False):
+                        debugger.add_pgs_object_crops(
+                            sub_image.index,
+                            sub_image.image,
+                            sub_image.pgs_objects,
+                        )
+
             # ── Step 5: Add subtitle to debugger FIRST ──────────────
             full_raw = "\n".join(vl["text"] for vl in vl_lines if vl["text"])
             if self.config.debug_output:
@@ -1253,6 +1287,29 @@ class OCRPipeline:
                 # Position: only pos regions get \pos() tags.
                 # Bot/top use Default/Top styles with margin-based positioning.
                 use_pos = reg.zone == "pos"
+
+                # ── Per-line color extraction (PGS only) ──────────
+                # When enabled for a zone, extract dominant color from
+                # each line's pixels and store on the result.
+                line_colors: list[list[int]] = []
+                dominant_color: list[int] = []
+                keep_colors = (
+                    (reg.zone == "bot" and self.settings.get("ocr_pgs_keep_bot_colors", False))
+                    or (reg.zone == "top" and self.settings.get("ocr_pgs_keep_top_colors", False))
+                    or (reg.zone == "pos" and self.settings.get("ocr_pgs_keep_pos_colors", False))
+                ) and sub_image.pgs_objects is not None
+
+                if keep_colors:
+                    for ln in reg.lines:
+                        rgb = _extract_line_dominant_color(
+                            sub_image.image, ln.x1, ln.y1, ln.x2, ln.y2
+                        )
+                        if rgb:
+                            line_colors.append(rgb)
+                    if line_colors:
+                        # Dominant = most common color across all lines
+                        dominant_color = line_colors[0]
+
                 ocr_result = OCRSubtitleResult(
                     index=sub_image.index,
                     start_ms=float(sub_image.start_ms),
@@ -1272,6 +1329,8 @@ class OCRPipeline:
                     zone=reg.zone,
                     pos_x=reg.left_x if use_pos else 0,
                     pos_y=reg.center_y if use_pos else 0,
+                    subtitle_colors=line_colors,
+                    dominant_color=dominant_color,
                 )
                 ocr_results.append(ocr_result)
 
