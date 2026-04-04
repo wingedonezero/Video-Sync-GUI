@@ -1201,12 +1201,14 @@ class OCRPipeline:
                         pgs_debug.append({**obj, "zone": zone})
                     debugger.add_pgs_object_data(sub_image.index, pgs_debug)
 
-                    # Save raw PGS object crops (optional)
-                    if self.settings.get("ocr_pgs_save_object_crops", False):
+                    # Save raw PGS object images (optional)
+                    if (
+                        self.settings.get("ocr_pgs_save_object_crops", False)
+                        and sub_image.pgs_raw_images
+                    ):
                         debugger.add_pgs_object_crops(
                             sub_image.index,
-                            sub_image.image,
-                            sub_image.pgs_objects,
+                            sub_image.pgs_raw_images,
                         )
 
             # ── Step 5: Add subtitle to debugger FIRST ──────────────

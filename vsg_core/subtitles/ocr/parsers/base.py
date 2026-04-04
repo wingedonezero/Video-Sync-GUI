@@ -50,6 +50,10 @@ class SubtitleImage:
     # Each dict: {"pgs_x": int, "pgs_y": int, "obj_w": int, "obj_h": int}
     # None for VobSub (uses line-level grouping instead).
     pgs_objects: list[dict] | None = None
+    # Raw PGS object RGBA bitmaps before compositing (for debug).
+    # Each entry is an RGBA numpy array at original size with proper alpha.
+    # Only populated when debug crop saving is requested. None otherwise.
+    pgs_raw_images: list | None = None
 
     def __post_init__(self):
         """Set width/height from image if not provided."""

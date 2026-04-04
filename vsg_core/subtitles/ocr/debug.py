@@ -290,18 +290,16 @@ class OCRDebugger:
     def add_pgs_object_crops(
         self,
         index: int,
-        full_frame: "np.ndarray",
-        pgs_objects: list[dict],
+        raw_images: list,
     ) -> None:
-        """Save raw PGS object crops from the full frame.
+        """Save original PGS object RGBA bitmaps (before compositing).
 
-        Crops each PGS object region from the composited frame and saves
-        as individual PNG files. Useful for analyzing object boundaries.
+        These are the actual decoded object images with proper alpha,
+        not crops from the composited frame.
 
         Args:
             index: Subtitle index
-            full_frame: Full-frame RGBA image
-            pgs_objects: List of PGS object dicts with pgs_x, pgs_y, obj_w, obj_h
+            raw_images: List of RGBA numpy arrays — original decoded objects
         """
         if not self.enabled:
             return
@@ -311,24 +309,18 @@ class OCRDebugger:
         crop_dir = self.debug_dir / "pgs_crops"
         crop_dir.mkdir(parents=True, exist_ok=True)
 
-        for oi, obj in enumerate(pgs_objects):
-            ox = obj["pgs_x"]
-            oy = obj["pgs_y"]
-            ow = obj["obj_w"]
-            oh = obj["obj_h"]
-            # Clamp to frame bounds
-            fh, fw = full_frame.shape[:2]
-            x2 = min(ox + ow, fw)
-            y2 = min(oy + oh, fh)
-            if x2 > ox and y2 > oy:
-                crop = full_frame[oy:y2, ox:x2]
-                # Convert RGBA to BGRA for cv2
-                if crop.shape[2] == 4:
-                    bgra = cv2.cvtColor(crop, cv2.COLOR_RGBA2BGRA)
-                else:
-                    bgra = cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
-                path = crop_dir / f"sub_{index:04d}_obj{oi}.png"
-                cv2.imwrite(str(path), bgra)
+        for oi, img in enumerate(raw_images):
+            if img is None or img.size == 0:
+                continue
+            # Convert RGBA to BGRA for cv2 PNG (preserves alpha)
+            if img.ndim == 3 and img.shape[2] == 4:
+                bgra = cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA)
+            elif img.ndim == 3:
+                bgra = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            else:
+                bgra = img
+            path = crop_dir / f"sub_{index:04d}_obj{oi}.png"
+            cv2.imwrite(str(path), bgra)
 
     def save(self):
         """Save all debug output to disk."""

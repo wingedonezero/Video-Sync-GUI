@@ -208,7 +208,9 @@ class PGSParser(SubtitleImageParser):
                     continue
 
                 try:
-                    images = self._render_display_set(ds, video_w, video_h)
+                    images, raw_obj_images = self._render_display_set(
+                        ds, video_w, video_h
+                    )
                 except Exception as e:
                     result.warnings.append(
                         f"Failed to render display set {i}: {e}"
@@ -251,6 +253,7 @@ class PGSParser(SubtitleImageParser):
                         frame_height=video_h,
                         is_forced=forced,
                         pgs_objects=pgs_objects if pgs_objects else None,
+                        pgs_raw_images=raw_obj_images if raw_obj_images else None,
                     )
                     result.subtitles.append(sub)
                     subtitle_index += 1
@@ -654,7 +657,10 @@ class PGSParser(SubtitleImageParser):
 
     def _render_display_set(
         self, ds: DisplaySet, video_w: int, video_h: int
-    ) -> list[tuple[np.ndarray | None, int, int, bool]]:
+    ) -> tuple[
+        list[tuple[np.ndarray | None, int, int, bool]],
+        list[np.ndarray],
+    ]:
         """
         Render display set to a single full-frame RGBA image.
 
@@ -664,11 +670,13 @@ class PGSParser(SubtitleImageParser):
         The OCR pipeline can then process it identically to VobSub.
 
         Returns:
-            List with a single (image, x=0, y=0, forced) tuple,
-            or empty list if nothing to render.
+            Tuple of:
+            - List with a single (image, x=0, y=0, forced) tuple,
+              or empty list if nothing to render.
+            - List of raw RGBA object bitmaps (original decoded, before compositing)
         """
         if not ds.composition_objects:
-            return []
+            return [], []
 
         # Build RGBA palette from YCbCr + Alpha
         rgba_palette = self._build_rgba_palette(ds.palette)
@@ -709,7 +717,10 @@ class PGSParser(SubtitleImageParser):
             decoded.append((image, co.x, co.y, co.forced))
 
         if not decoded:
-            return []
+            return [], []
+
+        # Keep raw object images (original RGBA with proper alpha)
+        raw_images = [img.copy() for img, _, _, _ in decoded]
 
         # Composite all objects onto a full-frame canvas
         frame = np.zeros((video_h, video_w, 4), dtype=np.uint8)
@@ -730,7 +741,7 @@ class PGSParser(SubtitleImageParser):
                 mask = src[:, :, 3] > 0
                 region[mask] = src[mask]
 
-        return [(frame, 0, 0, forced)]
+        return [(frame, 0, 0, forced)], raw_images
 
     def _build_rgba_palette(
         self, palette: list[PaletteEntry]
