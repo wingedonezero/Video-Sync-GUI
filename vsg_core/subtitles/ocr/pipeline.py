@@ -565,6 +565,152 @@ class OCRPipeline:
             regions.sort(key=lambda r: (_zo.get(r.zone, 1), r.top_y))
             return regions
 
+        def _group_lines_pgs(
+            lines_in: list,
+            pgs_objects: list[dict],
+            fw: int,
+            fh: int,
+        ) -> list:
+            """Group lines by PGS object position — object-level classification.
+
+            Unlike VobSub's line-level walk-up/walk-down, PGS classifies each
+            composition object as a whole (bot/top/pos) based on its physical
+            position on the frame. All lines within one PGS object share the
+            same zone. This is validated to produce zero mixed-zone objects
+            across 55,645 display sets (89,421 lines, 167 files).
+
+            Thresholds (validated on full PGS dataset):
+                BOT_DIST = 260   obj bottom within 260px of frame bottom
+                BOT_H_MAX = 300  max object height for bot (real max=276)
+                TOP_Y_MAX = 200  obj top within 200px of frame top
+                TOP_BOT_MAX = 350  top obj bottom edge limit
+                TOP_H_MAX = 250  max object height for top (real p95=213)
+                CX_TOL = 200     center tolerance from frame center
+            """
+            if not lines_in:
+                return []
+
+            # ── PGS object-level thresholds ──
+            PGS_BOT_DIST = 260
+            PGS_BOT_H_MAX = 300
+            PGS_TOP_Y_MAX = 200
+            PGS_TOP_BOT_MAX = 350
+            PGS_TOP_H_MAX = 250
+            PGS_CX_TOL = 200
+
+            cx_frame = fw / 2.0
+
+            # Step 1: Classify each PGS object
+            obj_zones: list[str] = []
+            for obj in (pgs_objects or []):
+                ox = obj["pgs_x"]
+                oy = obj["pgs_y"]
+                ow = obj["obj_w"]
+                oh = obj["obj_h"]
+                obj_bot = oy + oh
+                obj_cx = ox + ow // 2
+                cx_off = abs(obj_cx - cx_frame)
+                dist_bot = fh - obj_bot
+
+                is_bot = (
+                    dist_bot <= PGS_BOT_DIST
+                    and oh <= PGS_BOT_H_MAX
+                    and cx_off <= PGS_CX_TOL
+                )
+                is_top = (
+                    oy <= PGS_TOP_Y_MAX
+                    and obj_bot <= PGS_TOP_BOT_MAX
+                    and oh <= PGS_TOP_H_MAX
+                    and cx_off <= PGS_CX_TOL
+                )
+
+                if is_bot:
+                    obj_zones.append("bot")
+                elif is_top:
+                    obj_zones.append("top")
+                else:
+                    obj_zones.append("pos")
+
+            # Step 2: Map each line to its containing PGS object
+            line_zones: list[str] = []
+            for ln in lines_in:
+                best_zone = "pos"  # Default if no object contains this line
+                for oi, obj in enumerate(pgs_objects or []):
+                    ox = obj["pgs_x"]
+                    oy = obj["pgs_y"]
+                    ow = obj["obj_w"]
+                    oh = obj["obj_h"]
+                    if (
+                        oy <= ln.center_y <= oy + oh
+                        and ox <= ln.center_x <= ox + ow
+                    ):
+                        best_zone = obj_zones[oi]
+                        break
+                line_zones.append(best_zone)
+
+            # Step 3: Group lines by zone
+            # Bot lines: group together (multi-line dialogue)
+            # Top lines: group together (multi-line title cards)
+            # Pos lines: each stays individual (separate \pos())
+            regions: list = []
+
+            bot_lines = [
+                (i, ln)
+                for i, ln in enumerate(lines_in)
+                if line_zones[i] == "bot"
+            ]
+            top_lines = [
+                (i, ln)
+                for i, ln in enumerate(lines_in)
+                if line_zones[i] == "top"
+            ]
+            pos_lines = [
+                (i, ln)
+                for i, ln in enumerate(lines_in)
+                if line_zones[i] == "pos"
+            ]
+
+            if bot_lines:
+                reasons = [
+                    f"pgs-bot: {len(bot_lines)} lines from bot object(s)"
+                ]
+                regions.append(
+                    GroupedRegion(
+                        zone="bot",
+                        lines=[ln for _, ln in bot_lines],
+                        confidence=1.0,
+                        reasons=reasons,
+                    )
+                )
+
+            if top_lines:
+                reasons = [
+                    f"pgs-top: {len(top_lines)} lines from top object(s)"
+                ]
+                regions.append(
+                    GroupedRegion(
+                        zone="top",
+                        lines=[ln for _, ln in top_lines],
+                        confidence=1.0,
+                        reasons=reasons,
+                    )
+                )
+
+            for _, ln in pos_lines:
+                regions.append(
+                    GroupedRegion(
+                        zone="pos",
+                        lines=[ln],
+                        confidence=1.0,
+                        reasons=[f"pgs-pos: L{ln.line_id}"],
+                    )
+                )
+
+            # Deterministic sort: top, pos by y, bot
+            _zo = {"top": 0, "pos": 1, "bot": 2}
+            regions.sort(key=lambda r: (_zo.get(r.zone, 1), r.top_y))
+            return regions
+
         def _draw_region_debug(
             rgb: np.ndarray,
             regs: list,
@@ -955,7 +1101,13 @@ class OCRPipeline:
             # ── Step 3.5: Region grouping ──────────────────────────
             # Group pixel-refined lines into regions (bot/top/pos).
             # Must happen AFTER pixel refinement so we use true boundaries.
-            regions = _group_lines(lines, frame_w, frame_h)
+            # PGS uses object-level classification; VobSub uses line-level.
+            if sub_image.pgs_objects is not None:
+                regions = _group_lines_pgs(
+                    lines, sub_image.pgs_objects, frame_w, frame_h
+                )
+            else:
+                regions = _group_lines(lines, frame_w, frame_h)
 
             # ── Step 4: Debug images + line/region data ──────────
             if self.config.debug_output:
@@ -997,6 +1149,31 @@ class OCRPipeline:
                         }
                     )
                 debugger.add_grouping_data(sub_image.index, grouping_data)
+
+                # PGS object classification debug
+                if sub_image.pgs_objects is not None:
+                    cx_frame = frame_w / 2.0
+                    pgs_debug = []
+                    for obj in sub_image.pgs_objects:
+                        ox = obj["pgs_x"]
+                        oy = obj["pgs_y"]
+                        ow = obj["obj_w"]
+                        oh = obj["obj_h"]
+                        obj_bot = oy + oh
+                        obj_cx = ox + ow // 2
+                        cx_off = abs(obj_cx - cx_frame)
+                        dist_bot = frame_h - obj_bot
+                        # Classify (same thresholds as _group_lines_pgs)
+                        is_bot = dist_bot <= 260 and oh <= 300 and cx_off <= 200
+                        is_top = (
+                            oy <= 200
+                            and obj_bot <= 350
+                            and oh <= 250
+                            and cx_off <= 200
+                        )
+                        zone = "bot" if is_bot else ("top" if is_top else "pos")
+                        pgs_debug.append({**obj, "zone": zone})
+                    debugger.add_pgs_object_data(sub_image.index, pgs_debug)
 
             # ── Step 5: Add subtitle to debugger FIRST ──────────────
             full_raw = "\n".join(vl["text"] for vl in vl_lines if vl["text"])

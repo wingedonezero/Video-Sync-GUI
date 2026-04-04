@@ -14,10 +14,12 @@ Each parser extracts:
 """
 
 from .base import SubtitleImage, SubtitleImageParser
+from .pgs import PGSParser
 from .vobsub import VobSubParser
 
 __all__ = [
     "SubtitleImage",
     "SubtitleImageParser",
     "VobSubParser",
+    "PGSParser",
 ]

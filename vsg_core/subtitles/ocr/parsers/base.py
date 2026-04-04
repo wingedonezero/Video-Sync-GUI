@@ -46,6 +46,10 @@ class SubtitleImage:
     frame_height: int = 480
     is_forced: bool = False
     palette: list[tuple[int, int, int, int]] | None = None
+    # PGS composition object positions for object-level region classification.
+    # Each dict: {"pgs_x": int, "pgs_y": int, "obj_w": int, "obj_h": int}
+    # None for VobSub (uses line-level grouping instead).
+    pgs_objects: list[dict] | None = None
 
     def __post_init__(self):
         """Set width/height from image if not provided."""
@@ -219,7 +223,9 @@ class SubtitleImageParser(ABC):
 
                 return RawVobSubParser()
             return VobSubParser()
-        # Future: elif suffix == '.sup':
-        #     return PGSParser()
+        elif suffix == ".sup":
+            from .pgs import PGSParser
+
+            return PGSParser()
 
         return None

@@ -160,10 +160,7 @@ def run_ocr_unified(
             runner._log_message(f"[OCR] ERROR: IDX file not found: {input_path}")
             return None
     elif suffix == ".sup":
-        runner._log_message(
-            f"[OCR] WARNING: PGS (.sup) support not yet implemented. Skipping {sub_path.name}"
-        )
-        return None
+        input_path = sub_path  # .sup files are self-contained
     else:
         runner._log_message(f"[OCR] Skipping {sub_path.name}: Unsupported format.")
         return None
@@ -281,8 +278,7 @@ def run_preview_ocr(
             log(f"[Preview OCR] ERROR: IDX file not found: {input_path}")
             return None
     elif suffix == ".sup":
-        log("[Preview OCR] WARNING: PGS (.sup) support not yet implemented.")
-        return None
+        input_path = sub_path  # .sup files are self-contained
     else:
         log(f"[Preview OCR] ERROR: Unsupported format: {suffix}")
         return None
