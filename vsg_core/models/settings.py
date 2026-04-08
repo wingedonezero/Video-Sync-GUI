@@ -33,8 +33,6 @@ from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     CorrelationMethodStr,
     DelaySelectionModeStr,
     FilteringMethodStr,
-    FrameComparisonMethodStr,
-    FrameHashAlgorithmStr,
     OcrEngineStr,
     OcrOutputFormatStr,
     ResampleEngineStr,
@@ -50,7 +48,8 @@ from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     SubtitleSyncModeStr,
     SyncModeStr,
     SyncStabilityOutlierModeStr,
-    VideoVerifiedMethodStr,
+    VideoVerifiedBackendStr,
+    VideoVerifiedCrossCheckBackendStr,
 )
 
 # Sentinel for path defaults that need runtime resolution
@@ -168,37 +167,30 @@ class AppSettings(BaseModel):
     subtitle_target_fps: float = 0.0
 
     # =========================================================================
-    # Frame Matching Settings (used by video-verified classic mode)
+    # Video-Verified Sync Settings (sliding-window matcher)
     # =========================================================================
-    frame_hash_algorithm: FrameHashAlgorithmStr = "dhash"
-    frame_hash_size: int = 8
-    frame_hash_threshold: int = 5
-    frame_window_radius: int = 5
-    frame_comparison_method: FrameComparisonMethodStr = "hash"
-    frame_ssim_threshold: int = 10  # SSIM distance threshold (0-100, lower=stricter)
-
-    # =========================================================================
-    # Video-Verified Sync Settings
-    # =========================================================================
-    video_verified_zero_check_frames: int = 3
-    video_verified_min_quality_advantage: float = 0.1
-    video_verified_num_checkpoints: int = 9
-    video_verified_search_range_frames: int = 3
-    video_verified_sequence_length: int = 10
-    video_verified_use_pts_precision: bool = False
+    # Diagnostics (always available regardless of backend)
     video_verified_frame_audit: bool = False
     video_verified_visual_verify: bool = False
 
-    # Video-Verified: Matching Method
-    video_verified_method: VideoVerifiedMethodStr = "classic"
+    # Backend selection
+    video_verified_backend: VideoVerifiedBackendStr = "isc"
+    video_verified_cross_check_backend: VideoVerifiedCrossCheckBackendStr = "none"
+    video_verified_cross_check_tolerance_frames: int = 0  # 0 = strict match
 
-    # Video-Verified: Neural Feature Matching Settings
-    neural_window_seconds: int = 10
-    neural_slide_range_seconds: int = 5
-    neural_num_positions: int = 9
-    neural_batch_size: int = 32
-    neural_run_in_subprocess: bool = True
-    neural_debug_report: bool = False
+    # Sliding search geometry (shared across all backends)
+    video_verified_window_seconds: int = 10
+    video_verified_slide_range_seconds: int = 5
+    video_verified_num_positions: int = 9
+    video_verified_batch_size: int = 32
+
+    # Backend-specific tunables
+    video_verified_hash_size: int = 32  # pHash/dHash: 8/16/32/64 (1024-bit default)
+    video_verified_ssim_input_size: int = 256  # SSIM: 128/256/384/512
+
+    # Runtime
+    video_verified_run_in_subprocess: bool = True
+    video_verified_debug_report: bool = False
 
     # =========================================================================
     # Analysis/Correlation Settings

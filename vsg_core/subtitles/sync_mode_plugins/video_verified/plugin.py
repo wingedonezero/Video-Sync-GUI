@@ -2,8 +2,18 @@
 """
 VideoVerifiedSync plugin class.
 
-This is the SyncPlugin entry point that integrates with the subtitle pipeline.
-The actual frame matching algorithm lives in matcher.py.
+This is the SyncPlugin entry point that integrates with the subtitle
+pipeline. The actual sliding-window frame matching algorithm lives in
+``sliding_matcher.py`` and is backed by pluggable backends in
+``backends/``.
+
+Most jobs go through the two-phase path: ``preprocessing.py`` runs the
+matcher once per source and caches the result in
+``ctx.video_verified_sources``; the ``sync_dispatcher`` then reads that
+cache and calls ``_apply_cached_video_verified``. This ``apply()`` is
+the fallback path that runs the matcher inline when no cache entry
+exists (e.g., when the plugin is invoked outside the normal orchestrator
+flow).
 """
 
 from __future__ import annotations
@@ -13,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...sync_modes import SyncPlugin, register_sync_plugin
-from .matcher import calculate_video_verified_offset
+from .sliding_matcher import calculate_sliding_offset
 
 if TYPE_CHECKING:
     from ....models.settings import AppSettings
@@ -107,8 +117,9 @@ class VideoVerifiedSync(SyncPlugin):
         if subtitle_data.events:
             video_duration = max(e.end_ms for e in subtitle_data.events) + 60000
 
-        # Use the unified calculate function (handles everything)
-        final_offset_ms, details = calculate_video_verified_offset(
+        # Route through the sliding-window matcher with the configured backend.
+        backend_name = getattr(settings, "video_verified_backend", "isc")
+        final_offset_ms, details = calculate_sliding_offset(
             source_video=source_video,
             target_video=target_video,
             total_delay_ms=total_delay_ms,
@@ -117,6 +128,7 @@ class VideoVerifiedSync(SyncPlugin):
             runner=runner,
             temp_dir=temp_dir,
             video_duration_ms=video_duration,
+            backend_name=backend_name,
         )
 
         if final_offset_ms is None:

@@ -1517,6 +1517,29 @@ class SteppingTab(QWidget):
 
 
 class SubtitleSyncTab(QWidget):
+    """Subtitle sync settings tab.
+
+    Video-verified mode uses a single sliding-window matcher with six
+    pluggable backends (ISC, SSCD mixup, SSCD large, pHash, dHash, SSIM).
+    The backend dropdown selects the primary; an optional cross-check
+    dropdown runs a second backend in parallel for disagreement warnings.
+
+    Widget keys map 1:1 to ``AppSettings`` field names via
+    ``options_dialog/logic.py``, so adding a new field is a two-line
+    change here + one field in ``vsg_core/models/settings.py``.
+    """
+
+    # Backend dropdown entries — (value, display label).
+    # Must match vsg_core/models/types.py::VideoVerifiedBackendStr exactly.
+    _BACKEND_CHOICES: tuple[tuple[str, str], ...] = (
+        ("isc", "ISC ft_v107 (Neural, 52M params, 512² input)"),
+        ("sscd_mixup", "SSCD disc_mixup (Neural, 25M, faster)"),
+        ("sscd_large", "SSCD disc_large (Neural, 44M)"),
+        ("phash", "pHash GPU (Classical, sharpest)"),
+        ("dhash", "dHash GPU (Classical, fast)"),
+        ("ssim", "SSIM GPU (Classical, pairwise)"),
+    )
+
     def __init__(self):
         super().__init__()
         self.widgets: dict[str, QWidget] = {}
@@ -1574,196 +1597,211 @@ class SubtitleSyncTab(QWidget):
         main_layout.addWidget(time_group)
 
         # ===== VIDEO-VERIFIED SETTINGS =====
-        vv_group = QGroupBox("Video-Verified Settings")
+        vv_group = QGroupBox("Video-Verified Settings (Sliding-Window Matcher)")
         vv_layout = QFormLayout(vv_group)
 
-        # Method selection (classic vs neural)
-        self.widgets["video_verified_method"] = QComboBox()
-        self.widgets["video_verified_method"].addItem(
-            "Classic (phash/SSIM/MSE)", "classic"
-        )
-        self.widgets["video_verified_method"].addItem("Neural (ISC Features)", "neural")
-        self.widgets["video_verified_method"].setToolTip(
-            "Frame matching method:\n\n"
-            "• Classic: Uses perceptual hashing (phash), SSIM, and MSE\n"
-            "  to compare frames. Fast, works well for most content.\n\n"
-            "• Neural: Uses ISC (Image Similarity Challenge) deep features\n"
-            "  for near-duplicate frame detection. More accurate for\n"
-            "  challenging content. Requires GPU and ISC model download."
-        )
-        vv_layout.addRow("Matching Method:", self.widgets["video_verified_method"])
+        # --- Backend selection ---
 
-        # --- Classic-specific settings ---
-
-        self.widgets["frame_hash_algorithm"] = QComboBox()
-        self.widgets["frame_hash_algorithm"].addItems(
-            ["dhash", "phash", "average_hash", "whash"]
+        self.widgets["video_verified_backend"] = QComboBox()
+        for value, label in self._BACKEND_CHOICES:
+            self.widgets["video_verified_backend"].addItem(label, value)
+        self.widgets["video_verified_backend"].setToolTip(
+            "Primary feature-extraction backend for sliding-window matching.\n\n"
+            "Neural backends (weights required, downloaded via setup_gui.py):\n"
+            "  • ISC ft_v107       — original ISC competition winner, 52M params\n"
+            "  • SSCD disc_mixup   — Meta's ISC successor, 25M params, faster\n"
+            "  • SSCD disc_large   — larger SSCD variant, 44M params\n\n"
+            "Classical GPU backends (no weights, torch-only):\n"
+            "  • pHash  — perceptual hash via GPU DCT, sharpest peaks\n"
+            "  • dHash  — difference hash, fastest\n"
+            "  • SSIM   — Structural Similarity, pairwise scoring\n\n"
+            "All backends share the same sliding protocol — pick based on\n"
+            "speed/accuracy trade-off. ISC is the default and matches the\n"
+            "pre-refactor behavior."
         )
-        self.widgets["frame_hash_algorithm"].setToolTip(
-            "Hash algorithm for frame comparison:\n\n"
-            "• dhash (Default): Difference hash - fast, good for scene cuts\n"
-            "• phash: Perceptual hash - better for heavy re-encoding\n"
-            "• average_hash: Simple averaging - fastest but less accurate\n"
-            "• whash: Wavelet hash - most robust for processed videos"
-        )
-        vv_layout.addRow("Hash Algorithm:", self.widgets["frame_hash_algorithm"])
+        vv_layout.addRow("Backend:", self.widgets["video_verified_backend"])
 
-        self.widgets["frame_hash_size"] = QComboBox()
-        self.widgets["frame_hash_size"].addItem("4", 4)
-        self.widgets["frame_hash_size"].addItem("8", 8)
-        self.widgets["frame_hash_size"].addItem("16", 16)
-        self.widgets["frame_hash_size"].setCurrentIndex(1)  # Default 8
-        self.widgets["frame_hash_size"].setToolTip(
-            "Hash size (resolution):\n\n"
-            "• 4: Very tolerant (16-bit hash)\n"
-            "• 8 (Default): Balanced precision (64-bit hash)\n"
-            "• 16: Very precise (256-bit hash)"
+        self.widgets["video_verified_cross_check_backend"] = QComboBox()
+        self.widgets["video_verified_cross_check_backend"].addItem(
+            "None (single pass)", "none"
         )
-        vv_layout.addRow("Hash Size:", self.widgets["frame_hash_size"])
-
-        self.widgets["frame_hash_threshold"] = QSpinBox()
-        self.widgets["frame_hash_threshold"].setRange(0, 50)
-        self.widgets["frame_hash_threshold"].setValue(5)
-        self.widgets["frame_hash_threshold"].setToolTip(
-            "Max hamming distance for frame match:\n\n"
-            "• 0-3: Strict (near-perfect match required)\n"
-            "• 5 (Default): Balanced (minor compression differences OK)\n"
-            "• 10-15: Tolerant (heavy re-encoding OK)\n"
-            "• 20-30: Loose (different encodes, streaming vs BD)\n"
-            "• 30-50: Very loose (DVD, different regions)\n\n"
-            "If frame matching fails, check the log for suggested value."
-        )
-        vv_layout.addRow("Hash Threshold:", self.widgets["frame_hash_threshold"])
-
-        self.widgets["frame_window_radius"] = QSpinBox()
-        self.widgets["frame_window_radius"].setRange(1, 10)
-        self.widgets["frame_window_radius"].setValue(5)
-        self.widgets["frame_window_radius"].setToolTip(
-            "Sliding window radius (frames before/after):\n\n"
-            "Window size = 2*N+1 frames for temporal consistency.\n\n"
-            "• 3: 7-frame window (faster)\n"
-            "• 5 (Default): 11-frame window (recommended)\n"
-            "• 7+: 15+ frame window (more robust, slower)"
-        )
-        vv_layout.addRow("Window Radius:", self.widgets["frame_window_radius"])
-
-        self.widgets["frame_comparison_method"] = QComboBox()
-        self.widgets["frame_comparison_method"].addItems(["hash", "ssim", "mse"])
-        self.widgets["frame_comparison_method"].setToolTip(
-            "Frame comparison method:\n\n"
-            "• hash (Default): Perceptual hashing - fast, good for most cases\n"
-            "• ssim: Structural Similarity Index - more accurate, slightly slower\n"
-            "  Best for sources with color grading or encoding differences\n"
-            "• mse: Mean Squared Error - fast, works well for similar encodes\n\n"
-            "If hash gives inconsistent results, try SSIM for better accuracy."
-        )
-        vv_layout.addRow("Comparison Method:", self.widgets["frame_comparison_method"])
-
-        self.widgets["frame_ssim_threshold"] = QSpinBox()
-        self.widgets["frame_ssim_threshold"].setRange(1, 50)
-        self.widgets["frame_ssim_threshold"].setValue(10)
-        self.widgets["frame_ssim_threshold"].setToolTip(
-            "SSIM/MSE distance threshold for progressive/CFR content:\n\n"
-            "Only used when Comparison Method is 'ssim' or 'mse'.\n"
-            "Distance = (1 - SSIM) * 100, so lower = stricter.\n\n"
-            "• 5: Very strict (SSIM > 0.95)\n"
-            "• 10 (Default): Standard (SSIM > 0.90)\n"
-            "• 15: Tolerant (SSIM > 0.85)\n"
-            "• 25: Very tolerant (SSIM > 0.75)"
-        )
-        vv_layout.addRow("SSIM Threshold:", self.widgets["frame_ssim_threshold"])
-
-        self.widgets["video_verified_zero_check_frames"] = QSpinBox()
-        self.widgets["video_verified_zero_check_frames"].setRange(1, 10)
-        self.widgets["video_verified_zero_check_frames"].setValue(3)
-        self.widgets["video_verified_zero_check_frames"].setToolTip(
-            "Frame threshold for zero-check verification:\n\n"
-            "When audio correlation is less than N frames, verify against video.\n"
-            "This catches cases where audio may be slightly offset but subtitles\n"
-            "should actually be at 0ms.\n\n"
-            "• 2: Only verify very small offsets (~80ms at 24fps)\n"
-            "• 3 (Default): Verify ~125ms offsets (recommended)\n"
-            "• 5: Verify larger offsets (~200ms)"
+        for value, label in self._BACKEND_CHOICES:
+            self.widgets["video_verified_cross_check_backend"].addItem(label, value)
+        self.widgets["video_verified_cross_check_backend"].setToolTip(
+            "Optional cross-check backend — runs a second sliding pass with\n"
+            "a different backend after the primary finishes. The primary\n"
+            "result always wins; the cross-check only surfaces a warning in\n"
+            "the final audit when the two backends disagree by more than the\n"
+            "tolerance below.\n\n"
+            "Useful for paranoid runs on unusual content. Roughly doubles\n"
+            "the preprocessing time when enabled (less if one backend is a\n"
+            "fast classical one). Default: None."
         )
         vv_layout.addRow(
-            "Zero-Check Threshold:",
-            self.widgets["video_verified_zero_check_frames"],
+            "Cross-check Backend:",
+            self.widgets["video_verified_cross_check_backend"],
         )
 
-        self.widgets["video_verified_min_quality_advantage"] = QDoubleSpinBox()
-        self.widgets["video_verified_min_quality_advantage"].setRange(0.0, 0.5)
-        self.widgets["video_verified_min_quality_advantage"].setValue(0.1)
-        self.widgets["video_verified_min_quality_advantage"].setSingleStep(0.05)
-        self.widgets["video_verified_min_quality_advantage"].setToolTip(
-            "Quality advantage needed to prefer non-zero offset:\n\n"
-            "When comparing candidates, the non-zero offset must be better\n"
-            "by at least this margin to be chosen over 0ms.\n\n"
-            "• 0.0: Always pick best quality (may prefer tiny offsets)\n"
-            "• 0.1 (Default): Slight preference for 0ms when close\n"
-            "• 0.2: Strong preference for 0ms (only use non-zero if clearly better)"
+        self.widgets["video_verified_cross_check_tolerance_frames"] = QSpinBox()
+        self.widgets["video_verified_cross_check_tolerance_frames"].setRange(0, 30)
+        self.widgets["video_verified_cross_check_tolerance_frames"].setValue(0)
+        self.widgets["video_verified_cross_check_tolerance_frames"].setToolTip(
+            "Cross-check tolerance — how many frames of disagreement between\n"
+            "primary and secondary backends to accept before flagging as a\n"
+            "warning in the final audit.\n\n"
+            "• 0 (Default): Strict — any disagreement flags a warning\n"
+            "• 1: Allow ±1 frame (~42 ms at 24 fps — tolerates single-frame\n"
+            "     noise when backends pick adjacent frames in static scenes)\n"
+            "• 2+: More forgiving\n\n"
+            "Only active when Cross-check Backend is not 'None'."
         )
         vv_layout.addRow(
-            "Quality Margin:",
-            self.widgets["video_verified_min_quality_advantage"],
+            "Cross-check Tolerance:",
+            self.widgets["video_verified_cross_check_tolerance_frames"],
         )
 
-        self.widgets["video_verified_num_checkpoints"] = QSpinBox()
-        self.widgets["video_verified_num_checkpoints"].setRange(3, 10)
-        self.widgets["video_verified_num_checkpoints"].setValue(5)
-        self.widgets["video_verified_num_checkpoints"].setToolTip(
-            "Number of checkpoint times for frame matching:\n\n"
-            "More checkpoints = more accurate but slower.\n\n"
-            "• 3: Fast (good for short videos)\n"
-            "• 5 (Default): Balanced\n"
-            "• 7+: Very thorough"
-        )
-        vv_layout.addRow("Checkpoints:", self.widgets["video_verified_num_checkpoints"])
+        # --- Backend-specific settings (conditionally enabled) ---
 
-        self.widgets["video_verified_search_range_frames"] = QSpinBox()
-        self.widgets["video_verified_search_range_frames"].setRange(1, 10)
-        self.widgets["video_verified_search_range_frames"].setValue(3)
-        self.widgets["video_verified_search_range_frames"].setToolTip(
-            "Frame range to search around candidate offsets:\n\n"
-            "Generates candidates at each frame within ±N frames of correlation.\n\n"
-            "• 2: Tight search (fewer candidates)\n"
-            "• 3 (Default): Standard search\n"
-            "• 5: Wide search (more thorough)"
+        self.widgets["video_verified_hash_size"] = QComboBox()
+        for bits in (8, 16, 32, 64):
+            self.widgets["video_verified_hash_size"].addItem(
+                f"{bits} ({bits * bits}-bit)", bits
+            )
+        self.widgets["video_verified_hash_size"].setCurrentIndex(2)  # default 32
+        self.widgets["video_verified_hash_size"].setToolTip(
+            "Hash size for pHash and dHash backends — controls the size of\n"
+            "the binary descriptor per frame. Larger = more discriminating,\n"
+            "slightly slower.\n\n"
+            "• 8  (64-bit):   Tiny descriptor, classic pHash default\n"
+            "• 16 (256-bit):  Good discrimination, fast\n"
+            "• 32 (1024-bit): Default — sharpest peaks in our test runs\n"
+            "• 64 (4096-bit): Diminishing returns, more GPU work\n\n"
+            "Only active when Backend (or Cross-check) is pHash or dHash."
         )
         vv_layout.addRow(
-            "Search Range:", self.widgets["video_verified_search_range_frames"]
+            "Hash Size (pHash/dHash):",
+            self.widgets["video_verified_hash_size"],
         )
 
-        self.widgets["video_verified_sequence_length"] = QSpinBox()
-        self.widgets["video_verified_sequence_length"].setRange(5, 30)
-        self.widgets["video_verified_sequence_length"].setValue(10)
-        self.widgets["video_verified_sequence_length"].setToolTip(
-            "Number of consecutive frames to verify at each checkpoint:\n\n"
-            "After finding a candidate offset, verify that N consecutive frames\n"
-            "all match. This prevents false positives from single-frame matches.\n\n"
-            "• 5: Fast, less strict\n"
-            "• 10 (Default): Good balance of speed and accuracy\n"
-            "• 20+: Very strict verification"
+        self.widgets["video_verified_ssim_input_size"] = QComboBox()
+        for size in (128, 256, 384, 512):
+            self.widgets["video_verified_ssim_input_size"].addItem(
+                f"{size}×{size}", size
+            )
+        self.widgets["video_verified_ssim_input_size"].setCurrentIndex(1)  # default 256
+        self.widgets["video_verified_ssim_input_size"].setToolTip(
+            "Input resize size for the SSIM backend — frames are downsampled\n"
+            "to size×size before pairwise SSIM scoring. Larger = sharper\n"
+            "peaks but more VRAM and slower per position.\n\n"
+            "• 128×128: Fastest, lowest VRAM (~16 MB per position)\n"
+            "• 256×256: Default — good balance\n"
+            "• 384×384: Sharper peaks (~140 MB per position)\n"
+            "• 512×512: Sharpest (~250 MB per position, 8 GB VRAM minimum)\n\n"
+            "Only active when Backend (or Cross-check) is SSIM."
         )
         vv_layout.addRow(
-            "Sequence Length:", self.widgets["video_verified_sequence_length"]
+            "SSIM Input Size:",
+            self.widgets["video_verified_ssim_input_size"],
         )
 
-        self.widgets["video_verified_use_pts_precision"] = QCheckBox()
-        self.widgets["video_verified_use_pts_precision"].setChecked(False)
-        self.widgets["video_verified_use_pts_precision"].setToolTip(
-            "Use PTS (Presentation Timestamps) for sub-frame precision:\n\n"
-            "OFF (Default): Use frame-based offset (frame_offset * frame_duration)\n"
-            "  - Simple and reliable when frames match perfectly\n"
-            "  - Avoids container timing noise from muxing quirks\n\n"
-            "ON: Use actual PTS timestamps from container\n"
-            "  - May help with VFR (variable frame rate) content\n"
-            "  - Can introduce noise from container start time differences"
+        # --- Sliding geometry (shared across all backends) ---
+
+        self.widgets["video_verified_window_seconds"] = QSpinBox()
+        self.widgets["video_verified_window_seconds"].setRange(5, 30)
+        self.widgets["video_verified_window_seconds"].setValue(10)
+        self.widgets["video_verified_window_seconds"].setToolTip(
+            "Duration of the source frame sequence extracted at each position\n"
+            "(in seconds). Longer windows capture more frames for matching\n"
+            "but take longer.\n\n"
+            "• 5: Fast, fewer frames per position\n"
+            "• 10 (Default): Good balance of accuracy and speed\n"
+            "• 20+: Very thorough, slower extraction"
         )
         vv_layout.addRow(
-            "Use PTS Precision:", self.widgets["video_verified_use_pts_precision"]
+            "Window Duration (s):",
+            self.widgets["video_verified_window_seconds"],
         )
 
-        # --- Shared video-verified diagnostics (both classic and neural) ---
+        self.widgets["video_verified_slide_range_seconds"] = QSpinBox()
+        self.widgets["video_verified_slide_range_seconds"].setRange(1, 15)
+        self.widgets["video_verified_slide_range_seconds"].setValue(5)
+        self.widgets["video_verified_slide_range_seconds"].setToolTip(
+            "How far to slide the target window around the expected position\n"
+            "(in seconds). The target window slides ±N seconds around the\n"
+            "audio correlation offset to find the best visual match.\n\n"
+            "• 2: Tight search (audio correlation is very close)\n"
+            "• 5 (Default): Standard range\n"
+            "• 10+: Wide search (audio correlation may be far off)"
+        )
+        vv_layout.addRow(
+            "Slide Range (s):",
+            self.widgets["video_verified_slide_range_seconds"],
+        )
+
+        self.widgets["video_verified_num_positions"] = QSpinBox()
+        self.widgets["video_verified_num_positions"].setRange(3, 15)
+        self.widgets["video_verified_num_positions"].setValue(9)
+        self.widgets["video_verified_num_positions"].setToolTip(
+            "Number of checkpoint positions across the video:\n\n"
+            "Positions are spaced evenly from 10% to 90% of video duration.\n"
+            "Each position runs an independent sliding search, then the\n"
+            "matcher votes for a consensus offset.\n\n"
+            "• 5: Fast, fewer consensus votes\n"
+            "• 9 (Default): Strong consensus\n"
+            "• 13+: Very thorough, diminishing returns"
+        )
+        vv_layout.addRow(
+            "Num Positions:", self.widgets["video_verified_num_positions"]
+        )
+
+        self.widgets["video_verified_batch_size"] = QSpinBox()
+        self.widgets["video_verified_batch_size"].setRange(1, 128)
+        self.widgets["video_verified_batch_size"].setValue(32)
+        self.widgets["video_verified_batch_size"].setToolTip(
+            "GPU batch size for feature extraction:\n\n"
+            "Higher values use more GPU memory but extract faster. Applies\n"
+            "to every backend (neural and classical).\n\n"
+            "• 8: Low VRAM GPUs (2-4 GB)\n"
+            "• 32 (Default): Standard GPUs (6+ GB)\n"
+            "• 64+: High VRAM GPUs (12+ GB)"
+        )
+        vv_layout.addRow(
+            "GPU Batch Size:", self.widgets["video_verified_batch_size"]
+        )
+
+        # --- Runtime settings ---
+
+        self.widgets["video_verified_run_in_subprocess"] = QCheckBox()
+        self.widgets["video_verified_run_in_subprocess"].setChecked(True)
+        self.widgets["video_verified_run_in_subprocess"].setToolTip(
+            "Run neural backends in a separate subprocess:\n\n"
+            "ON (Default): Isolates GPU memory from the main application.\n"
+            "  Prevents memory conflicts with other GPU operations.\n\n"
+            "OFF: Run in the main process (faster startup, shared GPU memory).\n\n"
+            "Note: classical GPU backends (pHash, dHash, SSIM) always run\n"
+            "in-process regardless of this setting — their startup cost is\n"
+            "negligible and there's no large VRAM model to isolate."
+        )
+        vv_layout.addRow(
+            "Run in Subprocess:",
+            self.widgets["video_verified_run_in_subprocess"],
+        )
+
+        self.widgets["video_verified_debug_report"] = QCheckBox()
+        self.widgets["video_verified_debug_report"].setChecked(False)
+        self.widgets["video_verified_debug_report"].setToolTip(
+            "Write detailed sliding-window matching debug report:\n\n"
+            "When enabled, writes a per-source report with full score\n"
+            "landscapes, per-position results, and timing data to the\n"
+            "debug/sliding_verify/ directory. File name includes the\n"
+            "backend name so primary and cross-check don't collide.\n\n"
+            "Useful for diagnosing matching issues or validating results."
+        )
+        vv_layout.addRow(
+            "Debug Report:", self.widgets["video_verified_debug_report"]
+        )
+
+        # --- Diagnostics (unchanged from legacy) ---
 
         self.widgets["video_verified_frame_audit"] = QCheckBox()
         self.widgets["video_verified_frame_audit"].setChecked(False)
@@ -1805,79 +1843,6 @@ class SubtitleSyncTab(QWidget):
             "Visual Frame Verify:", self.widgets["video_verified_visual_verify"]
         )
 
-        # --- Neural-specific settings ---
-
-        self.widgets["neural_window_seconds"] = QSpinBox()
-        self.widgets["neural_window_seconds"].setRange(5, 30)
-        self.widgets["neural_window_seconds"].setValue(10)
-        self.widgets["neural_window_seconds"].setToolTip(
-            "Duration of frame window to extract at each checkpoint (seconds):\n\n"
-            "Longer windows capture more frames for comparison but take longer.\n\n"
-            "• 5: Fast, fewer frames per position\n"
-            "• 10 (Default): Good balance of accuracy and speed\n"
-            "• 20+: Very thorough, slower extraction"
-        )
-        vv_layout.addRow("Window Duration (s):", self.widgets["neural_window_seconds"])
-
-        self.widgets["neural_slide_range_seconds"] = QSpinBox()
-        self.widgets["neural_slide_range_seconds"].setRange(1, 15)
-        self.widgets["neural_slide_range_seconds"].setValue(5)
-        self.widgets["neural_slide_range_seconds"].setToolTip(
-            "How far to slide target window around expected position (seconds):\n\n"
-            "The target window slides +/-N seconds around the audio correlation\n"
-            "offset to find the best visual match.\n\n"
-            "• 2: Tight search (audio correlation is very close)\n"
-            "• 5 (Default): Standard range\n"
-            "• 10+: Wide search (audio correlation may be far off)"
-        )
-        vv_layout.addRow("Slide Range (s):", self.widgets["neural_slide_range_seconds"])
-
-        self.widgets["neural_num_positions"] = QSpinBox()
-        self.widgets["neural_num_positions"].setRange(3, 15)
-        self.widgets["neural_num_positions"].setValue(9)
-        self.widgets["neural_num_positions"].setToolTip(
-            "Number of checkpoint positions across the video:\n\n"
-            "Positions are spaced evenly from 10% to 90% of video duration.\n"
-            "Each position extracts and compares frames independently.\n\n"
-            "• 5: Fast, fewer consensus votes\n"
-            "• 9 (Default): Strong consensus\n"
-            "• 13+: Very thorough, diminishing returns"
-        )
-        vv_layout.addRow("Num Positions:", self.widgets["neural_num_positions"])
-
-        self.widgets["neural_batch_size"] = QSpinBox()
-        self.widgets["neural_batch_size"].setRange(1, 128)
-        self.widgets["neural_batch_size"].setValue(32)
-        self.widgets["neural_batch_size"].setToolTip(
-            "GPU batch size for ISC feature extraction:\n\n"
-            "Higher values use more GPU memory but extract faster.\n\n"
-            "• 8: Low VRAM GPUs (2-4 GB)\n"
-            "• 32 (Default): Standard GPUs (6+ GB)\n"
-            "• 64+: High VRAM GPUs (12+ GB)"
-        )
-        vv_layout.addRow("GPU Batch Size:", self.widgets["neural_batch_size"])
-
-        self.widgets["neural_run_in_subprocess"] = QCheckBox()
-        self.widgets["neural_run_in_subprocess"].setChecked(True)
-        self.widgets["neural_run_in_subprocess"].setToolTip(
-            "Run ISC model in a separate subprocess:\n\n"
-            "ON (Default): Isolates GPU memory from the main application.\n"
-            "  Prevents memory conflicts with other GPU operations.\n\n"
-            "OFF: Run in the main process (faster startup, shared GPU memory)."
-        )
-        vv_layout.addRow("Run in Subprocess:", self.widgets["neural_run_in_subprocess"])
-
-        self.widgets["neural_debug_report"] = QCheckBox()
-        self.widgets["neural_debug_report"].setChecked(False)
-        self.widgets["neural_debug_report"].setToolTip(
-            "Write detailed neural matching debug report:\n\n"
-            "When enabled, writes a JSON report with full score landscapes,\n"
-            "per-position results, feature statistics, and timing data\n"
-            "to the debug/neural_verify/ directory.\n\n"
-            "Useful for diagnosing matching issues or validating results."
-        )
-        vv_layout.addRow("Neural Debug Report:", self.widgets["neural_debug_report"])
-
         main_layout.addWidget(vv_group)
         main_layout.addStretch(1)
 
@@ -1885,7 +1850,12 @@ class SubtitleSyncTab(QWidget):
         self.widgets["subtitle_sync_mode"].currentTextChanged.connect(
             self._update_mode_visibility
         )
-        self.widgets["video_verified_method"].currentIndexChanged.connect(
+        self.widgets["video_verified_backend"].currentIndexChanged.connect(
+            lambda _: self._update_mode_visibility(
+                self.widgets["subtitle_sync_mode"].currentText()
+            )
+        )
+        self.widgets["video_verified_cross_check_backend"].currentIndexChanged.connect(
             lambda _: self._update_mode_visibility(
                 self.widgets["subtitle_sync_mode"].currentText()
             )
@@ -1893,51 +1863,60 @@ class SubtitleSyncTab(QWidget):
         self._update_mode_visibility(self.widgets["subtitle_sync_mode"].currentText())
 
     def _update_mode_visibility(self, text: str):
-        """Show/hide settings based on selected sync mode."""
+        """Show/hide (enable/disable) settings based on selected sync mode + backend.
+
+        Fields that apply to every backend are enabled whenever
+        video-verified mode is selected. Backend-specific fields
+        (hash_size for pHash/dHash, ssim_input_size for SSIM, cross-check
+        tolerance when cross-check is active) are conditionally enabled
+        so the user only sees relevant knobs light up.
+        """
         is_time_based = text == "time-based"
         is_video_verified = text == "video-verified"
 
-        # Determine which video-verified method is selected
-        method = self.widgets["video_verified_method"].currentData() or "classic"
-        is_classic = is_video_verified and method == "classic"
-        is_neural = is_video_verified and method == "neural"
+        # Look up the currently-selected backend + cross-check backend.
+        backend = (
+            self.widgets["video_verified_backend"].currentData() or "isc"
+        )
+        cross = (
+            self.widgets["video_verified_cross_check_backend"].currentData()
+            or "none"
+        )
 
         # Time-based specific
         self.widgets["time_based_use_raw_values"].setEnabled(is_time_based)
 
-        # Video-verified method selector
-        self.widgets["video_verified_method"].setEnabled(is_video_verified)
+        # Shared video-verified toggles (always enabled in video-verified mode)
+        for key in (
+            "video_verified_backend",
+            "video_verified_cross_check_backend",
+            "video_verified_window_seconds",
+            "video_verified_slide_range_seconds",
+            "video_verified_num_positions",
+            "video_verified_batch_size",
+            "video_verified_run_in_subprocess",
+            "video_verified_debug_report",
+            "video_verified_frame_audit",
+            "video_verified_visual_verify",
+        ):
+            self.widgets[key].setEnabled(is_video_verified)
 
-        # Classic frame matching settings (only used by classic method)
-        for key in [
-            "frame_hash_algorithm",
-            "frame_hash_size",
-            "frame_hash_threshold",
-            "frame_window_radius",
-            "frame_comparison_method",
-            "frame_ssim_threshold",
-        ]:
-            self.widgets[key].setEnabled(is_classic)
+        # Cross-check tolerance — only meaningful when cross-check is active.
+        self.widgets[
+            "video_verified_cross_check_tolerance_frames"
+        ].setEnabled(is_video_verified and cross != "none")
 
-        # Video-verified classic-specific settings
-        self.widgets["video_verified_zero_check_frames"].setEnabled(is_classic)
-        self.widgets["video_verified_min_quality_advantage"].setEnabled(is_classic)
-        self.widgets["video_verified_num_checkpoints"].setEnabled(is_classic)
-        self.widgets["video_verified_search_range_frames"].setEnabled(is_classic)
-        self.widgets["video_verified_sequence_length"].setEnabled(is_classic)
-        self.widgets["video_verified_use_pts_precision"].setEnabled(is_classic)
+        # Hash size — only relevant when primary OR cross-check uses a hash backend.
+        needs_hash = backend in ("phash", "dhash") or cross in ("phash", "dhash")
+        self.widgets["video_verified_hash_size"].setEnabled(
+            is_video_verified and needs_hash
+        )
 
-        # Shared video-verified settings (work with both classic and neural)
-        self.widgets["video_verified_frame_audit"].setEnabled(is_video_verified)
-        self.widgets["video_verified_visual_verify"].setEnabled(is_video_verified)
-
-        # Video-verified neural-specific settings
-        self.widgets["neural_window_seconds"].setEnabled(is_neural)
-        self.widgets["neural_slide_range_seconds"].setEnabled(is_neural)
-        self.widgets["neural_num_positions"].setEnabled(is_neural)
-        self.widgets["neural_batch_size"].setEnabled(is_neural)
-        self.widgets["neural_run_in_subprocess"].setEnabled(is_neural)
-        self.widgets["neural_debug_report"].setEnabled(is_neural)
+        # SSIM input size — only relevant when primary OR cross-check uses SSIM.
+        needs_ssim = backend == "ssim" or cross == "ssim"
+        self.widgets["video_verified_ssim_input_size"].setEnabled(
+            is_video_verified and needs_ssim
+        )
 
 
 class ChaptersTab(QWidget):

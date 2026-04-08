@@ -37,17 +37,33 @@ SubtitleRoundingStr = Literal["floor", "round", "ceil"]
 SyncModeStr = Literal["positive_only", "allow_negative"]
 
 # =========================================================================
-# Frame Matching Settings
+# Video-Verified Sliding-Window Matcher
 # =========================================================================
 
-# Hash algorithm for frame comparison
-FrameHashAlgorithmStr = Literal["dhash", "phash", "average_hash", "whash"]
+# Primary backend selection for video-verified subtitle sync.
+# Maps 1:1 to backend registry keys in
+# vsg_core/subtitles/sync_mode_plugins/video_verified/backends/__init__.py.
+VideoVerifiedBackendStr = Literal[
+    "isc",
+    "sscd_mixup",
+    "sscd_large",
+    "phash",
+    "dhash",
+    "ssim",
+]
 
-# Frame comparison method
-FrameComparisonMethodStr = Literal["hash", "ssim", "mse"]
-
-# Video-verified matching method
-VideoVerifiedMethodStr = Literal["classic", "neural"]
+# Cross-check backend — same set as VideoVerifiedBackendStr plus a "none" sentinel.
+# Two separate Literals (rather than Optional[...]) to keep JSON serialization
+# string-only and make the UI dropdown trivially enumerable.
+VideoVerifiedCrossCheckBackendStr = Literal[
+    "none",
+    "isc",
+    "sscd_mixup",
+    "sscd_large",
+    "phash",
+    "dhash",
+    "ssim",
+]
 
 # =========================================================================
 # Audio Analysis Settings

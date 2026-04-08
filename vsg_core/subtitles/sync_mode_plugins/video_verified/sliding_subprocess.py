@@ -1,16 +1,24 @@
-# vsg_core/subtitles/sync_mode_plugins/video_verified/neural_subprocess.py
+# vsg_core/subtitles/sync_mode_plugins/video_verified/sliding_subprocess.py
 """
-Subprocess worker for neural feature matching.
+Subprocess worker for sliding-window video-verified feature matching.
 
-Isolates the ISC model + GPU allocation in a separate process to avoid
-memory conflicts with the main app. Follows the same pattern as
-vsg_core/subtitles/ocr/unified_subprocess.py.
+Isolates the backend model + GPU allocation in a separate process to
+avoid memory conflicts with the main app. Follows the same pattern as
+``vsg_core/subtitles/ocr/unified_subprocess.py``. Works for any backend
+registered in ``backends/__init__.py`` — neural (ISC, SSCD mixup, SSCD
+large) or classical GPU (pHash, dHash, SSIM). Backend choice is passed
+via the ``--backend`` CLI arg.
 
 Communication protocol:
-  - Config: JSON file with settings + video paths
+  - Config: JSON file with serialized AppSettings + video paths
   - Logs: printed to stdout (forwarded by parent)
-  - Result: JSON prefixed with __VSG_NEURAL_JSON__ on stdout
-  - Output: JSON file with detailed results
+  - Result: JSON prefixed with ``__VSG_SLIDING_JSON__`` on stdout
+  - Output: JSON file with detailed results (written by this process)
+
+The parent process (``preprocessing.py::_run_sliding``) launches this
+module with ``python -m vsg_core.subtitles.sync_mode_plugins.video_verified.sliding_subprocess``
+and parses the ``__VSG_SLIDING_JSON__`` marker from stdout to collect
+the result payload.
 """
 
 from __future__ import annotations
@@ -21,7 +29,7 @@ import sys
 from pathlib import Path
 
 
-JSON_PREFIX = "__VSG_NEURAL_JSON__ "
+JSON_PREFIX = "__VSG_SLIDING_JSON__ "
 
 
 class _SubprocessRunner:
@@ -33,7 +41,7 @@ class _SubprocessRunner:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run neural feature matching in a subprocess."
+        description="Run sliding-window feature matching in a subprocess."
     )
     parser.add_argument(
         "--source-video", required=True, help="Path to source video file"
@@ -77,6 +85,15 @@ def main() -> int:
         default="",
         help="Source identifier (e.g., 'Source 2') for debug report naming",
     )
+    parser.add_argument(
+        "--backend",
+        required=False,
+        default="isc",
+        help=(
+            "Sliding backend name (matches VideoVerifiedBackendStr: "
+            "isc, sscd_mixup, sscd_large, phash, dhash, ssim). Default: isc."
+        ),
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config_json)
@@ -99,11 +116,11 @@ def main() -> int:
 
     runner = _SubprocessRunner()
 
-    # Run neural matching
+    # Run sliding-window matching with the requested backend
     try:
-        from .neural_matcher import calculate_neural_verified_offset
+        from .sliding_matcher import calculate_sliding_offset
 
-        final_offset_ms, details = calculate_neural_verified_offset(
+        final_offset_ms, details = calculate_sliding_offset(
             source_video=args.source_video,
             target_video=args.target_video,
             total_delay_ms=args.total_delay_ms,
@@ -114,9 +131,10 @@ def main() -> int:
             video_duration_ms=video_duration_ms,
             debug_output_dir=debug_output_dir,
             source_key=args.source_key,
+            backend_name=args.backend,
         )
     except Exception as exc:
-        payload = {"success": False, "error": f"Neural matching failed: {exc}"}
+        payload = {"success": False, "error": f"Sliding matching failed: {exc}"}
         print(f"{JSON_PREFIX}{json.dumps(payload)}", flush=True)
         return 1
 

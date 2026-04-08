@@ -71,13 +71,27 @@ AUDIO_SEP_CPU_REPO = (
     "git+https://github.com/nomadkaraoke/python-audio-separator.git"
 )
 
-# ISC model (neural frame matching)
+# ISC model (neural frame matching — first sliding-window backend)
 ISC_DOWNLOAD_URL = (
     "https://github.com/lyakaap/ISC21-Descriptor-Track-1st/"
     "releases/download/v1.0.1/isc_ft_v107.pth.tar"
 )
 ISC_WEIGHTS_FILENAME = "isc_ft_v107_weights.pt"
 ISC_MODEL_DIR = PROJECT_DIR / "models" / "isc"
+
+# SSCD models (Meta's ISC successor — sliding-window backends 2 and 3)
+# TorchScript files with the full architecture baked in, no timm needed.
+SSCD_MIXUP_URL = (
+    "https://dl.fbaipublicfiles.com/sscd-copy-detection/"
+    "sscd_disc_mixup.torchscript.pt"
+)
+SSCD_LARGE_URL = (
+    "https://dl.fbaipublicfiles.com/sscd-copy-detection/"
+    "sscd_disc_large.torchscript.pt"
+)
+SSCD_MIXUP_FILENAME = "sscd_disc_mixup.torchscript.pt"
+SSCD_LARGE_FILENAME = "sscd_disc_large.torchscript.pt"
+SSCD_MODEL_DIR = PROJECT_DIR / "models" / "sscd"
 
 # OCR VLM models
 OCR_MODELS_DIR = PROJECT_DIR / "models" / "ocr"
@@ -949,6 +963,86 @@ print(f"OK Saved stripped weights: {{weights_path.name}} ({{size_mb:.0f}} MB, {{
             label="Downloading ISC weights...",
         )
 
+    def download_sscd_models(self) -> None:
+        """Download both SSCD TorchScript weights (disc_mixup + disc_large).
+
+        Meta's SSCD models are distributed as self-contained TorchScript
+        files (no architecture reconstruction needed — just torch.jit.load).
+        This method fetches both the ``disc_mixup`` (~98 MB) and
+        ``disc_large`` (~178 MB) variants into ``models/sscd/`` alongside
+        the existing ``models/isc/`` directory, skipping files that are
+        already present so re-running the button is a no-op.
+
+        Combined download: ~276 MB. No stripping or re-save needed.
+        """
+        self.window.clear_log()
+
+        mixup_path = SSCD_MODEL_DIR / SSCD_MIXUP_FILENAME
+        large_path = SSCD_MODEL_DIR / SSCD_LARGE_FILENAME
+
+        # Report the current status of both files upfront
+        already_present: list[str] = []
+        need_download: list[tuple[str, str, Path]] = []
+        if mixup_path.is_file():
+            size_mb = mixup_path.stat().st_size / 1024 / 1024
+            already_present.append(
+                f"disc_mixup ({size_mb:.0f} MB) at {mixup_path}"
+            )
+        else:
+            need_download.append(("disc_mixup", SSCD_MIXUP_URL, mixup_path))
+        if large_path.is_file():
+            size_mb = large_path.stat().st_size / 1024 / 1024
+            already_present.append(
+                f"disc_large ({size_mb:.0f} MB) at {large_path}"
+            )
+        else:
+            need_download.append(("disc_large", SSCD_LARGE_URL, large_path))
+
+        for line in already_present:
+            self.window.log_success(f"SSCD {line} — already downloaded, skipping")
+
+        if not need_download:
+            self.window.log_success(
+                "All SSCD weights already downloaded — nothing to do."
+            )
+            return
+
+        self.window.log_info(
+            f"Downloading {len(need_download)} SSCD model(s) "
+            f"(~{'98 MB' if len(need_download) == 1 and need_download[0][0] == 'disc_mixup' else '178 MB' if len(need_download) == 1 else '276 MB'} total)..."
+        )
+        for name, url, _ in need_download:
+            self.window.log_info(f"  {name}: {url}")
+        self.window.log_info(f"  Destination: {SSCD_MODEL_DIR}")
+
+        # Download via torch.hub.download_url_to_file — same helper the
+        # ISC path uses under the hood, handles resume/retry and progress.
+        downloads_repr = "[" + ", ".join(
+            f"({n!r}, {u!r}, {str(p)!r})" for n, u, p in need_download
+        ) + "]"
+        script = f"""
+import sys
+from pathlib import Path
+import torch
+
+model_dir = Path({str(SSCD_MODEL_DIR)!r})
+model_dir.mkdir(parents=True, exist_ok=True)
+
+downloads = {downloads_repr}
+
+for name, url, dst_str in downloads:
+    dst = Path(dst_str)
+    print(f"Downloading SSCD {{name}} from Meta CDN...")
+    # download_url_to_file writes atomically to a .partial and renames on success
+    torch.hub.download_url_to_file(url, str(dst), progress=True)
+    size_mb = dst.stat().st_size / 1024 / 1024
+    print(f"OK Saved SSCD {{name}}: {{dst.name}} ({{size_mb:.0f}} MB)")
+"""
+        self._run_subprocess(
+            [str(VENV_PYTHON), "-c", script],
+            label="Downloading SSCD weights...",
+        )
+
     def download_ocr_vlm_model(self, model_name: str) -> None:
         """Download an OCR VLM model from HuggingFace."""
         self.window.clear_log()
@@ -1335,7 +1429,11 @@ class SetupWindow(QMainWindow):
             sidebar_layout,
             "Models",
             [
-                ("ISC Weights (Neural Match)", self.controller.download_isc_model),
+                ("ISC Weights (Sliding Backend)", self.controller.download_isc_model),
+                (
+                    "SSCD Weights (Sliding Backend)",
+                    self.controller.download_sscd_models,
+                ),
                 ("EasyOCR Models", self.controller.download_easyocr_models),
                 (
                     "LFM2-VL-450M (Fast VLM OCR)",
