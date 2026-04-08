@@ -122,8 +122,8 @@ def calculate_neural_verified_offset(
 
     # Open clips
     try:
-        src_yuv, src_rgb = _open_clip(source_video, vs, temp_dir)
-        tgt_yuv, tgt_rgb = _open_clip(target_video, vs, temp_dir)
+        src_yuv, src_rgb, src_start_pts_s = _open_clip(source_video, vs, temp_dir)
+        tgt_yuv, tgt_rgb, tgt_start_pts_s = _open_clip(target_video, vs, temp_dir)
     except Exception as e:
         log(f"[NeuralVerified] Failed to open videos: {e}")
         return total_delay_ms, {
@@ -140,12 +140,61 @@ def calculate_neural_verified_offset(
 
     log(
         f"[NeuralVerified] Source: {src_yuv.num_frames}f @ {src_fps:.3f}fps, "
-        f"{src_yuv.width}x{src_yuv.height}"
+        f"{src_yuv.width}x{src_yuv.height}  start_pts={src_start_pts_s:+.6f}s"
     )
     log(
         f"[NeuralVerified] Target: {tgt_yuv.num_frames}f @ {tgt_fps:.3f}fps, "
-        f"{tgt_yuv.width}x{tgt_yuv.height}"
+        f"{tgt_yuv.width}x{tgt_yuv.height}  start_pts={tgt_start_pts_s:+.6f}s"
     )
+
+    # ─── PTS OFFSET CORRECTION ───────────────────────────────────
+    # If source and target have different container PTS start times,
+    # their frame-index spaces are shifted by a constant whole-frame
+    # amount relative to each other. The neural matcher compares frames
+    # by index, so an N-frame PTS label mismatch looks identical to an
+    # N-frame content shift — even though the wall-clock-aligned subs
+    # need no shift at all.
+    #
+    # We pre-compute the delta in frames (rounded to nearest whole frame
+    # because the matcher is frame-discrete), shift the target window
+    # center by that amount so the sliding search is centered on wall-
+    # clock equality, and subtract the same amount from the final
+    # reported offset. The sub shifter therefore always receives a
+    # WALL-CLOCK shift, regardless of either file's PTS origin.
+    #
+    # For the common case (both files start_pts=0) the delta is zero
+    # and every subsequent line executes identically to the pre-patch
+    # code. No regression is possible when delta==0.
+    pts_delta_s = src_start_pts_s - tgt_start_pts_s
+    pts_delta_frames = int(round(pts_delta_s * src_fps))
+    pts_correction_applied = pts_delta_frames != 0
+
+    if pts_correction_applied:
+        log("[NeuralVerified] ─────────────────────────────────────")
+        log("[NeuralVerified] ⚠ PTS DELTA DETECTED — applying correction")
+        log(f"[NeuralVerified]   Source start_pts: {src_start_pts_s:+.6f}s")
+        log(f"[NeuralVerified]   Target start_pts: {tgt_start_pts_s:+.6f}s")
+        log(
+            f"[NeuralVerified]   Delta:            {pts_delta_s:+.6f}s "
+            f"= {pts_delta_frames:+d} frames"
+        )
+        log(
+            f"[NeuralVerified]   Action: target window center shifted by "
+            f"{pts_delta_frames:+d} frames so search is centered on wall-clock equality"
+        )
+        log(
+            "[NeuralVerified]   Cause:  source has non-zero PTS origin "
+            "(container metadata preserves a wall-clock offset)"
+        )
+        log(
+            "[NeuralVerified]   Output: matcher will return a WALL-CLOCK offset, "
+            "which is what sub timing uses"
+        )
+        log(
+            "[NeuralVerified]   REVIEW: this source will be flagged in the final "
+            "audit — please verify subs manually in the output"
+        )
+        log("[NeuralVerified] ─────────────────────────────────────")
 
     # Check FPS compatibility — for now we only handle same-fps content
     fps_ratio = max(src_fps, tgt_fps) / min(src_fps, tgt_fps)
@@ -215,8 +264,13 @@ def calculate_neural_verified_offset(
         src_end = min(src_start + src_n_frames, src_rgb.num_frames)
         src_frames = list(range(src_start, src_end))
 
-        # Target frame range (padded for sliding)
-        tgt_center = src_start  # Start from same position
+        # Target frame range (padded for sliding).
+        # tgt_center is shifted by pts_delta_frames so that slide_pos == slide_pad
+        # corresponds to WALL-CLOCK equality (not frame-index equality) between
+        # src_frames[0] and tgt_frames[slide_pad]. For files where both
+        # start_pts values are 0 this adds 0 and is identical to the
+        # pre-patch version.
+        tgt_center = src_start + pts_delta_frames
         tgt_window_start = max(0, tgt_center - slide_pad)
         tgt_window_end = min(tgt_rgb.num_frames, tgt_center + src_n_frames + slide_pad)
         tgt_frames = list(range(tgt_window_start, tgt_window_end))
@@ -249,7 +303,14 @@ def calculate_neural_verified_offset(
         # Positive = Source 2 subs shift forward, Negative = shift backward
         # (tgt_pos - src_pos): if Source 2 content is at frame 4917 but matches
         # Source 1 at frame 4941, offset = +24 = "shift Source 2 forward by 24f"
-        offset_frames = (tgt_window_start + best_pos) - src_start
+        #
+        # raw_offset_frames is the frame-index offset the matcher found. Some
+        # (or all) of this may be due to the PTS label mismatch already
+        # absorbed into tgt_center above. We subtract pts_delta_frames so
+        # that offset_frames represents only the *additional* wall-clock
+        # shift (= what the sub shifter should actually apply).
+        raw_offset_frames = (tgt_window_start + best_pos) - src_start
+        offset_frames = raw_offset_frames - pts_delta_frames
         offset_ms = offset_frames * src_frame_dur_ms
 
         # Score gradient (how sharp is the peak)
@@ -408,6 +469,12 @@ def calculate_neural_verified_offset(
     final_offset_ms = video_offset_ms + global_shift_ms
 
     log(f"[NeuralVerified] Video-verified offset: {video_offset_ms:+.3f}ms (neural)")
+    if pts_correction_applied:
+        log(
+            f"[NeuralVerified]   (wall-clock; raw frame-index match included "
+            f"{pts_delta_frames:+d}f / {pts_delta_s * 1000:+.1f}ms of PTS label "
+            f"offset which has been removed)"
+        )
     log(f"[NeuralVerified] + Global shift: {global_shift_ms:+.3f}ms")
     log(f"[NeuralVerified] = Final offset: {final_offset_ms:+.3f}ms")
     log(f"[NeuralVerified] ═══════════════════════════════════════")
@@ -428,6 +495,12 @@ def calculate_neural_verified_offset(
         "target_fps": tgt_fps,
         "total_time_s": dt_total,
         "per_position_results": results,
+        # PTS correction metadata — consumed by NeuralConfidenceAuditor
+        "pts_correction_applied": pts_correction_applied,
+        "src_start_pts_s": src_start_pts_s,
+        "tgt_start_pts_s": tgt_start_pts_s,
+        "pts_delta_s": pts_delta_s,
+        "pts_delta_frames": pts_delta_frames,
     }
 
 
@@ -435,7 +508,17 @@ def calculate_neural_verified_offset(
 
 
 def _open_clip(video_path: str, vs, temp_dir: Path | None = None):
-    """Open a video with VapourSynth/FFMS2 and return (yuv_clip, rgb_clip)."""
+    """Open a video with VapourSynth/FFMS2 and return (yuv, rgb, start_pts_s).
+
+    start_pts_s is the wall-clock time of frame 0 read from container
+    metadata (ffms2's ``_AbsoluteTime`` frame property). For the common
+    case this is ``0.0``. Some re-encodes (and DVD/Blu-ray rips through
+    MakeMKV + mkvmerge) preserve a non-zero PTS origin from the original
+    source, which produces a constant frame-index vs wall-clock offset
+    between two files. The sliding matcher compensates for this using
+    the relative delta between source and target ``start_pts_s``; callers
+    that do not care can simply ignore the third return value.
+    """
     from ...frame_utils.video_reader import _get_ffms2_cache_path
 
     core = vs.core
@@ -455,7 +538,17 @@ def _open_clip(video_path: str, vs, temp_dir: Path | None = None):
         clip = core.ffms2.Source(source=video_path, cachefile=cache_path)
 
     rgb_clip = core.resize.Bicubic(clip, format=vs.RGB24, matrix_in_s="170m")
-    return clip, rgb_clip
+
+    # Read frame 0's absolute wall-clock time from container PTS metadata.
+    # Safe fallback to 0.0 if the property is missing for any reason
+    # (old ffms2, weird containers) — in that case the caller treats the
+    # file as PTS-origin-zero, which is identical to today's behavior.
+    try:
+        start_pts_s = float(clip.get_frame(0).props.get("_AbsoluteTime", 0.0))
+    except Exception:
+        start_pts_s = 0.0
+
+    return clip, rgb_clip, start_pts_s
 
 
 def _frame_to_tensor(frame, device, F):

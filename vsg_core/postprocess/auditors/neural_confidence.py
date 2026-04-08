@@ -79,6 +79,33 @@ class NeuralConfidenceAuditor(BaseAuditor):
                     f"({positions_str}, score {mean_score:.4f})"
                 )
 
+            # PTS correction flag — independent of confidence, always shown
+            # when the neural matcher had to compensate for a non-zero PTS
+            # origin difference between source and target. Counts as an
+            # issue so the job report surfaces it in the summary tally.
+            if details.get("pts_correction_applied", False):
+                src_pts = details.get("src_start_pts_s", 0.0)
+                tgt_pts = details.get("tgt_start_pts_s", 0.0)
+                delta_s = details.get("pts_delta_s", 0.0)
+                delta_f = details.get("pts_delta_frames", 0)
+                self.log(
+                    f"  \u26a0 {source_key}: PTS correction applied "
+                    f"({delta_f:+d}f / {delta_s * 1000:+.1f}ms)"
+                )
+                self.log(
+                    f"    Source start_pts={src_pts:+.6f}s, "
+                    f"Target start_pts={tgt_pts:+.6f}s"
+                )
+                self.log(
+                    "    Source has a non-zero PTS origin — the matcher "
+                    "compensated and returned a wall-clock offset."
+                )
+                self.log(
+                    "    Rare edge case; please verify subs manually in "
+                    "the output file."
+                )
+                issues += 1
+
         if issues == 0:
             self.log("\u2705 All neural verification checks passed.")
         else:
