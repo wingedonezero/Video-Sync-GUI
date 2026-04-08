@@ -31,8 +31,6 @@ class FrameAuditAuditor(BaseAuditor):
             self.log("[INFO] No frame audit results available - skipping")
             return 0
 
-        issues = 0
-
         for track_key, result in self.ctx.frame_audit_results.items():
             start_issues = result.start_early + result.start_late
             end_issues = result.end_early + result.end_late
@@ -54,16 +52,14 @@ class FrameAuditAuditor(BaseAuditor):
                 )
                 # Don't count as issues since they were corrected
             elif has_any:
-                self.log(
-                    f"[WARNING] {track_key}: "
-                    f"{start_issues} start, {end_issues} end, "
+                self._report(
+                    f"{track_key}: {start_issues} start, {end_issues} end, "
                     f"{span_issues} span, {duration_issues} duration issues"
                 )
-                issues += 1
             else:
                 self.log(f"  ✓ {track_key}: 0 start, 0 end, 0 span, 0 duration issues")
 
-        if issues == 0:
+        if not self.issues:
             self.log("✅ All frame audits passed - no frame drift detected")
 
-        return issues
+        return len(self.issues)

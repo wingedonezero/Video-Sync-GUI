@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/audio_channels.py
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -18,12 +17,9 @@ class AudioChannelsAuditor(BaseAuditor):
         if not final_ffprobe_data:
             return 0
 
-        issues = 0
         actual_streams = final_ffprobe_data.get("streams", [])
         audio_items = [
-            item
-            for item in self.ctx.extracted_items
-            if item.track.type == "audio"
+            item for item in self.ctx.extracted_items if item.track.type == "audio"
         ]
 
         for plan_item in audio_items:
@@ -77,15 +73,16 @@ class AudioChannelsAuditor(BaseAuditor):
 
             if source_channels != actual_channels:
                 track_name = plan_item.track.props.name or f"Track {plan_item.track.id}"
-                self.log(
-                    f"[WARNING] Channel count mismatch for '{track_name}' ({plan_item.track.source}):"
+                downmix_note = (
+                    " - CRITICAL: Audio was downmixed!"
+                    if actual_channels < source_channels
+                    else ""
                 )
-                self.log(f"          Source: {source_channels} channels")
-                self.log(f"          Output: {actual_channels} channels")
-
-                if actual_channels < source_channels:
-                    self.log("          CRITICAL: Audio was downmixed!")
-                issues += 1
+                self._report(
+                    f"Channel count mismatch for '{track_name}' "
+                    f"({plan_item.track.source}): source {source_channels} "
+                    f"channels, output {actual_channels} channels{downmix_note}"
+                )
             else:
                 # Also check channel layout if available
                 source_layout = source_audio.get("channel_layout", "")
@@ -95,15 +92,15 @@ class AudioChannelsAuditor(BaseAuditor):
                     track_name = (
                         plan_item.track.props.name or f"Track {plan_item.track.id}"
                     )
-                    self.log(f"[WARNING] Channel layout changed for '{track_name}':")
-                    self.log(f"          Source: {source_layout}")
-                    self.log(f"          Output: {actual_layout}")
-                    issues += 1
+                    self._report(
+                        f"Channel layout changed for '{track_name}': "
+                        f"source '{source_layout}', output '{actual_layout}'"
+                    )
 
-        if issues == 0:
+        if not self.issues:
             self.log("✅ All audio channel layouts preserved correctly.")
 
-        return issues
+        return len(self.issues)
 
     def _get_audio_stream_index_from_track_id(
         self, mkv_data: dict, track_id: int

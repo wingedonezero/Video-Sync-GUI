@@ -1,7 +1,12 @@
 # vsg_core/postprocess/final_auditor.py
 """
 Final Audit Orchestrator - Coordinates all post-merge validation checks.
-Enhanced with drift correction and global shift auditors.
+
+Each concrete auditor extends ``BaseAuditor`` and reports issues via
+``self._report()`` / ``self._track_issue()``. This orchestrator runs them
+all, collects their structured issues into a single list, and returns
+both the total count and the list so the pipeline can surface the
+details in the batch report dialog.
 """
 
 import json
@@ -16,15 +21,19 @@ from .auditors import (
     AudioObjectBasedAuditor,
     AudioQualityAuditor,
     AudioSyncAuditor,
+    AuditIssue,
+    BaseAuditor,
     ChaptersAuditor,
     CodecIntegrityAuditor,
     DolbyVisionAuditor,
     DriftCorrectionAuditor,
     FrameAuditAuditor,
+    FrameLockedAuditor,
     GlobalShiftAuditor,
     LanguageTagsAuditor,
     SlidingConfidenceAuditor,
     SteppingCorrectionAuditor,
+    SteppingSeparatedAuditor,
     SubtitleClampingAuditor,
     SubtitleFormatsAuditor,
     TrackFlagsAuditor,
@@ -47,13 +56,20 @@ class FinalAuditor:
         self._shared_ffprobe_cache: dict[str, dict | None] = {}
         self._shared_mkvmerge_cache: dict[str, dict | None] = {}
 
-    def run(self, final_mkv_path: Path):
+    def run(self, final_mkv_path: Path) -> tuple[int, list[AuditIssue]]:
         """
         Comprehensive audit of the final file - checks everything but modifies nothing.
+
+        Returns:
+            (total_issues, collected_issues) tuple. ``total_issues`` is an int
+            for backwards compatibility; ``collected_issues`` is the structured
+            list of :class:`AuditIssue` to surface in the batch report.
         """
         self.log("========================================")
         self.log("=== POST-MERGE FINAL AUDIT STARTING ===")
         self.log("========================================")
+
+        all_issues: list[AuditIssue] = []
 
         # Detect if enhanced ffprobe is needed based on applied delays
         # Check if any track has a delay > 5000ms from the merge plan
@@ -96,7 +112,7 @@ class FinalAuditor:
         final_mkvmerge_data = self._get_metadata(str(final_mkv_path), "mkvmerge")
         if not final_mkvmerge_data or "tracks" not in final_mkvmerge_data:
             self.log("[ERROR] Could not read metadata from final file. Aborting audit.")
-            return
+            return 0, all_issues
 
         final_tracks = final_mkvmerge_data.get("tracks", [])
 
@@ -149,202 +165,86 @@ class FinalAuditor:
 
             self.ctx.extracted_items = final_items
 
-        total_issues = 0
-
         final_plan_items = self.ctx.extracted_items
 
         if len(final_tracks) != len(final_plan_items):
-            self.log(
-                f"[WARNING] Track count mismatch! Plan expected {len(final_plan_items)}, but final file has {len(final_tracks)}."
+            msg = (
+                f"Track count mismatch! Plan expected "
+                f"{len(final_plan_items)}, but final file has "
+                f"{len(final_tracks)}."
             )
-            total_issues += 1
+            self.log(f"[WARNING] {msg}")
+            all_issues.append(
+                AuditIssue(
+                    auditor="FinalAuditor",
+                    severity="warning",
+                    message=msg,
+                )
+            )
 
         final_ffprobe_data = self._get_metadata(str(final_mkv_path), "ffprobe")
 
-        self.log("\n--- Auditing Track Flags (Default/Forced) ---")
-        auditor = TrackFlagsAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
+        # ------------------------------------------------------------------
+        # Auditor dispatch table. Each entry is (label, auditor_class,
+        # needs_ffprobe). needs_ffprobe=True means the auditor requires
+        # ffprobe data and is skipped if ffprobe metadata is unavailable.
+        # ------------------------------------------------------------------
+        auditors: list[tuple[str, type[BaseAuditor], bool]] = [
+            ("Track Flags (Default/Forced)", TrackFlagsAuditor, False),
+            ("Video Core Metadata (HDR, 3D, Color)", VideoMetadataAuditor, True),
+            ("Dolby Vision Metadata", DolbyVisionAuditor, True),
+            ("Object-Based Audio (Atmos/DTS:X)", AudioObjectBasedAuditor, True),
+            ("Codec Integrity", CodecIntegrityAuditor, True),
+            ("Audio Channel Layouts", AudioChannelsAuditor, True),
+            ("Audio Quality Parameters", AudioQualityAuditor, True),
+            ("Drift Corrections", DriftCorrectionAuditor, False),
+            ("Stepping Correction Quality", SteppingCorrectionAuditor, False),
+            (
+                "Stepping Detected in Source-Separated Sources",
+                SteppingSeparatedAuditor,
+                False,
+            ),
+            ("Global Shift", GlobalShiftAuditor, False),
+            ("Audio Sync Delays", AudioSyncAuditor, False),
+            ("Subtitle Formats", SubtitleFormatsAuditor, False),
+            (
+                "Sliding-Window Verification Confidence",
+                SlidingConfidenceAuditor,
+                False,
+            ),
+            ("FrameLocked Subtitle Quality", FrameLockedAuditor, False),
+            ("Frame Alignment (Rounding Drift)", FrameAuditAuditor, False),
+            ("Subtitle Timestamp Clamping", SubtitleClampingAuditor, False),
+            ("Chapters", ChaptersAuditor, False),
+            ("Track Order", TrackOrderAuditor, False),
+            ("Language Tags", LanguageTagsAuditor, False),
+            ("Track Names", TrackNamesAuditor, False),
+            ("Attachments", AttachmentsAuditor, False),
+        ]
 
-        if final_ffprobe_data:
-            self.log("\n--- Auditing Video Core Metadata (HDR, 3D, Color) ---")
-            auditor = VideoMetadataAuditor(self.ctx, self.runner)
+        for label, auditor_cls, needs_ffprobe in auditors:
+            if needs_ffprobe and not final_ffprobe_data:
+                continue
+            self.log(f"\n--- Auditing {label} ---")
+            auditor = auditor_cls(self.ctx, self.runner)
             auditor._source_ffprobe_cache = self._shared_ffprobe_cache
             auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-            total_issues += auditor.run(
-                final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-            )
-
-            self.log("\n--- Auditing Dolby Vision Metadata ---")
-            auditor = DolbyVisionAuditor(self.ctx, self.runner)
-            auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-            auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-            total_issues += auditor.run(
-                final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-            )
-
-            self.log("\n--- Auditing Object-Based Audio (Atmos/DTS:X) ---")
-            auditor = AudioObjectBasedAuditor(self.ctx, self.runner)
-            auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-            auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-            total_issues += auditor.run(
-                final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-            )
-
-            self.log("\n--- Auditing Codec Integrity ---")
-            auditor = CodecIntegrityAuditor(self.ctx, self.runner)
-            auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-            auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-            total_issues += auditor.run(
-                final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-            )
-
-            self.log("\n--- Auditing Audio Channel Layouts ---")
-            auditor = AudioChannelsAuditor(self.ctx, self.runner)
-            auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-            auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-            total_issues += auditor.run(
-                final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-            )
-
-            self.log("\n--- Auditing Audio Quality Parameters ---")
-            auditor = AudioQualityAuditor(self.ctx, self.runner)
-            auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-            auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-            total_issues += auditor.run(
-                final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-            )
-
-        self.log("\n--- Auditing Drift Corrections ---")
-        auditor = DriftCorrectionAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Stepping Correction Quality ---")
-        auditor = SteppingCorrectionAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Global Shift ---")
-        auditor = GlobalShiftAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Audio Sync Delays ---")
-        auditor = AudioSyncAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Subtitle Formats ---")
-        auditor = SubtitleFormatsAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Sliding-Window Verification Confidence ---")
-        auditor = SlidingConfidenceAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing FrameLocked Subtitle Quality ---")
-        total_issues += self._audit_framelocked_stats()
-
-        self.log("\n--- Auditing Frame Alignment (Rounding Drift) ---")
-        auditor = FrameAuditAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Subtitle Timestamp Clamping ---")
-        auditor = SubtitleClampingAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Chapters ---")
-        auditor = ChaptersAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Track Order ---")
-        auditor = TrackOrderAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Language Tags ---")
-        auditor = LanguageTagsAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Track Names ---")
-        auditor = TrackNamesAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        self.log("\n--- Auditing Attachments ---")
-        auditor = AttachmentsAuditor(self.ctx, self.runner)
-        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
-        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
-        total_issues += auditor.run(
-            final_mkv_path, final_mkvmerge_data, final_ffprobe_data
-        )
-
-        # Check for stepping detected in source-separated sources (manual review needed)
-        if self.ctx.stepping_detected_separated:
-            self.log("\n--- WARNING: Stepping Detected in Source-Separated Sources ---")
-            self.log(
-                "[WARNING] Stepping patterns were detected in sources using source separation."
-            )
-            self.log(
-                "[WARNING] Automatic stepping correction is unreliable on separated stems."
-            )
-            self.log("[WARNING] The following sources may have timing inconsistencies:")
-            for source_key in self.ctx.stepping_detected_separated:
-                self.log(
-                    f"  - {source_key}: Stepping detected but correction skipped (source separation enabled)"
+            try:
+                auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
+            except Exception as e:
+                msg = f"{label}: auditor crashed with {type(e).__name__}: {e}"
+                self.log(f"[ERROR] {msg}")
+                all_issues.append(
+                    AuditIssue(
+                        auditor=auditor_cls.__name__.removesuffix("Auditor"),
+                        severity="error",
+                        message=msg,
+                    )
                 )
-            self.log("[RECOMMENDATION] Manually review sync quality for these sources.")
-            self.log(
-                "[RECOMMENDATION] If timing issues exist, consider re-syncing without source separation"
-            )
-            self.log("[RECOMMENDATION] if same-language audio tracks are available.")
-            total_issues += len(self.ctx.stepping_detected_separated)
+                continue
+            all_issues.extend(auditor.issues)
+
+        total_issues = len(all_issues)
 
         self.log("\n========================================")
         if total_issues == 0:
@@ -353,63 +253,7 @@ class FinalAuditor:
             self.log(f"⚠️  FINAL AUDIT FOUND {total_issues} POTENTIAL ISSUE(S)")
             self.log("    Please review the warnings above.")
         self.log("========================================\n")
-        return total_issues
-
-    def _audit_framelocked_stats(self) -> int:
-        """Audit FrameLocked subtitle sync quality - report actual final duration changes."""
-        issues = 0
-
-        # Find all subtitle items that used FrameLocked sync
-        framelocked_items = [
-            item
-            for item in self.ctx.extracted_items
-            if hasattr(item, "framelocked_stats") and item.framelocked_stats
-        ]
-
-        if not framelocked_items:
-            self.log("[INFO] No FrameLocked subtitles found - skipping audit")
-            return 0
-
-        for item in framelocked_items:
-            stats = item.framelocked_stats
-            track_name = item.track.props.name or f"Track {item.track.id}"
-
-            # Get the actual final change stats
-            final_duration_changed = stats.get("final_duration_changed", 0)
-            final_end_adjusted = stats.get("final_end_adjusted", 0)
-            total_events = stats.get("total_events", 0)
-
-            self.log(f"[FrameLocked] {track_name}:")
-            self.log(f"  - Total Events: {total_events}")
-            self.log(f"  - Final Duration Changed: {final_duration_changed}")
-            self.log(f"  - Final End Adjusted: {final_end_adjusted}")
-
-            # Warn if durations were unexpectedly modified
-            if final_duration_changed > 0:
-                self.log(
-                    f"[WARNING] {final_duration_changed} subtitle(s) had duration changes"
-                )
-                self.log(
-                    "          This may indicate timing issues or intentional zero-duration effects becoming visible"
-                )
-                issues += 1
-
-            # Warn if ends were adjusted beyond the global delay
-            if final_end_adjusted > 0:
-                self.log(
-                    f"[WARNING] {final_end_adjusted} subtitle(s) had end times adjusted beyond delay"
-                )
-                self.log(
-                    "          This may indicate duration modifications for frame visibility"
-                )
-                issues += 1
-
-            if final_duration_changed == 0 and final_end_adjusted == 0:
-                self.log(
-                    "[OK] All durations preserved correctly (zero-duration effects stayed zero-duration)"
-                )
-
-        return issues
+        return total_issues, all_issues
 
     def _get_metadata(self, file_path: str, tool: str) -> dict | None:
         """Gets metadata using either mkvmerge or ffprobe with enhanced probing for large delays."""

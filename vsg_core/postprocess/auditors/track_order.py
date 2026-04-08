@@ -14,7 +14,6 @@ class TrackOrderAuditor(BaseAuditor):
         Audits track order.
         Returns the number of issues found.
         """
-        issues = 0
         final_tracks = final_mkvmerge_data.get("tracks", [])
         plan_items = self.ctx.extracted_items
 
@@ -31,17 +30,15 @@ class TrackOrderAuditor(BaseAuditor):
 
         if video_indices and audio_indices:
             if max(video_indices) > min(audio_indices):
-                self.log(
-                    "[WARNING] Track order issue: Audio tracks appear before some video tracks!"
+                self._report(
+                    "Track order issue: Audio tracks appear before some video tracks"
                 )
-                issues += 1
 
         if audio_indices and subtitle_indices:
             if max(audio_indices) > min(subtitle_indices):
-                self.log(
-                    "[WARNING] Track order issue: Subtitle tracks appear before some audio tracks!"
+                self._report(
+                    "Track order issue: Subtitle tracks appear before some audio tracks"
                 )
-                issues += 1
 
         # Verify preserved tracks come after main tracks
         for i, item in enumerate(plan_items):
@@ -60,12 +57,12 @@ class TrackOrderAuditor(BaseAuditor):
 
                 if not main_track_found:
                     track_name = item.track.props.name or f"Track {i}"
-                    self.log(
-                        f"[WARNING] Preserved track '{track_name}' appears without a main track before it!"
+                    self._report(
+                        f"Preserved track '{track_name}' appears without a "
+                        "main track before it"
                     )
-                    issues += 1
 
-        if issues == 0:
+        if not self.issues:
             self.log("✅ Track order is correct.")
 
-        return issues
+        return len(self.issues)

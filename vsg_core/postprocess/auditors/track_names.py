@@ -14,7 +14,6 @@ class TrackNamesAuditor(BaseAuditor):
         Audits track names.
         Returns the number of issues found.
         """
-        issues = 0
         final_tracks = final_mkvmerge_data.get("tracks", [])
         plan_items = self.ctx.extracted_items
 
@@ -35,12 +34,12 @@ class TrackNamesAuditor(BaseAuditor):
             actual_name = final_tracks[i].get("properties", {}).get("track_name", "")
 
             if expected_name and expected_name != actual_name:
-                self.log(f"[WARNING] Track name mismatch for track {i}:")
-                self.log(f"          Expected: '{expected_name}'")
-                self.log(f"          Actual:   '{actual_name}'")
-                issues += 1
+                self._report(
+                    f"Track name mismatch for track {i}: expected "
+                    f"'{expected_name}', actual '{actual_name}'"
+                )
 
-        if issues == 0:
+        if not self.issues:
             self.log("✅ All track names are correct.")
 
-        return issues
+        return len(self.issues)

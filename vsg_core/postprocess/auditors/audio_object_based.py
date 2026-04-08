@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/audio_object_based.py
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -18,12 +17,9 @@ class AudioObjectBasedAuditor(BaseAuditor):
         if not final_ffprobe_data:
             return 0
 
-        issues = 0
         actual_streams = final_ffprobe_data.get("streams", [])
         audio_items = [
-            item
-            for item in self.ctx.extracted_items
-            if item.track.type == "audio"
+            item for item in self.ctx.extracted_items if item.track.type == "audio"
         ]
 
         for plan_item in audio_items:
@@ -61,11 +57,7 @@ class AudioObjectBasedAuditor(BaseAuditor):
             ]
             actual_audio = None
             for i, item in enumerate(
-                [
-                    it
-                    for it in self.ctx.extracted_items
-                    if it.track.type == "audio"
-                ]
+                [it for it in self.ctx.extracted_items if it.track.type == "audio"]
             ):
                 if item == plan_item and i < len(actual_audio_streams):
                     actual_audio = actual_audio_streams[i]
@@ -79,10 +71,10 @@ class AudioObjectBasedAuditor(BaseAuditor):
 
             # Check for Atmos
             if "Atmos" in source_profile and "Atmos" not in actual_profile:
-                self.log(
-                    f"[WARNING] Dolby Atmos metadata was lost for audio track from {plan_item.track.source}!"
+                self._report(
+                    f"Dolby Atmos metadata was lost for audio track from "
+                    f"{plan_item.track.source}"
                 )
-                issues += 1
             elif "Atmos" in source_profile and "Atmos" in actual_profile:
                 self.log(
                     f"✅ Dolby Atmos preserved for track from {plan_item.track.source}."
@@ -90,17 +82,17 @@ class AudioObjectBasedAuditor(BaseAuditor):
 
             # Check for DTS:X
             if "DTS:X" in source_profile and "DTS:X" not in actual_profile:
-                self.log(
-                    f"[WARNING] DTS:X metadata was lost for audio track from {plan_item.track.source}!"
+                self._report(
+                    f"DTS:X metadata was lost for audio track from "
+                    f"{plan_item.track.source}"
                 )
-                issues += 1
             elif "DTS:X" in source_profile and "DTS:X" in actual_profile:
                 self.log(f"✅ DTS:X preserved for track from {plan_item.track.source}.")
 
-        if issues == 0:
+        if not self.issues:
             self.log("✅ All object-based audio metadata preserved correctly.")
 
-        return issues
+        return len(self.issues)
 
     def _get_audio_stream_index_from_track_id(
         self, mkv_data: dict, track_id: int

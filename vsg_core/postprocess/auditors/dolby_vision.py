@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/dolby_vision.py
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -18,12 +17,9 @@ class DolbyVisionAuditor(BaseAuditor):
         if not final_ffprobe_data:
             return 0
 
-        issues = 0
         actual_streams = final_ffprobe_data.get("streams", [])
         video_items = [
-            item
-            for item in self.ctx.extracted_items
-            if item.track.type == "video"
+            item for item in self.ctx.extracted_items if item.track.type == "video"
         ]
 
         for plan_item in video_items:
@@ -54,13 +50,11 @@ class DolbyVisionAuditor(BaseAuditor):
             actual_has_dv = self._has_dolby_vision(actual_video)
 
             if source_has_dv and not actual_has_dv:
-                self.log(
-                    "[WARNING] Dolby Vision metadata was present in source but is MISSING from the output!"
+                self._report(
+                    "Dolby Vision metadata was present in source but is "
+                    "MISSING from the output - significant quality loss for "
+                    "compatible displays"
                 )
-                self.log(
-                    "         This is a significant quality loss for compatible displays."
-                )
-                issues += 1
             elif source_has_dv and actual_has_dv:
                 self.log("✅ Dolby Vision metadata preserved successfully.")
 
@@ -78,9 +72,8 @@ class DolbyVisionAuditor(BaseAuditor):
                 )
             )
             for item in video_items
-            if item.track.type == "video"
-            and self.ctx.sources.get(item.track.source)
+            if item.track.type == "video" and self.ctx.sources.get(item.track.source)
         ):
             self.log("✅ No Dolby Vision metadata to preserve.")
 
-        return issues
+        return len(self.issues)

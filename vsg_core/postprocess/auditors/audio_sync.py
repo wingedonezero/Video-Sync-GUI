@@ -20,7 +20,6 @@ class AudioSyncAuditor(BaseAuditor):
         This is CRITICAL because sync issues are very noticeable.
         Returns the number of issues found.
         """
-        issues = 0
         final_tracks = final_mkvmerge_data.get("tracks", [])
 
         if not self.ctx.delays:
@@ -48,11 +47,11 @@ class AudioSyncAuditor(BaseAuditor):
         final_audio_tracks = [t for t in final_tracks if t.get("type") == "audio"]
 
         if len(final_audio_tracks) != len(audio_plan_items):
-            self.log(
-                f"[WARNING] Audio track count mismatch! Expected {len(audio_plan_items)}, got {len(final_audio_tracks)}."
+            self._report(
+                f"Audio track count mismatch! Expected "
+                f"{len(audio_plan_items)}, got {len(final_audio_tracks)}."
             )
-            issues += 1
-            return issues
+            return len(self.issues)
 
         for i, (plan_item, final_track) in enumerate(
             zip(audio_plan_items, final_audio_tracks)
@@ -65,25 +64,23 @@ class AudioSyncAuditor(BaseAuditor):
             sample_rate = track_props.get("audio_sampling_frequency", 48000)
 
             # Method 1: Check codec_delay metadata (primary method)
-            issues += self._verify_codec_delay(
-                plan_item, final_track, expected_delay_ms, i
-            )
+            self._verify_codec_delay(plan_item, final_track, expected_delay_ms, i)
 
             # Method 2: Check first packet timestamp (secondary verification)
-            issues += self._verify_first_packet_timestamp(
+            self._verify_first_packet_timestamp(
                 final_mkv_path, i, expected_delay_ms, plan_item, sample_rate
             )
 
-        if issues == 0:
+        if not self.issues:
             self.log(
                 "✅ All audio sync delays verified correctly (dual verification passed)."
             )
 
-        return issues
+        return len(self.issues)
 
     def _verify_codec_delay(
         self, plan_item, final_track: dict, expected_delay_ms: float, track_index: int
-    ) -> int:
+    ) -> None:
         """
         Primary verification: Check codec_delay in container metadata.
         This is what mkvmerge's --sync option sets.
@@ -91,8 +88,9 @@ class AudioSyncAuditor(BaseAuditor):
         Note: With large delays (>5000ms), mkvmerge may not properly set container
         metadata fields, even though packet timestamps are correct. In such cases,
         packet timestamp verification is more reliable.
+
+        Issues are appended to ``self.issues`` via ``_track_issue``.
         """
-        issues = 0
         props = final_track.get("properties", {})
 
         # Try to get the delay from various possible fields
@@ -177,7 +175,7 @@ class AudioSyncAuditor(BaseAuditor):
                             f"  ✓ '{name}' ({source}) metadata: {actual_delay_ms:+.1f}ms"
                             f" (matches calculated {calculated_actual_delay:+.3f}ms)"
                         )
-                        return 0
+                        return
                     else:
                         self.log(
                             f"[WARNING] Audio sync mismatch (metadata) for '{name}' ({source}, {lang}):"
@@ -192,7 +190,14 @@ class AudioSyncAuditor(BaseAuditor):
                         self.log(f"          Actual delay:   {actual_delay_ms:+.1f}ms")
                         self.log(f"          Difference:     {diff_ms:.1f}ms")
                         self.log(f"          Sync mode:      {sync_mode}")
-                        return 1
+                        self._track_issue(
+                            f"Audio sync mismatch (metadata) for '{name}' "
+                            f"({source}, {lang}): calculated "
+                            f"{calculated_actual_delay:+.3f}ms vs actual "
+                            f"{actual_delay_ms:+.1f}ms (diff {diff_ms:.1f}ms, "
+                            f"sync mode {sync_mode})"
+                        )
+                        return
             else:
                 # Unknown codec frame size, use generous tolerance
                 tolerance_ms = 100.0
@@ -210,7 +215,7 @@ class AudioSyncAuditor(BaseAuditor):
             self.log(
                 f"  ⓘ '{name}' ({source}) has large delay ({expected_delay_ms:+.1f}ms) - skipping metadata check, will verify packet timestamps"
             )
-            return 0
+            return
 
         if diff_ms > tolerance_ms:
             # Get sync mode for context
@@ -237,11 +242,14 @@ class AudioSyncAuditor(BaseAuditor):
                     "          This may indicate a muxing issue or chain correction problem."
                 )
 
-            issues += 1
+            self._track_issue(
+                f"Audio sync mismatch (metadata) for '{name}' "
+                f"({source}, {lang}): expected {expected_delay_ms:+.1f}ms vs "
+                f"actual {actual_delay_ms:+.1f}ms (diff {diff_ms:.1f}ms, "
+                f"sync mode {sync_mode})"
+            )
         else:
             self.log(f"  ✓ '{name}' ({source}) metadata: {actual_delay_ms:+.1f}ms")
-
-        return issues
 
     def _verify_first_packet_timestamp(
         self,
@@ -250,13 +258,13 @@ class AudioSyncAuditor(BaseAuditor):
         expected_delay_ms: float,
         plan_item,
         sample_rate: int = 48000,
-    ) -> int:
+    ) -> None:
         """
         Secondary verification: Check the timestamp of the first audio packet.
         This verifies that the delay was actually applied to the stream data.
-        """
-        issues = 0
 
+        Issues are appended to ``self.issues`` via ``_track_issue``.
+        """
         try:
             # Use ffprobe to get the first packet's presentation timestamp
             cmd = [
@@ -277,18 +285,18 @@ class AudioSyncAuditor(BaseAuditor):
             result = self.runner.run(cmd, self.tool_paths)
             if not result:
                 # Can't verify - not a critical error
-                return 0
+                return
 
             data = json.loads(result)
             packets = data.get("packets", [])
 
             if not packets:
                 # No packet data - skip verification
-                return 0
+                return
 
             first_pts = packets[0].get("pts_time")
             if first_pts is None:
-                return 0
+                return
 
             first_pts_ms = float(first_pts) * 1000.0
 
@@ -336,7 +344,7 @@ class AudioSyncAuditor(BaseAuditor):
                                 f" (matches calculated"
                                 f" {calculated_actual_delay:+.3f}ms)"
                             )
-                            return 0
+                            return
                         else:
                             matroska_delay_ms = int(calculated_actual_delay)
                             self.log(
@@ -363,7 +371,14 @@ class AudioSyncAuditor(BaseAuditor):
                             self.log(
                                 "          → Stream data may not be properly delayed!"
                             )
-                            return 1
+                            self._track_issue(
+                                f"Audio sync mismatch (packet timestamp) for "
+                                f"'{name}' ({source}): calculated "
+                                f"{calculated_actual_delay:+.3f}ms vs first "
+                                f"packet {first_pts_ms:+.1f}ms "
+                                f"(diff {diff_ms:.1f}ms)"
+                            )
+                            return
                 else:
                     # Unknown codec frame size
                     tolerance_ms = 100.0
@@ -396,7 +411,12 @@ class AudioSyncAuditor(BaseAuditor):
                         "          This may indicate a muxing issue or chain correction problem."
                     )
 
-                issues += 1
+                self._track_issue(
+                    f"Audio sync mismatch (packet timestamp) for '{name}' "
+                    f"({source}): expected {expected_delay_ms:+.1f}ms vs "
+                    f"first packet {first_pts_ms:+.1f}ms "
+                    f"(diff {diff_ms:.1f}ms, sync mode {sync_mode})"
+                )
             else:
                 self.log(f"  ✓ '{name}' ({source}) first packet: {first_pts_ms:+.1f}ms")
 
@@ -405,8 +425,6 @@ class AudioSyncAuditor(BaseAuditor):
             self.log(
                 f"  [INFO] Could not verify packet timestamps for track {audio_track_index} ({e})"
             )
-
-        return issues
 
     def _get_codec_samples_per_frame(self, codec_id: str) -> int | None:
         """

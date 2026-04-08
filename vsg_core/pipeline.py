@@ -190,7 +190,7 @@ class JobPipeline:
             log_to_all(f"[SUCCESS] Output file created: {final_output_path}")
 
             # --- 13. Audit Output ---
-            issues = ResultAuditor.audit_output(
+            issues, audit_details = ResultAuditor.audit_output(
                 final_output_path, ctx, runner, log_to_all
             )
 
@@ -202,6 +202,7 @@ class JobPipeline:
                 output=str(final_output_path),
                 delays=ctx.delays.source_delays_ms if ctx.delays else {},
                 issues=issues,
+                audit_details=audit_details,
                 stepping_sources=ctx.stepping_sources,
                 stepping_detected_disabled=ctx.stepping_detected_disabled,
                 stepping_detected_separated=ctx.stepping_detected_separated,

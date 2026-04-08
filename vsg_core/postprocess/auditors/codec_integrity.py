@@ -17,7 +17,6 @@ class CodecIntegrityAuditor(BaseAuditor):
         if not final_ffprobe_data:
             return 0
 
-        issues = 0
         actual_streams = final_ffprobe_data.get("streams", [])
         plan_items = self.ctx.extracted_items
 
@@ -54,12 +53,12 @@ class CodecIntegrityAuditor(BaseAuditor):
                 continue  # Codecs match, no issue
 
             # If there's still a mismatch, it's a real warning
-            self.log(f"[WARNING] Codec mismatch for '{track_name}':")
-            self.log(f"          Expected: {expected_codec}")
-            self.log(f"          Actual:   {actual_codec}")
-            issues += 1
+            self._report(
+                f"Codec mismatch for '{track_name}': expected "
+                f"{expected_codec}, actual {actual_codec}"
+            )
 
-        if issues == 0:
+        if not self.issues:
             self.log("✅ All codecs preserved correctly (no unintended transcoding).")
 
-        return issues
+        return len(self.issues)
