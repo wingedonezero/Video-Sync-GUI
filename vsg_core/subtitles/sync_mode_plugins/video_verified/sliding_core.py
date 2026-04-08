@@ -67,12 +67,8 @@ def open_clip(video_path: str, vs: Any, temp_dir: Path | None = None):
     constant frame-index vs wall-clock offset. The orchestrator subtracts
     the relative delta between source and target start_pts_s so sub
     timing (which is always wall-clock) is preserved.
-
-    Matches the interface of the legacy ``neural_matcher._open_clip``
-    verbatim so it can replace it in Phase 3 without other callers
-    noticing.
     """
-    from ..frame_utils.video_reader import _get_ffms2_cache_path  # noqa: PLC0415
+    from ...frame_utils.video_reader import _get_ffms2_cache_path  # noqa: PLC0415
 
     core = vs.core
 
