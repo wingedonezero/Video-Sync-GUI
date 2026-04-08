@@ -50,6 +50,8 @@ from .types import (  # noqa: TC001 - Pydantic needs these at runtime
     SubtitleSyncModeStr,
     SyncModeStr,
     SyncStabilityOutlierModeStr,
+    VideoVerifiedBackendStr,
+    VideoVerifiedCrossCheckBackendStr,
     VideoVerifiedMethodStr,
 )
 
@@ -199,6 +201,34 @@ class AppSettings(BaseModel):
     neural_batch_size: int = 32
     neural_run_in_subprocess: bool = True
     neural_debug_report: bool = False
+
+    # =========================================================================
+    # Video-Verified Sync Settings — sliding-window matcher (new)
+    # =========================================================================
+    # These fields replace the legacy frame_* / video_verified_zero_check_* /
+    # video_verified_num_checkpoints* / neural_* fields above. During the
+    # refactor phases both old and new fields exist simultaneously so the
+    # tree compiles and the old pipeline keeps working. Phase 5 deletes the
+    # legacy fields and this block becomes the only video-verified config.
+    #
+    # Backend selection
+    video_verified_backend: VideoVerifiedBackendStr = "isc"
+    video_verified_cross_check_backend: VideoVerifiedCrossCheckBackendStr = "none"
+    video_verified_cross_check_tolerance_frames: int = 0  # 0 = strict match
+
+    # Sliding search geometry (shared across all backends)
+    video_verified_window_seconds: int = 10
+    video_verified_slide_range_seconds: int = 5
+    video_verified_num_positions: int = 9
+    video_verified_batch_size: int = 32
+
+    # Backend-specific tunables
+    video_verified_hash_size: int = 32  # pHash/dHash: 8/16/32/64 (1024-bit default)
+    video_verified_ssim_input_size: int = 256  # SSIM: 128/256/384/512
+
+    # Runtime
+    video_verified_run_in_subprocess: bool = True
+    video_verified_debug_report: bool = False
 
     # =========================================================================
     # Analysis/Correlation Settings

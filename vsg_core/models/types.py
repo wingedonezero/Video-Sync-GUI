@@ -46,8 +46,33 @@ FrameHashAlgorithmStr = Literal["dhash", "phash", "average_hash", "whash"]
 # Frame comparison method
 FrameComparisonMethodStr = Literal["hash", "ssim", "mse"]
 
-# Video-verified matching method
+# Video-verified matching method (DEPRECATED — replaced by video_verified_backend
+# during the sliding-window refactor. Kept temporarily alongside the new fields
+# so the tree compiles through Phases 1-4; removed in Phase 5.)
 VideoVerifiedMethodStr = Literal["classic", "neural"]
+
+# Video-verified sliding-window matcher backends
+VideoVerifiedBackendStr = Literal[
+    "isc",
+    "sscd_mixup",
+    "sscd_large",
+    "phash",
+    "dhash",
+    "ssim",
+]
+
+# Cross-check backend — same set as VideoVerifiedBackendStr plus a "none" sentinel.
+# Two separate Literals (rather than Optional[...]) to keep JSON serialization
+# string-only and make the UI dropdown trivially enumerable.
+VideoVerifiedCrossCheckBackendStr = Literal[
+    "none",
+    "isc",
+    "sscd_mixup",
+    "sscd_large",
+    "phash",
+    "dhash",
+    "ssim",
+]
 
 # =========================================================================
 # Audio Analysis Settings
