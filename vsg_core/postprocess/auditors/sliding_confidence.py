@@ -1,4 +1,4 @@
-# vsg_core/postprocess/auditors/neural_confidence.py
+# vsg_core/postprocess/auditors/sliding_confidence.py
 """
 Auditor for sliding-window video verification confidence.
 
@@ -7,13 +7,16 @@ When the sliding-window matcher is used for subtitle sync (any backend
 level and flags LOW results so the user knows to verify manually. Also
 surfaces PTS correction events and cross-check disagreements.
 
-Renamed from the legacy "neural confidence" auditor; the Phase 4 refactor
-renames the file and class to ``SlidingConfidenceAuditor`` — this file
-still lives at ``neural_confidence.py`` during the transition so existing
-imports in ``auditors/__init__.py`` and ``postprocess/final_auditor.py``
-continue to work. The reason filter accepts both the new
-``"sliding-matched"`` string and the legacy ``"neural-matched"`` string
-so in-flight jobs from the transition period are still audited.
+Renamed from the legacy ``neural_confidence.py`` / ``NeuralConfidenceAuditor``
+during the Phase 4 UI + auditor refactor. The reason filter still
+accepts both the new ``"sliding-matched"`` string and the legacy
+``"neural-matched"`` string so any stale cached data (if it exists)
+still gets audited; Phase 5 narrows the set once we confirm nothing
+emits the old string.
+
+A backward-compat alias ``NeuralConfidenceAuditor = SlidingConfidenceAuditor``
+is re-exported from ``auditors/__init__.py`` until Phase 5 so external
+callers don't break mid-refactor.
 """
 
 from pathlib import Path
@@ -26,7 +29,7 @@ from .base import BaseAuditor
 _SLIDING_REASONS = frozenset({"sliding-matched", "neural-matched"})
 
 
-class NeuralConfidenceAuditor(BaseAuditor):
+class SlidingConfidenceAuditor(BaseAuditor):
     """
     Checks sliding-window verification confidence for each source.
 

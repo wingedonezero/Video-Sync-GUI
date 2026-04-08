@@ -23,7 +23,7 @@ from .auditors import (
     FrameAuditAuditor,
     GlobalShiftAuditor,
     LanguageTagsAuditor,
-    NeuralConfidenceAuditor,
+    SlidingConfidenceAuditor,
     SteppingCorrectionAuditor,
     SubtitleClampingAuditor,
     SubtitleFormatsAuditor,
@@ -258,8 +258,8 @@ class FinalAuditor:
             final_mkv_path, final_mkvmerge_data, final_ffprobe_data
         )
 
-        self.log("\n--- Auditing Neural Verification Confidence ---")
-        auditor = NeuralConfidenceAuditor(self.ctx, self.runner)
+        self.log("\n--- Auditing Sliding-Window Verification Confidence ---")
+        auditor = SlidingConfidenceAuditor(self.ctx, self.runner)
         auditor._source_ffprobe_cache = self._shared_ffprobe_cache
         auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
         total_issues += auditor.run(
