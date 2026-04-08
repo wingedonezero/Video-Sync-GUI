@@ -13,10 +13,6 @@ from .frame_audit import FrameAuditAuditor
 from .global_shift import GlobalShiftAuditor
 from .language_tags import LanguageTagsAuditor
 from .sliding_confidence import SlidingConfidenceAuditor
-
-# Backward-compat alias — removed in Phase 5 after verifying no caller
-# still imports the old name.
-NeuralConfidenceAuditor = SlidingConfidenceAuditor
 from .stepping_correction import SteppingCorrectionAuditor
 from .subtitle_clamping import SubtitleClampingAuditor
 from .subtitle_formats import SubtitleFormatsAuditor
@@ -38,7 +34,6 @@ __all__ = [
     "FrameAuditAuditor",
     "GlobalShiftAuditor",
     "LanguageTagsAuditor",
-    "NeuralConfidenceAuditor",  # deprecated alias; removed in Phase 5
     "SlidingConfidenceAuditor",
     "SteppingCorrectionAuditor",
     "SubtitleClampingAuditor",

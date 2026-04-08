@@ -1793,7 +1793,7 @@ class SubtitleSyncTab(QWidget):
             "Write detailed sliding-window matching debug report:\n\n"
             "When enabled, writes a per-source report with full score\n"
             "landscapes, per-position results, and timing data to the\n"
-            "debug/neural_verify/ directory. File name includes the\n"
+            "debug/sliding_verify/ directory. File name includes the\n"
             "backend name so primary and cross-check don't collide.\n\n"
             "Useful for diagnosing matching issues or validating results."
         )

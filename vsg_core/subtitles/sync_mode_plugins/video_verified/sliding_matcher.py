@@ -10,22 +10,16 @@ to find the best-matching offset, then vote across positions for a
 consensus answer. Each backend provides its own ``score()`` method via
 the ``SlidingBackend`` protocol; everything else is backend-agnostic.
 
-This replaces the former ``neural_matcher.py`` (ISC-only) with a design
-that scales to any feature extractor. The back-compat wrapper
-``calculate_neural_verified_offset()`` is preserved at the bottom of the
-file so legacy callers still work during the refactor transition.
-
-Critical invariants preserved verbatim from neural_matcher.py:
+Critical invariants:
 - PTS correction (source and target ``_AbsoluteTime`` delta) is applied
   in the orchestrator so the backend always receives wall-clock-aligned
   frame indices and never has to think about container timing.
-- Consensus, confidence thresholds, and debug-report structure are
-  unchanged — the matcher returns the same ``details`` dict shape as
-  before, with only two new fields: ``backend`` and ``reason`` switched
-  from ``"neural-matched"`` to ``"sliding-matched"``.
+- The matcher returns a ``details`` dict with ``reason="sliding-matched"``
+  and a ``backend`` field identifying which feature extractor produced
+  the offset. The ``SlidingConfidenceAuditor`` keys off these fields.
 
-Tested accuracy baselines (neural_matcher.py heritage, should remain
-intact for the ISC backend):
+Tested accuracy baselines (should remain intact for the ISC backend,
+which is the default and matches the pre-refactor behavior):
 - Outbreak Company EP3: 9/9 exact (same-master, same fps)
 - Black Summoner EP1:   9/9 exact (BDMV vs web encode)
 - 009-1 EP1:            9/9 exact (interlaced DVD, with bwdif deinterlace)
@@ -585,44 +579,6 @@ def calculate_sliding_offset(
         "pts_delta_s": pts_delta_s,
         "pts_delta_frames": pts_delta_frames,
     }
-
-
-# ── Backward-compat wrapper ──────────────────────────────────────────────────
-
-
-def calculate_neural_verified_offset(
-    source_video: str,
-    target_video: str,
-    total_delay_ms: float,
-    global_shift_ms: float,
-    settings=None,
-    runner=None,
-    temp_dir: Path | None = None,
-    video_duration_ms: float | None = None,
-    debug_output_dir: Path | None = None,
-    source_key: str = "",
-) -> tuple[float | None, dict[str, Any]]:
-    """Backward-compat shim — forwards to ``calculate_sliding_offset(backend="isc")``.
-
-    Kept so any caller that hasn't been updated to pass ``backend_name``
-    explicitly continues to work exactly as before. Callers should switch
-    to ``calculate_sliding_offset`` and pass ``backend_name`` derived from
-    ``settings.video_verified_backend``. Scheduled for removal in Phase 5
-    of the refactor.
-    """
-    return calculate_sliding_offset(
-        source_video=source_video,
-        target_video=target_video,
-        total_delay_ms=total_delay_ms,
-        global_shift_ms=global_shift_ms,
-        settings=settings,
-        runner=runner,
-        temp_dir=temp_dir,
-        video_duration_ms=video_duration_ms,
-        debug_output_dir=debug_output_dir,
-        source_key=source_key,
-        backend_name="isc",
-    )
 
 
 # ── Debug report writer ──────────────────────────────────────────────────────

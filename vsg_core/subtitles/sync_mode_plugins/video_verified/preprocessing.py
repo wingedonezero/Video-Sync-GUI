@@ -164,8 +164,8 @@ def _run_sliding(
     debug_output_dir = None
     if getattr(ctx.settings, "video_verified_debug_report", False):
         debug_paths = getattr(ctx, "debug_paths", None)
-        if debug_paths and getattr(debug_paths, "neural_verify_dir", None):
-            debug_output_dir = debug_paths.neural_verify_dir
+        if debug_paths and getattr(debug_paths, "sliding_verify_dir", None):
+            debug_output_dir = debug_paths.sliding_verify_dir
 
     if not use_subprocess:
         # Run in-process — either because the backend doesn't need

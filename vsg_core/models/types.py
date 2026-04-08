@@ -37,21 +37,12 @@ SubtitleRoundingStr = Literal["floor", "round", "ceil"]
 SyncModeStr = Literal["positive_only", "allow_negative"]
 
 # =========================================================================
-# Frame Matching Settings
+# Video-Verified Sliding-Window Matcher
 # =========================================================================
 
-# Hash algorithm for frame comparison
-FrameHashAlgorithmStr = Literal["dhash", "phash", "average_hash", "whash"]
-
-# Frame comparison method
-FrameComparisonMethodStr = Literal["hash", "ssim", "mse"]
-
-# Video-verified matching method (DEPRECATED — replaced by video_verified_backend
-# during the sliding-window refactor. Kept temporarily alongside the new fields
-# so the tree compiles through Phases 1-4; removed in Phase 5.)
-VideoVerifiedMethodStr = Literal["classic", "neural"]
-
-# Video-verified sliding-window matcher backends
+# Primary backend selection for video-verified subtitle sync.
+# Maps 1:1 to backend registry keys in
+# vsg_core/subtitles/sync_mode_plugins/video_verified/backends/__init__.py.
 VideoVerifiedBackendStr = Literal[
     "isc",
     "sscd_mixup",
