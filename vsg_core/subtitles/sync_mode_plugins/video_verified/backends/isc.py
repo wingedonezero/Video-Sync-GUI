@@ -2,15 +2,15 @@
 """ISC ft_v107 neural backend — the original Image Similarity Challenge model.
 
 52M params, 512×512 input, 256-dim L2-normalized descriptor. Runs on GPU.
-Same architecture and behavior as the legacy ``isc_model.py`` +
-``neural_matcher._extract_features_batch``/``_frame_to_tensor`` pipeline,
-now exposed through the unified ``SlidingBackend`` protocol.
+Architecture is EfficientNetV2-M (via timm) + GeM pooling + FC + BN +
+L2 normalize, reconstructed from the stripped-checkpoint format shipped
+with the project's setup GUI.
 
-Weights file: ``models/isc/isc_ft_v107_weights.pt`` (downloaded by the
+Weights file: ``models/isc/isc_ft_v107_weights.pt`` (downloaded via the
 ISC button in ``setup_gui.py``).
 
 Normalization: (0.5, 0.5, 0.5) mean and std — NOT ImageNet defaults.
-Input: 512×512 RGB tensor.
+Input: 512×512 RGB tensor (bilinear resize).
 Output: 256-dim L2-normalized descriptor.
 """
 
