@@ -37,43 +37,42 @@ class ChaptersAuditor(BaseAuditor):
         if self.ctx.chapters_xml:
             # Chapters were PROCESSED - compare final vs processed
             self.log("  → Chapter processing was enabled")
-            return self._verify_processed_chapters(final_chapters_xml)
+            self._verify_processed_chapters(final_chapters_xml)
         else:
             # Chapters were NOT processed - compare final vs source
             self.log("  → Chapter processing was not enabled")
-            return self._verify_unprocessed_chapters(
+            self._verify_unprocessed_chapters(
                 source_chapters_xml,
                 final_chapters_xml,
                 source_has_chapters,
                 final_has_chapters,
             )
 
-    def _verify_processed_chapters(self, final_chapters_xml: str | None) -> int:
+        return len(self.issues)
+
+    def _verify_processed_chapters(self, final_chapters_xml: str | None) -> None:
         """
         Verify that the processed chapters made it into the final file.
         Compares final file chapters against ctx.chapters_xml (the processed version).
         """
-        issues = 0
 
         # Load the processed chapters XML
         try:
             processed_xml_path = Path(self.ctx.chapters_xml)
             if not processed_xml_path.exists():
-                self.log(
-                    f"[WARNING] Processed chapters XML file not found: {processed_xml_path}"
+                self._report(
+                    f"Processed chapters XML file not found: {processed_xml_path}"
                 )
-                return 1
+                return
 
             processed_xml_content = processed_xml_path.read_text(encoding="utf-8")
         except Exception as e:
-            self.log(f"[WARNING] Could not read processed chapters XML: {e}")
-            return 1
+            self._report(f"Could not read processed chapters XML: {e}")
+            return
 
         if not final_chapters_xml:
-            self.log(
-                "[WARNING] Chapters were processed but are MISSING from the final file!"
-            )
-            return 1
+            self._report("Chapters were processed but are MISSING from the final file")
+            return
 
         # Compare processed vs final
         try:
@@ -101,15 +100,18 @@ class ChaptersAuditor(BaseAuditor):
 
             # Check 1: Count must match
             if len(processed_atoms) != len(final_atoms):
-                self.log(
-                    f"[WARNING] Chapter count mismatch! Processed: {len(processed_atoms)}, Final: {len(final_atoms)}"
+                self._report(
+                    f"Chapter count mismatch! Processed: "
+                    f"{len(processed_atoms)}, Final: {len(final_atoms)}"
                 )
-                return 1
+                return
 
             self.log(f"  ✓ Chapter count: {len(final_atoms)} chapters")
 
+            before_count = len(self.issues)
+
             # Check 2: Verify timestamps match (processed chapters should have been applied)
-            issues += self._compare_timestamps(
+            self._compare_timestamps(
                 processed_atoms,
                 final_atoms,
                 processed_prefix,
@@ -120,26 +122,19 @@ class ChaptersAuditor(BaseAuditor):
 
             # Check 3: If renaming was enabled, verify it was applied
             if self.ctx.settings.rename_chapters:
-                issues += self._verify_rename_applied(
-                    final_atoms, final_prefix, final_nsmap
-                )
+                self._verify_rename_applied(final_atoms, final_prefix, final_nsmap)
 
             # Check 4: Basic sanity checks
-            issues += self._check_for_duplicates(final_atoms, final_prefix, final_nsmap)
-            issues += self._check_timestamp_sanity(
-                final_atoms, final_prefix, final_nsmap
-            )
+            self._check_for_duplicates(final_atoms, final_prefix, final_nsmap)
+            self._check_timestamp_sanity(final_atoms, final_prefix, final_nsmap)
 
-            if issues == 0:
+            if len(self.issues) == before_count:
                 self.log(
                     f"✅ Processed chapters correctly merged ({len(final_atoms)} chapter(s) verified)."
                 )
 
         except Exception as e:
-            self.log(f"[WARNING] Could not verify processed chapters: {e}")
-            issues += 1
-
-        return issues
+            self._report(f"Could not verify processed chapters: {e}")
 
     def _verify_unprocessed_chapters(
         self,
@@ -147,29 +142,27 @@ class ChaptersAuditor(BaseAuditor):
         final_xml: str | None,
         source_has_chapters: bool,
         final_has_chapters: bool,
-    ) -> int:
+    ) -> None:
         """
         Verify chapters when processing was NOT enabled.
         Final should match source exactly.
         """
-        issues = 0
-
         if not source_has_chapters and not final_has_chapters:
             self.log("✅ No chapters in source or final file (as expected).")
-            return 0
+            return
 
         if not source_has_chapters and final_has_chapters:
             chapter_count = self._count_chapters(final_xml)
             self.log(
                 f"[INFO] Final file has {chapter_count} chapter(s) (none in source)."
             )
-            return 0
+            return
 
         if source_has_chapters and not final_has_chapters:
-            self.log(
-                "[WARNING] Source file had chapters but they are MISSING from the final file!"
+            self._report(
+                "Source file had chapters but they are MISSING from the final file"
             )
-            return 1
+            return
 
         # Both have chapters - verify they match
         try:
@@ -177,19 +170,16 @@ class ChaptersAuditor(BaseAuditor):
             final_count = self._count_chapters(final_xml)
 
             if source_count != final_count:
-                self.log(
-                    f"[WARNING] Chapter count mismatch! Source: {source_count}, Final: {final_count}"
+                self._report(
+                    f"Chapter count mismatch! Source: {source_count}, "
+                    f"Final: {final_count}"
                 )
-                issues += 1
             else:
                 self.log(
                     f"✅ Chapters preserved successfully ({final_count} chapter(s) found)."
                 )
         except Exception as e:
-            self.log(f"[WARNING] Could not verify chapter count: {e}")
-            issues += 1
-
-        return issues
+            self._report(f"Could not verify chapter count: {e}")
 
     def _compare_timestamps(
         self,
@@ -199,12 +189,12 @@ class ChaptersAuditor(BaseAuditor):
         final_prefix: str,
         proc_nsmap: dict,
         final_nsmap: dict,
-    ) -> int:
+    ) -> None:
         """
         Compare timestamps between processed and final chapters.
         They should match exactly if processing was applied correctly.
         """
-        issues = 0
+        mismatches = 0
 
         for i, (proc_atom, final_atom) in enumerate(
             zip(processed_atoms, final_atoms), 1
@@ -225,7 +215,12 @@ class ChaptersAuditor(BaseAuditor):
                     self.log(
                         "          → Processed chapters were not merged correctly!"
                     )
-                    issues += 1
+                    self._track_issue(
+                        f"Chapter {i} start time mismatch: processed "
+                        f"{proc_start.text}, final {final_start.text} "
+                        "(processed chapters not merged correctly)"
+                    )
+                    mismatches += 1
 
             # Compare end times
             proc_end = proc_atom.find(
@@ -242,14 +237,12 @@ class ChaptersAuditor(BaseAuditor):
                         f"[INFO] Chapter {i} end time differs (may be normalized differently)"
                     )
 
-        if issues == 0:
+        if mismatches == 0:
             self.log("  ✓ All chapter timestamps match processed version")
 
-        return issues
-
-    def _verify_rename_applied(self, atoms, prefix: str, nsmap: dict) -> int:
+    def _verify_rename_applied(self, atoms, prefix: str, nsmap: dict) -> None:
         """Verify chapters were renamed to 'Chapter NN' format."""
-        issues = 0
+        renamed_issues = 0
         expected_pattern = re.compile(r"^Chapter \d{2}$")
 
         for i, atom in enumerate(atoms, 1):
@@ -257,18 +250,15 @@ class ChaptersAuditor(BaseAuditor):
             if name_node is not None and name_node.text:
                 actual_name = name_node.text
                 if not expected_pattern.match(actual_name):
-                    self.log(
-                        f"[WARNING] Chapter {i} was not renamed: '{actual_name}' (expected 'Chapter {i:02d}')"
+                    self._report(
+                        f"Chapter {i} was not renamed: '{actual_name}' "
+                        f"(expected 'Chapter {i:02d}') - chapter renaming "
+                        "was enabled but not applied"
                     )
-                    self.log(
-                        "          → Chapter renaming was enabled but not applied!"
-                    )
-                    issues += 1
+                    renamed_issues += 1
 
-        if issues == 0:
+        if renamed_issues == 0:
             self.log("  ✓ Chapter renaming applied correctly")
-
-        return issues
 
     def _extract_chapters(self, file_path) -> str | None:
         """Extract chapters XML from a file, return None if no chapters."""
@@ -302,9 +292,8 @@ class ChaptersAuditor(BaseAuditor):
             return {"def": ns_uri}, "def:"
         return None, ""
 
-    def _check_for_duplicates(self, atoms, prefix: str, nsmap: dict) -> int:
+    def _check_for_duplicates(self, atoms, prefix: str, nsmap: dict) -> None:
         """Check for duplicate chapter start times."""
-        issues = 0
         start_times = []
 
         for atom in atoms:
@@ -313,17 +302,14 @@ class ChaptersAuditor(BaseAuditor):
                 start_times.append(st_el.text)
 
         if len(start_times) != len(set(start_times)):
-            self.log("[WARNING] Found duplicate chapter start times!")
-            issues += 1
+            self._report("Found duplicate chapter start times")
         else:
             self.log("  ✓ No duplicate chapter timestamps")
 
-        return issues
-
-    def _check_timestamp_sanity(self, atoms, prefix: str, nsmap: dict) -> int:
+    def _check_timestamp_sanity(self, atoms, prefix: str, nsmap: dict) -> None:
         """Basic timestamp sanity checks."""
-        issues = 0
         prev_start = None
+        sanity_issues = 0
 
         for i, atom in enumerate(atoms, 1):
             st_el = atom.find(f"{prefix}ChapterTimeStart", namespaces=nsmap)
@@ -334,20 +320,16 @@ class ChaptersAuditor(BaseAuditor):
 
                 # Check timestamps are increasing
                 if prev_start and curr_start <= prev_start:
-                    self.log(
-                        f"[WARNING] Chapter {i} timestamp is not in ascending order!"
-                    )
-                    issues += 1
+                    self._report(f"Chapter {i} timestamp is not in ascending order")
+                    sanity_issues += 1
 
                 # Check start < end
                 if en_el is not None and en_el.text:
                     if curr_start >= en_el.text:
-                        self.log(f"[WARNING] Chapter {i} start time >= end time!")
-                        issues += 1
+                        self._report(f"Chapter {i} start time >= end time")
+                        sanity_issues += 1
 
                 prev_start = curr_start
 
-        if issues == 0:
+        if sanity_issues == 0:
             self.log("  ✓ Chapter timestamps are in correct order")
-
-        return issues

@@ -2,14 +2,18 @@
 """
 Result auditor component.
 
-Wraps the FinalAuditor for post-merge validation.
+Wraps the FinalAuditor for post-merge validation. Returns both the issue
+count (for the legacy tally) and the structured list of issues so the
+pipeline can surface them in the batch report.
 """
 
 from collections.abc import Callable
 from pathlib import Path
 
 from ..io.runner import CommandRunner
+from ..orchestrator.steps.context import Context
 from ..postprocess import FinalAuditor
+from ..postprocess.auditors import AuditIssue
 
 
 class ResultAuditor:
@@ -18,10 +22,10 @@ class ResultAuditor:
     @staticmethod
     def audit_output(
         output_file: Path,
-        context: object,
+        context: Context,
         runner: CommandRunner,
         log_callback: Callable[[str], None],
-    ) -> int:
+    ) -> tuple[int, list[AuditIssue]]:
         """
         Audits the merged output file.
 
@@ -32,15 +36,15 @@ class ResultAuditor:
             log_callback: Logging callback function
 
         Returns:
-            Number of issues found (0 = no issues)
+            Tuple of (issue count, structured issue list). On failure the
+            count is 0 and the list is empty — the error is logged via
+            ``log_callback``.
         """
         log_callback("--- Post-Merge: Running Final Audit ---")
-        issues = 0
 
         try:
             auditor = FinalAuditor(context, runner)
-            issues = auditor.run(output_file)
+            return auditor.run(output_file)
         except Exception as audit_error:
             log_callback(f"[ERROR] Final audit step failed: {audit_error}")
-
-        return issues
+            return 0, []

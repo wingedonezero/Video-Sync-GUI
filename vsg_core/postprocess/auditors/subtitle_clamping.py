@@ -10,7 +10,6 @@ content in the first few seconds of the video.
 
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -32,7 +31,6 @@ class SubtitleClampingAuditor(BaseAuditor):
         Audits subtitle clamping.
         Returns the number of tracks with clamped events.
         """
-        issues = 0
         clamped_tracks = []
 
         # Check all subtitle items for clamping info
@@ -65,16 +63,23 @@ class SubtitleClampingAuditor(BaseAuditor):
             self.log(
                 "    These events will appear at 0ms instead of their calculated times"
             )
-            issues += 1
+            self._track_issue(
+                f"{track['name']} ({track['source']}): "
+                f"{info['events_clamped']} event(s) clamped to 0ms "
+                f"(delay {info['delay_ms']:+.1f}ms, negative range "
+                f"{info['min_time_ms']:.0f}ms to {info['max_time_ms']:.0f}ms) "
+                "- early subtitle events may be slightly out of sync"
+            )
 
         # Summary
-        if issues > 0:
+        if self.issues:
             self.log(
-                f"\n[INFO] {issues} subtitle track(s) had events clamped due to negative timestamps"
+                f"\n[INFO] {len(self.issues)} subtitle track(s) had events "
+                "clamped due to negative timestamps"
             )
             self.log(
                 "       This is a format limitation (ASS/SRT cannot store negative times)"
             )
             self.log("       Early subtitle events may be slightly out of sync")
 
-        return issues
+        return len(self.issues)

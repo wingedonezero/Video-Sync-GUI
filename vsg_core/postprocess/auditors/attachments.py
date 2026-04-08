@@ -18,7 +18,6 @@ class AttachmentsAuditor(BaseAuditor):
 
         Returns the number of issues found.
         """
-        issues = 0
         actual_attachments = final_mkvmerge_data.get("attachments", [])
 
         if not self.ctx.attachments:
@@ -35,13 +34,11 @@ class AttachmentsAuditor(BaseAuditor):
 
         # Check 1: Count
         if actual_count < expected_count:
-            self.log(
-                f"[WARNING] Expected {expected_count} attachments but only found {actual_count}."
+            self._report(
+                f"Expected {expected_count} attachments but only found "
+                f"{actual_count} - some fonts may be missing, which could "
+                "affect subtitle rendering"
             )
-            self.log(
-                "         Some fonts may be missing, which could affect subtitle rendering."
-            )
-            issues += 1
             # Don't return early - check what we do have
         elif actual_count > expected_count:
             self.log(
@@ -59,30 +56,27 @@ class AttachmentsAuditor(BaseAuditor):
                         {"name": att_file.name, "size": att_file.stat().st_size}
                     )
             except Exception as e:
-                self.log(
-                    f"[WARNING] Could not read expected attachment {att_path}: {e}"
-                )
+                self._report(f"Could not read expected attachment {att_path}: {e}")
 
         if not expected_attachments:
             self.log("✅ Could not verify attachment details (files not accessible).")
-            return issues
+            return len(self.issues)
 
         # Check 3: Verify each expected attachment is present
-        issues += self._verify_attachments(expected_attachments, actual_attachments)
+        self._verify_attachments(expected_attachments, actual_attachments)
 
-        if issues == 0:
+        if not self.issues:
             self.log(
                 f"✅ All {len(expected_attachments)} attachment(s) verified correctly."
             )
 
-        return issues
+        return len(self.issues)
 
-    def _verify_attachments(self, expected: list[dict], actual: list[dict]) -> int:
+    def _verify_attachments(self, expected: list[dict], actual: list[dict]) -> None:
         """
-        Verify expected attachments are in the final file with correct names and reasonable sizes.
+        Verify expected attachments are in the final file with correct names
+        and reasonable sizes. Issues are appended to ``self.issues``.
         """
-        issues = 0
-
         for exp_att in expected:
             exp_name = exp_att["name"]
             exp_size = exp_att["size"]
@@ -96,10 +90,9 @@ class AttachmentsAuditor(BaseAuditor):
                     break
 
             if not matching:
-                self.log(
-                    f"[WARNING] Expected attachment '{exp_name}' not found in final file!"
+                self._report(
+                    f"Expected attachment '{exp_name}' not found in final file"
                 )
-                issues += 1
                 continue
 
             # Check size
@@ -116,23 +109,21 @@ class AttachmentsAuditor(BaseAuditor):
                 self.log(f"  ✓ Attachment '{exp_name}' verified ({act_size:,} bytes)")
             elif act_size < 100:
                 # File was truncated to almost nothing - definitely wrong
-                self.log(f"[WARNING] Attachment '{exp_name}' appears corrupted!")
-                self.log(f"          Expected: {exp_size:,} bytes")
-                self.log(f"          Actual:   {act_size:,} bytes (likely truncated)")
-                issues += 1
+                self._report(
+                    f"Attachment '{exp_name}' appears corrupted "
+                    f"(expected {exp_size:,} bytes, got {act_size:,} bytes, "
+                    "likely truncated)"
+                )
             elif size_diff_pct > 5.0:
                 # Size differs by more than 5% - might be wrong file
-                self.log(f"[WARNING] Attachment '{exp_name}' size mismatch!")
-                self.log(f"          Expected: {exp_size:,} bytes")
-                self.log(
-                    f"          Actual:   {act_size:,} bytes ({size_diff_pct:.1f}% difference)"
+                self._report(
+                    f"Attachment '{exp_name}' size mismatch "
+                    f"(expected {exp_size:,} bytes, got {act_size:,} bytes, "
+                    f"{size_diff_pct:.1f}% difference) - may be a different "
+                    "version of the file"
                 )
-                self.log("          → May be a different version of the file")
-                issues += 1
             else:
                 # Size is close enough
                 self.log(
                     f"  ✓ Attachment '{exp_name}' verified ({act_size:,} bytes, within tolerance)"
                 )
-
-        return issues

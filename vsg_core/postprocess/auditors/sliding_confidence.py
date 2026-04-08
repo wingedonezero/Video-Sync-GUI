@@ -42,8 +42,6 @@ class SlidingConfidenceAuditor(BaseAuditor):
         Returns the total number of warnings (LOW confidence +
         PTS corrections + cross-check disagreements).
         """
-        issues = 0
-
         # Skip entirely if no video-verified sources exist
         if not self.ctx.video_verified_sources:
             return 0
@@ -85,7 +83,11 @@ class SlidingConfidenceAuditor(BaseAuditor):
                     f"Audio correlation: {audio_ms:+.1f}ms"
                 )
                 self.log("    Subtitle timing may need manual verification")
-                issues += 1
+                self._track_issue(
+                    f"{source_key}: LOW confidence ({backend_display}, "
+                    f"{positions_str}, score {mean_score:.4f}) - subtitle "
+                    "timing may need manual verification"
+                )
             else:
                 self.log(
                     f"  \u2713 {source_key}: {confidence} confidence "
@@ -117,7 +119,11 @@ class SlidingConfidenceAuditor(BaseAuditor):
                     "    Rare edge case; please verify subs manually in "
                     "the output file."
                 )
-                issues += 1
+                self._track_issue(
+                    f"{source_key}: PTS correction applied "
+                    f"({delta_f:+d}f / {delta_s * 1000:+.1f}ms) - rare edge "
+                    "case, please verify subs manually in the output file"
+                )
 
             # Cross-check disagreement — when a secondary backend was
             # configured and its result differs from the primary beyond
@@ -149,14 +155,20 @@ class SlidingConfidenceAuditor(BaseAuditor):
                         "    Two backends disagree — please verify subs "
                         "manually in the output file."
                     )
-                    issues += 1
+                    self._track_issue(
+                        f"{source_key}: Cross-check disagreement "
+                        f"(primary={video_offset_ms:+.1f}ms vs "
+                        f"{cross_backend}={cross_offset}ms) - two backends "
+                        "disagree, please verify subs manually"
+                    )
 
-        if issues == 0:
+        total = len(self.issues)
+        if total == 0:
             self.log("\u2705 All sliding-window verification checks passed.")
         else:
             self.log(
-                f"\u26a0\ufe0f  {issues} sliding-window warning(s) — "
+                f"\u26a0\ufe0f  {total} sliding-window warning(s) — "
                 "review sync quality for flagged sources"
             )
 
-        return issues
+        return total

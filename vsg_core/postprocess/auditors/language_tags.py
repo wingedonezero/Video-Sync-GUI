@@ -14,7 +14,6 @@ class LanguageTagsAuditor(BaseAuditor):
         Audits language tags, respecting custom language overrides.
         Returns the number of issues found.
         """
-        issues = 0
         final_tracks = final_mkvmerge_data.get("tracks", [])
         plan_items = self.ctx.extracted_items
 
@@ -32,12 +31,12 @@ class LanguageTagsAuditor(BaseAuditor):
 
             if expected_lang != actual_lang:
                 track_name = item.track.props.name or f"Track {i}"
-                self.log(f"[WARNING] Language tag mismatch for '{track_name}':")
-                self.log(f"          Expected: '{expected_lang}'")
-                self.log(f"          Actual:   '{actual_lang}'")
-                issues += 1
+                self._report(
+                    f"Language tag mismatch for '{track_name}': expected "
+                    f"'{expected_lang}', actual '{actual_lang}'"
+                )
 
-        if issues == 0:
+        if not self.issues:
             self.log("✅ All language tags are correct.")
 
-        return issues
+        return len(self.issues)

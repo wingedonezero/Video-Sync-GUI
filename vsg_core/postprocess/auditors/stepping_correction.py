@@ -28,8 +28,6 @@ class SteppingCorrectionAuditor(BaseAuditor):
         Audits stepping corrections.
         Returns the number of issues found.
         """
-        issues = 0
-
         if not self.ctx.segment_flags:
             return 0
 
@@ -59,7 +57,7 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 continue
 
             self.log(f"\n  → Analyzing stepping corrections for {source_key}...")
-            source_issues = 0
+            source_issues_start = len(self.issues)
 
             for idx, boundary in enumerate(audit_metadata, 1):
                 target_time_s = boundary.get("target_time_s", 0)
@@ -109,8 +107,12 @@ class SteppingCorrectionAuditor(BaseAuditor):
                             "amount_s": amount_s,
                         },
                     )
-                    issues += 1
-                    source_issues += 1
+                    self._track_issue(
+                        f"{source_key} at {target_time_s:.1f}s: no silence "
+                        f"zone found - correction applied at raw boundary "
+                        "without silence guarantee (high risk of cutting "
+                        "dialogue/music)"
+                    )
 
                 # Check 1: Silence overflow (only for removals)
                 if (
@@ -139,8 +141,11 @@ class SteppingCorrectionAuditor(BaseAuditor):
                             "zone_duration": zone_duration,
                         },
                     )
-                    issues += 1
-                    source_issues += 1
+                    self._track_issue(
+                        f"{source_key} at {target_time_s:.1f}s: silence "
+                        f"overflow ({overflow_s:.3f}s beyond available "
+                        "silence) - may cut into dialogue/music"
+                    )
 
                 # Check 2: Low boundary score
                 elif score < min_boundary_score:
@@ -167,8 +172,11 @@ class SteppingCorrectionAuditor(BaseAuditor):
                             "threshold": min_boundary_score,
                         },
                     )
-                    issues += 1
-                    source_issues += 1
+                    self._track_issue(
+                        f"{source_key} at {target_time_s:.1f}s: low boundary "
+                        f"score {score:.1f} (threshold {min_boundary_score:.1f}) "
+                        "- weak silence, may cut into dialogue/music"
+                    )
 
                 # Check 3: Speech detected
                 elif overlaps_speech:
@@ -190,8 +198,10 @@ class SteppingCorrectionAuditor(BaseAuditor):
                             "amount_s": amount_s,
                         },
                     )
-                    issues += 1
-                    source_issues += 1
+                    self._track_issue(
+                        f"{source_key} at {target_time_s:.1f}s: speech "
+                        "detected near boundary - may cut dialogue"
+                    )
 
                 # Check 4: Transient detected (informational only, not counted as issue)
                 elif near_transient:
@@ -224,7 +234,7 @@ class SteppingCorrectionAuditor(BaseAuditor):
                             "      Note: Video snap skipped to maintain silence guarantee"
                         )
 
-            if source_issues == 0:
+            if len(self.issues) == source_issues_start:
                 self.log(f"  ✅ {source_key}: All quality checks passed")
 
         # Summary
@@ -244,7 +254,7 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 f"    {len(self.ctx.stepping_sources)} source(s) corrected with no detected issues"
             )
 
-        return issues
+        return len(self.issues)
 
     def _add_quality_issue(
         self, source: str, issue_type: str, severity: str, message: str, details: dict

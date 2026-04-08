@@ -5,7 +5,6 @@ Auditor for verifying drift corrections were applied correctly.
 
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -22,8 +21,6 @@ class DriftCorrectionAuditor(BaseAuditor):
         Audits drift corrections.
         Returns the number of issues found.
         """
-        issues = 0
-
         total_corrections = (
             len(self.ctx.pal_drift_flags)
             + len(self.ctx.linear_drift_flags)
@@ -36,28 +33,19 @@ class DriftCorrectionAuditor(BaseAuditor):
 
         self.log(f"  → Verifying {total_corrections} drift correction(s)...")
 
-        issues += self._verify_correction_type(self.ctx.pal_drift_flags, "PAL Drift")
+        self._verify_correction_type(self.ctx.pal_drift_flags, "PAL Drift")
+        self._verify_correction_type(self.ctx.linear_drift_flags, "Linear Drift")
+        self._verify_correction_type(self.ctx.segment_flags, "Stepping")
 
-        issues += self._verify_correction_type(
-            self.ctx.linear_drift_flags, "Linear Drift"
-        )
-
-        issues += self._verify_correction_type(self.ctx.segment_flags, "Stepping")
-
-        if issues == 0:
+        if not self.issues:
             self.log(
                 f"✅ All {total_corrections} drift correction(s) verified successfully."
             )
 
-        return issues
+        return len(self.issues)
 
-    def _verify_correction_type(self, flag_dict: dict, correction_name: str) -> int:
-        """
-        Verify corrections for a specific correction type.
-        Returns number of issues found.
-        """
-        issues = 0
-
+    def _verify_correction_type(self, flag_dict: dict, correction_name: str) -> None:
+        """Verify corrections for a specific correction type."""
         for analysis_key in flag_dict:
             source_key = analysis_key.split("_")[0]
 
@@ -73,30 +61,23 @@ class DriftCorrectionAuditor(BaseAuditor):
             ]
 
             if not corrected_items:
-                self.log(
-                    f"[WARNING] {correction_name} correction was flagged for "
-                    f"{source_key} but no corrected track found in final file!"
+                self._report(
+                    f"{correction_name} correction was flagged for "
+                    f"{source_key} but no corrected track found in final "
+                    "file - correction step failed silently"
                 )
-                self.log(
-                    "          This indicates the correction step failed silently."
-                )
-                issues += 1
                 continue
 
             for item in corrected_items:
                 track_name = item.track.props.name or f"Track {item.track.id}"
 
                 if item.track.props.codec_id != "FLAC":
-                    self.log(
-                        f"[WARNING] {correction_name} corrected track '{track_name}' "
-                        f"({source_key}) is not FLAC!"
+                    self._report(
+                        f"{correction_name} corrected track '{track_name}' "
+                        f"({source_key}) is not FLAC - expected FLAC, got "
+                        f"{item.track.props.codec_id}; correction may not "
+                        "have been applied correctly"
                     )
-                    self.log("          Expected: FLAC")
-                    self.log(f"          Actual:   {item.track.props.codec_id}")
-                    self.log(
-                        "          → Correction may not have been applied correctly."
-                    )
-                    issues += 1
                 else:
                     self.log(
                         f"  ✓ {correction_name} correction verified for "
@@ -114,13 +95,8 @@ class DriftCorrectionAuditor(BaseAuditor):
                 ]
 
                 if not preserved_items:
-                    self.log(
-                        f"[WARNING] No preserved original found for corrected track "
-                        f"'{track_name}' ({source_key})"
+                    self._report(
+                        f"No preserved original found for corrected track "
+                        f"'{track_name}' ({source_key}) - original audio "
+                        "was not preserved for comparison"
                     )
-                    self.log(
-                        "          Original audio was not preserved for comparison."
-                    )
-                    issues += 1
-
-        return issues

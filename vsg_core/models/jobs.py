@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vsg_core.postprocess.auditors import AuditIssue
+
     from .context_types import (
         FilterConfig,
         FontReplacements,
@@ -114,6 +116,7 @@ class PipelineResult:
     delays: dict[str, int] | None = None
     error: str | None = None
     issues: int = 0
+    audit_details: list[AuditIssue] = field(default_factory=list)
     stepping_sources: list[str] = field(default_factory=list)
     stepping_detected_disabled: list[str] = field(default_factory=list)
     stepping_detected_separated: list[str] = field(default_factory=list)

@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/audio_quality.py
 from pathlib import Path
 
-
 from .base import BaseAuditor
 
 
@@ -18,12 +17,9 @@ class AudioQualityAuditor(BaseAuditor):
         if not final_ffprobe_data:
             return 0
 
-        issues = 0
         actual_streams = final_ffprobe_data.get("streams", [])
         audio_items = [
-            item
-            for item in self.ctx.extracted_items
-            if item.track.type == "audio"
+            item for item in self.ctx.extracted_items if item.track.type == "audio"
         ]
 
         for plan_item in audio_items:
@@ -82,15 +78,18 @@ class AudioQualityAuditor(BaseAuditor):
                 actual_rate = int(actual_sample_rate)
 
                 if source_rate != actual_rate:
-                    self.log(
-                        f"[WARNING] Sample rate changed for '{track_name}' ({plan_item.track.source}):"
-                    )
-                    self.log(f"          Source: {source_rate} Hz")
-                    self.log(f"          Output: {actual_rate} Hz")
-
                     if actual_rate < source_rate:
-                        self.log("          CRITICAL: Audio was downsampled!")
-                        issues += 1
+                        self._report(
+                            f"Sample rate reduced for '{track_name}' "
+                            f"({plan_item.track.source}): {source_rate} Hz -> "
+                            f"{actual_rate} Hz (CRITICAL: audio was downsampled)"
+                        )
+                    else:
+                        self.log(
+                            f"[WARNING] Sample rate changed for '{track_name}' "
+                            f"({plan_item.track.source}): {source_rate} Hz -> "
+                            f"{actual_rate} Hz"
+                        )
 
             # Check bit depth
             source_bits = source_audio.get("bits_per_sample") or source_audio.get(
@@ -106,22 +105,25 @@ class AudioQualityAuditor(BaseAuditor):
                     actual_depth = int(actual_bits)
 
                     if source_depth != actual_depth:
-                        self.log(
-                            f"[WARNING] Bit depth changed for '{track_name}' ({plan_item.track.source}):"
-                        )
-                        self.log(f"          Source: {source_depth}-bit")
-                        self.log(f"          Output: {actual_depth}-bit")
-
                         if actual_depth < source_depth:
-                            self.log("          CRITICAL: Bit depth reduced!")
-                            issues += 1
+                            self._report(
+                                f"Bit depth reduced for '{track_name}' "
+                                f"({plan_item.track.source}): {source_depth}-bit "
+                                f"-> {actual_depth}-bit (CRITICAL: bit depth reduced)"
+                            )
+                        else:
+                            self.log(
+                                f"[WARNING] Bit depth changed for '{track_name}' "
+                                f"({plan_item.track.source}): {source_depth}-bit "
+                                f"-> {actual_depth}-bit"
+                            )
                 except (ValueError, TypeError):
                     pass
 
-        if issues == 0:
+        if not self.issues:
             self.log("✅ All audio quality parameters preserved correctly.")
 
-        return issues
+        return len(self.issues)
 
     def _get_audio_stream_index_from_track_id(
         self, mkv_data: dict, track_id: int

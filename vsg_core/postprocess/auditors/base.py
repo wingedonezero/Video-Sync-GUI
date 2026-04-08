@@ -6,6 +6,8 @@ from vsg_core.io.runner import CommandRunner
 from vsg_core.models.jobs import PlanItem
 from vsg_core.orchestrator.steps.context import Context
 
+from .issue import AuditIssue, SeverityStr
+
 
 class BaseAuditor:
     """
@@ -17,6 +19,7 @@ class BaseAuditor:
         self.runner = runner
         self.tool_paths = ctx.tool_paths
         self.log = runner._log_message
+        self.issues: list[AuditIssue] = []
         self._source_ffprobe_cache: dict[str, dict | None] = {}
         self._source_mkvmerge_cache: dict[str, dict | None] = {}
 
@@ -33,6 +36,41 @@ class BaseAuditor:
             Number of issues found
         """
         raise NotImplementedError("Subclasses must implement run()")
+
+    # ========================================================================
+    # ISSUE REPORTING
+    # ========================================================================
+
+    def _auditor_name(self) -> str:
+        """Short display name for this auditor (strips trailing 'Auditor')."""
+        name = type(self).__name__
+        return name.removesuffix("Auditor") or name
+
+    def _report(self, message: str, severity: SeverityStr = "warning") -> None:
+        """
+        Log a problem AND append it to this auditor's structured issue list.
+
+        Use this instead of ``self.log("[WARNING] ...")`` + ``issues += 1``
+        for any finding that should show up in the batch report dialog.
+        """
+        prefix = "[ERROR]" if severity == "error" else "[WARNING]"
+        self.log(f"{prefix} {message}")
+        self._track_issue(message, severity)
+
+    def _track_issue(self, message: str, severity: SeverityStr = "warning") -> None:
+        """
+        Append a structured issue WITHOUT logging.
+
+        Use when the auditor already emits a detailed multi-line log block
+        and you just want a concise summary surfaced to the batch report.
+        """
+        self.issues.append(
+            AuditIssue(
+                auditor=self._auditor_name(),
+                severity=severity,
+                message=message,
+            )
+        )
 
     # ========================================================================
     # SHARED UTILITY METHODS
