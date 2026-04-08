@@ -1,25 +1,44 @@
 # vsg_core/postprocess/auditors/neural_confidence.py
 """
-Auditor for neural (ISC) video verification confidence.
+Auditor for sliding-window video verification confidence.
 
-When ISC sequence sliding is used for subtitle sync, this auditor checks
-the confidence level and flags LOW results so the user knows to verify
-manually. Only runs when neural verification was actually used.
+When the sliding-window matcher is used for subtitle sync (any backend
+— ISC, SSCD, pHash, dHash, SSIM), this auditor checks the confidence
+level and flags LOW results so the user knows to verify manually. Also
+surfaces PTS correction events and cross-check disagreements.
+
+Renamed from the legacy "neural confidence" auditor; the Phase 4 refactor
+renames the file and class to ``SlidingConfidenceAuditor`` — this file
+still lives at ``neural_confidence.py`` during the transition so existing
+imports in ``auditors/__init__.py`` and ``postprocess/final_auditor.py``
+continue to work. The reason filter accepts both the new
+``"sliding-matched"`` string and the legacy ``"neural-matched"`` string
+so in-flight jobs from the transition period are still audited.
 """
 
 from pathlib import Path
 
 from .base import BaseAuditor
 
+# Reasons we treat as "this source went through the sliding matcher".
+# Phase 5 drops "neural-matched" from the set after we confirm no
+# producer emits it anymore.
+_SLIDING_REASONS = frozenset({"sliding-matched", "neural-matched"})
+
 
 class NeuralConfidenceAuditor(BaseAuditor):
     """
-    Checks neural verification confidence for each source that used ISC matching.
+    Checks sliding-window verification confidence for each source.
 
     Confidence levels:
       HIGH   = 90%+ positions agree AND mean score >= 0.98
       MEDIUM = 70%+ positions agree AND mean score >= 0.95
       LOW    = anything else (flagged as warning)
+
+    Additional surfaces (counted as issues):
+      - PTS correction events (when source start_pts != target start_pts)
+      - Cross-check disagreements (when a secondary backend disagrees
+        with the primary by more than the tolerance)
     """
 
     def run(
@@ -29,8 +48,9 @@ class NeuralConfidenceAuditor(BaseAuditor):
         final_ffprobe_data: dict | None = None,
     ) -> int:
         """
-        Audits neural verification confidence for all sources.
-        Returns the number of LOW confidence warnings.
+        Audits sliding-window verification confidence for all sources.
+        Returns the total number of warnings (LOW confidence +
+        PTS corrections + cross-check disagreements).
         """
         issues = 0
 
@@ -38,34 +58,37 @@ class NeuralConfidenceAuditor(BaseAuditor):
         if not self.ctx.video_verified_sources:
             return 0
 
-        # Filter to only sources that used neural matching
-        neural_sources: list[tuple[str, dict]] = []
+        # Filter to only sources that used the sliding matcher (any backend).
+        sliding_sources: list[tuple[str, dict]] = []
         for source_key, vv_result in self.ctx.video_verified_sources.items():
             details = vv_result.get("details")
             if not details:
                 continue
             reason = details.get("reason", "")
-            if reason == "neural-matched":
-                neural_sources.append((source_key, details))
+            if reason in _SLIDING_REASONS:
+                sliding_sources.append((source_key, details))
 
-        # Skip if no neural verification was used (classic mode or audio-only)
-        if not neural_sources:
+        # Skip if no sliding verification was used (classic mode or audio-only)
+        if not sliding_sources:
             return 0
 
-        for source_key, details in neural_sources:
+        for source_key, details in sliding_sources:
             confidence = details.get("confidence", "UNKNOWN")
             consensus_count = details.get("consensus_count", 0)
             num_positions = details.get("num_positions", 0)
             mean_score = details.get("mean_score", 0.0)
             video_offset_ms = details.get("video_offset_ms", 0.0)
             audio_ms = details.get("audio_correlation_ms", 0.0)
+            backend_display = details.get(
+                "backend_display_name", details.get("backend", "unknown")
+            )
 
             positions_str = f"{consensus_count}/{num_positions} positions"
 
             if confidence == "LOW":
                 self.log(
                     f"  \u26a0 {source_key}: LOW confidence "
-                    f"({positions_str}, score {mean_score:.4f})"
+                    f"({backend_display}, {positions_str}, score {mean_score:.4f})"
                 )
                 self.log(
                     f"    Video offset: {video_offset_ms:+.1f}ms, "
@@ -76,11 +99,11 @@ class NeuralConfidenceAuditor(BaseAuditor):
             else:
                 self.log(
                     f"  \u2713 {source_key}: {confidence} confidence "
-                    f"({positions_str}, score {mean_score:.4f})"
+                    f"({backend_display}, {positions_str}, score {mean_score:.4f})"
                 )
 
             # PTS correction flag — independent of confidence, always shown
-            # when the neural matcher had to compensate for a non-zero PTS
+            # when the sliding matcher had to compensate for a non-zero PTS
             # origin difference between source and target. Counts as an
             # issue so the job report surfaces it in the summary tally.
             if details.get("pts_correction_applied", False):
@@ -106,11 +129,43 @@ class NeuralConfidenceAuditor(BaseAuditor):
                 )
                 issues += 1
 
+            # Cross-check disagreement — when a secondary backend was
+            # configured and its result differs from the primary beyond
+            # the tolerance. Agreement is informational (no issue count).
+            cross_check = details.get("cross_check")
+            if cross_check:
+                cross_backend = cross_check.get("backend", "unknown")
+                cross_offset = cross_check.get("offset_ms")
+                diff_frames = cross_check.get("diff_frames")
+                tolerance = cross_check.get("tolerance_frames", 0)
+                agreed = cross_check.get("agreed", False)
+                if agreed:
+                    self.log(
+                        f"    \u2713 Cross-check agreed: {cross_backend} "
+                        f"within {tolerance} frame(s)"
+                    )
+                else:
+                    self.log(
+                        f"  \u26a0 {source_key}: Cross-check disagreement "
+                        f"(primary={video_offset_ms:+.1f}ms vs "
+                        f"{cross_backend}={cross_offset}ms)"
+                    )
+                    if diff_frames is not None:
+                        self.log(
+                            f"    Diff: {diff_frames:.1f} frames "
+                            f"(tolerance: {tolerance})"
+                        )
+                    self.log(
+                        "    Two backends disagree — please verify subs "
+                        "manually in the output file."
+                    )
+                    issues += 1
+
         if issues == 0:
-            self.log("\u2705 All neural verification checks passed.")
+            self.log("\u2705 All sliding-window verification checks passed.")
         else:
             self.log(
-                f"\u26a0\ufe0f  {issues} neural confidence warning(s) — "
+                f"\u26a0\ufe0f  {issues} sliding-window warning(s) — "
                 "review sync quality for flagged sources"
             )
 
