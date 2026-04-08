@@ -83,9 +83,12 @@ class SlidingBackend(Protocol):
         setup GUI and error messaging when weights are missing.
     needs_subprocess
         ``True`` if the backend should run inside the subprocess isolation
-        wrapper (applies to any backend that loads a large model into VRAM
-        — ISC, SSCD). Hash backends bypass subprocess isolation entirely
-        because their startup cost dwarfs their runtime.
+        wrapper. All current backends set this to True because torch's
+        CUDA/ROCm context leaks several GB of host RAM that only
+        ``os.exit()`` reclaims — even classical backends with no model
+        weights pay this cost the moment they import torch. The user can
+        still opt out via ``video_verified_run_in_subprocess`` if they
+        want fast startup at the cost of memory hygiene.
     weights_filename
         Filename of the weights file inside ``models/{backend_dir}/``.
         ``None`` for backends that require no weights (pHash, dHash, SSIM).

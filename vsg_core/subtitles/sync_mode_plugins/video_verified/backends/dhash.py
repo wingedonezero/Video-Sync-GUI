@@ -39,7 +39,11 @@ class DHashBackend:
     name = "dhash"
     display_name = "dHash (GPU)"
     requires_weights = False
-    needs_subprocess = False
+    # See PHashBackend for the rationale: subprocess isolation is needed
+    # even for weight-less classical backends because torch's CUDA/ROCm
+    # context (cuBLAS, MIOpen primitive caches, driver state) leaks
+    # several GB of host RAM that only os.exit() reclaims.
+    needs_subprocess = True
     weights_filename = None
 
     def __init__(self) -> None:

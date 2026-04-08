@@ -135,10 +135,13 @@ def _run_sliding(
     """Run the sliding-window matcher with the given backend.
 
     Runs in a subprocess when BOTH ``backend.needs_subprocess`` is True
-    AND the user has ``video_verified_run_in_subprocess`` enabled. Hash
-    backends (pHash, dHash, SSIM) have ``needs_subprocess=False`` on the
-    backend class and therefore ALWAYS run in-process — their startup
-    cost is negligible and there's no large VRAM model to isolate.
+    AND the user has ``video_verified_run_in_subprocess`` enabled. As
+    of the post-merge subprocess-symmetry fix, every backend (neural
+    AND classical) sets ``needs_subprocess=True`` because torch's
+    CUDA/ROCm context leaks several GB of host RAM that only os.exit()
+    reclaims — even classical backends with no model weights pay this
+    cost the moment they import torch. The user toggle still lets them
+    opt out for fast startup if they don't care about memory hygiene.
     """
     import json
 
