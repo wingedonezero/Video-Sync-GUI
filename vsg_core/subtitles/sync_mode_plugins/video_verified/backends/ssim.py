@@ -70,7 +70,13 @@ class SsimBackend:
     name = "ssim"
     display_name = "SSIM (GPU)"
     requires_weights = False
-    needs_subprocess = False
+    # See PHashBackend for the rationale: subprocess isolation is needed
+    # even for weight-less classical backends because torch's CUDA/ROCm
+    # context (cuBLAS, MIOpen primitive caches, driver state) leaks
+    # several GB of host RAM that only os.exit() reclaims. SSIM also
+    # keeps every src/tgt frame on-device for the slide loop, so its
+    # peak VRAM is even more important to clean up between sources.
+    needs_subprocess = True
     weights_filename = None
 
     def __init__(self) -> None:

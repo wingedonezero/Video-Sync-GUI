@@ -1774,13 +1774,21 @@ class SubtitleSyncTab(QWidget):
         self.widgets["video_verified_run_in_subprocess"] = QCheckBox()
         self.widgets["video_verified_run_in_subprocess"].setChecked(True)
         self.widgets["video_verified_run_in_subprocess"].setToolTip(
-            "Run neural backends in a separate subprocess:\n\n"
-            "ON (Default): Isolates GPU memory from the main application.\n"
-            "  Prevents memory conflicts with other GPU operations.\n\n"
-            "OFF: Run in the main process (faster startup, shared GPU memory).\n\n"
-            "Note: classical GPU backends (pHash, dHash, SSIM) always run\n"
-            "in-process regardless of this setting — their startup cost is\n"
-            "negligible and there's no large VRAM model to isolate."
+            "Run the matcher in a separate subprocess (applies to ALL backends):\n\n"
+            "ON (Default): Each backend invocation runs in an isolated\n"
+            "  subprocess that exits when the source is done. Reclaims the\n"
+            "  PyTorch CUDA/ROCm context (~1 GB VRAM + several GB host RAM)\n"
+            "  between sources. Prevents memory leaks from accumulating\n"
+            "  across long batch jobs. Adds ~3-4s subprocess startup per\n"
+            "  source.\n\n"
+            "OFF: Run in the main app process (faster startup, shared GPU\n"
+            "  memory). The torch CUDA/ROCm context will persist for the\n"
+            "  lifetime of the app — expect several GB of RAM and 1+ GB\n"
+            "  of VRAM held until the app exits, even after matching\n"
+            "  finishes. Recommended only for one-off jobs or debugging.\n\n"
+            "Applies equally to neural (ISC, SSCD) and classical (pHash,\n"
+            "dHash, SSIM) backends — both import torch and both leak\n"
+            "context state if not isolated."
         )
         vv_layout.addRow(
             "Run in Subprocess:",

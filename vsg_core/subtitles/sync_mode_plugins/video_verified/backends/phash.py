@@ -55,7 +55,15 @@ class PHashBackend:
     name = "phash"
     display_name = "pHash (GPU)"
     requires_weights = False
-    needs_subprocess = False
+    # We DO want subprocess isolation even though pHash has no model weights.
+    # Importing torch (for the GPU DCT path) lazy-initializes the CUDA/ROCm
+    # context, cuBLAS, cuDNN/MIOpen primitive caches, etc. — that state lives
+    # until the process exits and ``torch.cuda.empty_cache()`` does NOT
+    # reclaim it. Without subprocess isolation, every pHash run leaves
+    # several GB of host RAM and ~1 GB of VRAM allocated until the main
+    # app shuts down. Subprocess startup adds ~3-4s; the memory hygiene
+    # is worth the trade.
+    needs_subprocess = True
     weights_filename = None
 
     def __init__(self) -> None:
