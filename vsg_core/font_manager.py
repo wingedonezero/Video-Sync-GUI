@@ -89,6 +89,11 @@ class FontInfo:
             return
 
         try:
+            if TTFont is None:
+                self.family_name = self.file_path.stem
+                self.full_name = self.file_path.stem
+                self.is_valid = True
+                return
             font = TTFont(str(self.file_path), fontNumber=0)
             name_table = font.get("name")
 

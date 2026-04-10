@@ -58,6 +58,9 @@ class ChaptersAuditor(BaseAuditor):
 
         # Load the processed chapters XML
         try:
+            if not self.ctx.chapters_xml:
+                self._report("chapters_xml is set but empty — cannot verify processed chapters")
+                return
             processed_xml_path = Path(self.ctx.chapters_xml)
             if not processed_xml_path.exists():
                 self._report(
@@ -152,7 +155,7 @@ class ChaptersAuditor(BaseAuditor):
             return
 
         if not source_has_chapters and final_has_chapters:
-            chapter_count = self._count_chapters(final_xml)
+            chapter_count = self._count_chapters(final_xml or "")
             self.log(
                 f"[INFO] Final file has {chapter_count} chapter(s) (none in source)."
             )
@@ -166,8 +169,8 @@ class ChaptersAuditor(BaseAuditor):
 
         # Both have chapters - verify they match
         try:
-            source_count = self._count_chapters(source_xml)
-            final_count = self._count_chapters(final_xml)
+            source_count = self._count_chapters(source_xml or "")
+            final_count = self._count_chapters(final_xml or "")
 
             if source_count != final_count:
                 self._report(
@@ -266,6 +269,8 @@ class ChaptersAuditor(BaseAuditor):
             xml_content = self.runner.run(
                 ["mkvextract", str(file_path), "chapters", "-"], self.tool_paths
             )
+            if not isinstance(xml_content, str):
+                return None
             if (
                 xml_content
                 and xml_content.strip()

@@ -100,12 +100,15 @@ class CommandRunner:
             proc = subprocess.Popen(full_cmd, **popen_kwargs)
 
             # (THE FIX IS HERE) Pass input_data to communicate
-            stdout_data, stderr_data = proc.communicate(input=input_data)
+            # input_data is bytes | None; when is_binary=False, it is always None,
+            # so the text-mode communicate() receives None as expected.
+            stdout_data, stderr_data = proc.communicate(input=input_data)  # type: ignore[arg-type]
             rc = proc.returncode or 0
 
             # For binary mode, log any stderr separately (don't mix with binary data)
             if is_binary and stderr_data:
                 try:
+                    assert isinstance(stderr_data, bytes)
                     stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
                     if stderr_text:
                         self._log_message(f"[ffmpeg stderr] {stderr_text}")

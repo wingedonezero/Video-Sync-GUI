@@ -198,6 +198,11 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                 del ctx.stepping_edls[source_key]
                 continue
 
+            if ref_file_path is None:
+                log("[SteppingCorrection] No Source 1 file — skipping QA check.")
+                del ctx.stepping_edls[source_key]
+                continue
+
             passed, _qa_meta = verify_correction(
                 corrected_path=str(qa_path),
                 ref_file_path=ref_file_path,
@@ -333,6 +338,11 @@ def _find_analysis_track(
     source_key = analysis_track_key.split("_", maxsplit=1)[0]
     track_id = int(analysis_track_key.split("_")[1])
     source_path = ctx.sources.get(source_key)
+    if source_path is None:
+        runner._log_message(
+            f"[ERROR] No source path for {source_key} — cannot extract analysis track."
+        )
+        return None
 
     runner._log_message(
         f"[SteppingCorrection] Analysis track {analysis_track_key} "

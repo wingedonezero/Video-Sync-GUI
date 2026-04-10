@@ -18,7 +18,7 @@ class CodecIntegrityAuditor(BaseAuditor):
             return 0
 
         actual_streams = final_ffprobe_data.get("streams", [])
-        plan_items = self.ctx.extracted_items
+        plan_items = self.ctx.extracted_items or []
 
         for i, plan_item in enumerate(plan_items):
             if i >= len(actual_streams):
