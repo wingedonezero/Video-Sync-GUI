@@ -91,7 +91,7 @@ class OptionsDialog(QDialog):
         self.sections["logging"] = self._logging_tab.widgets
 
         # Save/Cancel
-        btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         v.addWidget(btns)
@@ -130,11 +130,11 @@ class OptionsDialog(QDialog):
             f"Found {len(orphaned)} invalid/orphaned config entries:\n\n{keys_list}\n\n"
             "These are old settings no longer used by the application.\n"
             "Remove them from settings.json?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
 
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             removed = self.config.remove_orphaned_keys()
             QMessageBox.information(
                 self,

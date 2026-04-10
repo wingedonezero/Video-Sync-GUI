@@ -137,7 +137,7 @@ class FavoritesManagerDialog(QDialog):
 
         for fav in favorites:
             item = QListWidgetItem()
-            item.setData(Qt.UserRole, fav["id"])
+            item.setData(Qt.ItemDataRole.UserRole, fav["id"])
 
             # Create display text with color preview indicator
             hex_display = fav["hex"]
@@ -173,7 +173,7 @@ class FavoritesManagerDialog(QDialog):
             self.save_edit_btn.setEnabled(False)
             return
 
-        favorite_id = current.data(Qt.UserRole)
+        favorite_id = current.data(Qt.ItemDataRole.UserRole)
         favorite = self.favorites_manager.get_by_id(favorite_id)
 
         if favorite:
@@ -203,7 +203,7 @@ class FavoritesManagerDialog(QDialog):
         color = QColorDialog.getColor(initial_color, self, "Select Color")
 
         if color.isValid():
-            self._current_hex = color.name(QColor.HexArgb)
+            self._current_hex = color.name(QColor.NameFormat.HexArgb)
             self.color_swatch.set_color(self._current_hex)
             self.save_edit_btn.setEnabled(True)
 
@@ -226,7 +226,7 @@ class FavoritesManagerDialog(QDialog):
         # Re-select the edited item
         for i in range(self.favorites_list.count()):
             item = self.favorites_list.item(i)
-            if item.data(Qt.UserRole) == self._current_favorite_id:
+            if item.data(Qt.ItemDataRole.UserRole) == self._current_favorite_id:
                 self.favorites_list.setCurrentItem(item)
                 break
 
@@ -235,14 +235,14 @@ class FavoritesManagerDialog(QDialog):
         color = QColorDialog.getColor(QColor("#FFFFFFFF"), self, "Select Color to Add")
 
         if color.isValid():
-            hex_color = color.name(QColor.HexArgb)
+            hex_color = color.name(QColor.NameFormat.HexArgb)
             new_id = self.favorites_manager.add("New Color", hex_color)
             self._refresh_list()
 
             # Select the newly added item
             for i in range(self.favorites_list.count()):
                 item = self.favorites_list.item(i)
-                if item.data(Qt.UserRole) == new_id:
+                if item.data(Qt.ItemDataRole.UserRole) == new_id:
                     self.favorites_list.setCurrentItem(item)
                     self.name_edit.setFocus()
                     self.name_edit.selectAll()
@@ -261,11 +261,11 @@ class FavoritesManagerDialog(QDialog):
             self,
             "Delete Favorite",
             f"Delete '{favorite['name']}'?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
 
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self.favorites_manager.remove(self._current_favorite_id)
             self._current_favorite_id = None
             self._refresh_list()

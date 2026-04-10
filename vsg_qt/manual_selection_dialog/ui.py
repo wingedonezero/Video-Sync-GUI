@@ -100,7 +100,7 @@ class ManualSelectionDialog(QDialog):
         self.info_label = QLabel()
         self.info_label.setVisible(False)
         self.info_label.setStyleSheet("color: green; font-weight: bold;")
-        root.addWidget(self.info_label, 0, Qt.AlignCenter)
+        root.addWidget(self.info_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         main_hbox = QHBoxLayout()
         left_pane_widget = QWidget()
@@ -129,7 +129,7 @@ class ManualSelectionDialog(QDialog):
             group_layout.addWidget(source_list_widget)
 
             # Add context menu for source settings (all sources including Source 1)
-            group_box.setContextMenuPolicy(Qt.CustomContextMenu)
+            group_box.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             group_box.customContextMenuRequested.connect(
                 lambda pos, sk=source_key, gb=group_box: self._show_source_context_menu(
                     pos, sk, gb
@@ -180,7 +180,7 @@ class ManualSelectionDialog(QDialog):
         main_hbox.addWidget(right_pane_widget, 2)
         root.addLayout(main_hbox)
 
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -200,7 +200,7 @@ class ManualSelectionDialog(QDialog):
     def _on_double_clicked_source(self, item) -> None:
         if not item:
             return
-        td = item.data(Qt.UserRole)
+        td = item.data(Qt.ItemDataRole.UserRole)
         # FIX: Call method on the logic instance
         if td and not self._logic.is_blocked_video(td):
             self.final_list.add_track_widget(td, preset=("style_patch" in td))
@@ -317,15 +317,15 @@ class ManualSelectionDialog(QDialog):
     # ... other methods like _add_external_subtitles, keyPressEvent, etc remain the same ...
     # They are omitted here for brevity but should be kept in your file.
     def keyPressEvent(self, event) -> None:
-        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Up:
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Up:
             self.final_list._move_by(-1)
             event.accept()
             return
-        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Down:
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Down:
             self.final_list._move_by(+1)
             event.accept()
             return
-        if event.key() == Qt.Key_Delete:
+        if event.key() == Qt.Key.Key_Delete:
             item = self.final_list.currentItem()
             if item:
                 self.final_list.takeItem(self.final_list.row(item))
@@ -957,7 +957,7 @@ class ManualSelectionDialog(QDialog):
                 temp_root=self.config.settings.temp_root,
                 user_fonts_dir=str(self.config.get_fonts_dir()),
             )
-            if editor.exec() == QDialog.Accepted:
+            if editor.exec() == QDialog.DialogCode.Accepted:
                 style_patch = editor.get_style_patch()
                 font_replacements = editor.get_font_replacements()
                 filter_config = editor.get_filter_config()
@@ -1037,7 +1037,7 @@ class ManualSelectionDialog(QDialog):
         # Create progress dialog
         progress = QProgressDialog("Running OCR preview...", "Cancel", 0, 100, self)
         progress.setWindowTitle("OCR Preview")
-        progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
         progress.setValue(0)
         progress.show()
@@ -1083,7 +1083,7 @@ class ManualSelectionDialog(QDialog):
             ]
         )
 
-        process.setProcessChannelMode(QProcess.SeparateChannels)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.start()
 
         if not process.waitForStarted(3000):
@@ -1097,7 +1097,7 @@ class ManualSelectionDialog(QDialog):
 
         from PySide6.QtWidgets import QApplication
 
-        while process.state() != QProcess.NotRunning:
+        while process.state() != QProcess.ProcessState.NotRunning:
             process.waitForReadyRead(100)
             output = bytes(process.readAllStandardOutput()).decode(
                 "utf-8", errors="replace"

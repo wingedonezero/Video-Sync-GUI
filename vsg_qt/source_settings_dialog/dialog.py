@@ -132,11 +132,11 @@ class SourceSettingsDialog(QDialog):
         layout.addStretch()
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.Reset
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Reset
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        buttons.button(QDialogButtonBox.Reset).clicked.connect(self._reset_to_defaults)
+        buttons.button(QDialogButtonBox.StandardButton.Reset).clicked.connect(self._reset_to_defaults)
         layout.addWidget(buttons)
 
     def _populate_source_track_combo(self):

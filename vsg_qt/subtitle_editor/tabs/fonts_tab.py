@@ -42,13 +42,13 @@ class FontPreviewDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index) -> None:
         """Paint the item with font preview."""
-        font_name = index.data(Qt.DisplayRole)
-        font_path = index.data(Qt.UserRole)
+        font_name = index.data(Qt.ItemDataRole.DisplayRole)
+        font_path = index.data(Qt.ItemDataRole.UserRole)
 
         painter.save()
 
         # Draw selection background if selected
-        if option.state & QStyle.State_Selected:
+        if option.state & QStyle.StateFlag.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight())
             painter.setPen(option.palette.highlightedText().color())
         else:
@@ -65,7 +65,7 @@ class FontPreviewDelegate(QStyledItemDelegate):
 
         # Draw the font name
         text_rect = option.rect.adjusted(4, 2, -4, -2)
-        painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, font_name)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, font_name)
 
         painter.restore()
 
@@ -81,7 +81,7 @@ class FontPreviewComboBox(QComboBox):
     """
 
     # Custom role for storing font data
-    FontDataRole = Qt.UserRole + 1
+    FontDataRole = Qt.ItemDataRole.UserRole + 1
 
     def __init__(self, loaded_fonts: dict[str, str], parent=None):
         super().__init__(parent)
@@ -107,7 +107,7 @@ class FontPreviewComboBox(QComboBox):
         self.addItem(font_name)
         index = self.count() - 1
         # Store path in UserRole for backward compatibility with delegate
-        self.setItemData(index, font_path, Qt.UserRole)
+        self.setItemData(index, font_path, Qt.ItemDataRole.UserRole)
         # Store full font data including family_name
         self.setItemData(
             index,
@@ -167,14 +167,14 @@ class FontsTab(BaseTab):
         self._fonts_table.setHorizontalHeaderLabels(
             ["#", "Style", "Original Font", "Replacement"]
         )
-        self._fonts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._fonts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._fonts_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._fonts_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
         header = self._fonts_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Interactive)
-        header.setSectionResizeMode(2, QHeaderView.Interactive)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
         self._fonts_table.setColumnWidth(1, 120)
         self._fonts_table.setColumnWidth(2, 150)
@@ -333,7 +333,7 @@ class FontsTab(BaseTab):
         for row, (style_name, original_font) in enumerate(fonts_by_style.items()):
             # Row number
             num_item = QTableWidgetItem(str(row + 1))
-            num_item.setTextAlignment(Qt.AlignCenter)
+            num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._fonts_table.setItem(row, 0, num_item)
 
             # Style name
@@ -342,7 +342,7 @@ class FontsTab(BaseTab):
 
             # Original font (read-only)
             font_item = QTableWidgetItem(original_font)
-            font_item.setForeground(Qt.gray)
+            font_item.setForeground(Qt.GlobalColor.gray)
             self._fonts_table.setItem(row, 2, font_item)
 
             # Replacement dropdown with font preview
@@ -352,7 +352,7 @@ class FontsTab(BaseTab):
 
             # Add "(none)" option first
             combo.addItem("(none)")
-            combo.setItemData(0, None, Qt.UserRole)
+            combo.setItemData(0, None, Qt.ItemDataRole.UserRole)
 
             # Add available fonts from the fonts directory
             for font_info in sorted(
@@ -405,7 +405,7 @@ class FontsTab(BaseTab):
         for style_name, combo in self._font_combos.items():
             original_font = combo.property("original_font")
             selected_text = combo.currentText()
-            selected_path = combo.currentData(Qt.UserRole)
+            selected_path = combo.currentData(Qt.ItemDataRole.UserRole)
 
             if selected_text == "(none)" or not selected_text:
                 # No replacement for this style

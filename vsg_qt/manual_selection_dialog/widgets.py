@@ -18,9 +18,9 @@ class SourceList(QListWidget):
         super().__init__(parent)
         self.dialog = dialog
         self.setDragEnabled(True)
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.setDefaultDropAction(Qt.CopyAction)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
     def add_track_item(self, track: dict, guard_block: bool):
@@ -29,12 +29,12 @@ class SourceList(QListWidget):
         )
 
         it = QListWidgetItem(item_text, self)
-        it.setData(Qt.UserRole, track)
+        it.setData(Qt.ItemDataRole.UserRole, track)
 
         if guard_block:
             flags = it.flags()
-            flags &= ~Qt.ItemIsDragEnabled
-            flags &= ~Qt.ItemIsEnabled
+            flags &= ~Qt.ItemFlag.ItemIsDragEnabled
+            flags &= ~Qt.ItemFlag.ItemIsEnabled
             it.setFlags(flags)
             it.setForeground(QColor("#888"))
             it.setToolTip(
@@ -51,7 +51,7 @@ class SourceList(QListWidget):
         if not item:
             return
 
-        track = item.data(Qt.UserRole)
+        track = item.data(Qt.ItemDataRole.UserRole)
         if not track:
             return
 
@@ -80,9 +80,9 @@ class FinalList(QListWidget):
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
-        self.setDefaultDropAction(Qt.MoveAction)
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
     def dropEvent(self, event) -> None:
@@ -90,7 +90,7 @@ class FinalList(QListWidget):
         if source and source is not self:
             it = source.currentItem()
             if it:
-                track = it.data(Qt.UserRole)
+                track = it.data(Qt.ItemDataRole.UserRole)
                 if track and not self.dialog._logic.is_blocked_video(track):
                     self.add_track_widget(track)
                     event.accept()

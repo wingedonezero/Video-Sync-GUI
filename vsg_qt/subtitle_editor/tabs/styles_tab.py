@@ -144,7 +144,7 @@ class StylesTab(BaseTab):
             load_btn.setText("\u25bc")  # Down triangle
             load_btn.setFixedSize(28, 28)
             load_btn.setToolTip("Load from favorites")
-            load_btn.setPopupMode(QToolButton.InstantPopup)
+            load_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             load_btn.clicked.connect(
                 lambda checked, k=color_key: self._show_favorites_menu(k)
             )
@@ -429,10 +429,10 @@ class StylesTab(BaseTab):
         initial = QColor(stored_hex)
 
         color = QColorDialog.getColor(
-            initial, self, "Select Color", QColorDialog.ShowAlphaChannel
+            initial, self, "Select Color", QColorDialog.ColorDialogOption.ShowAlphaChannel
         )
         if color.isValid():
-            self._set_color_button(button, color.name(QColor.HexArgb))
+            self._set_color_button(button, color.name(QColor.NameFormat.HexArgb))
             self._update_style()
 
     def _save_to_favorites(self, color_key: str) -> None:

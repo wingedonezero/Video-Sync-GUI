@@ -103,7 +103,7 @@ class FilteringTab(BaseTab):
 
         # Preview toggle
         preview_frame = QFrame()
-        preview_frame.setFrameShape(QFrame.StyledPanel)
+        preview_frame.setFrameShape(QFrame.Shape.StyledPanel)
         preview_layout = QVBoxLayout(preview_frame)
 
         self._preview_check = QCheckBox("Preview filter in events table")

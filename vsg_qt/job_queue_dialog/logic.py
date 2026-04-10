@@ -62,9 +62,9 @@ class JobQueueLogic:
         headers = ["#", "Status", "Sources"]
         self.v.table.setHorizontalHeaderLabels(headers)
         header = self.v.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
 
         self.v.table.setRowCount(len(self.jobs))
         for row, job in enumerate(self.jobs):
@@ -111,7 +111,7 @@ class JobQueueLogic:
         job["status"] = status_text + validation_warning
 
         order_item = QTableWidgetItem(str(row + 1))
-        order_item.setTextAlignment(Qt.AlignCenter)
+        order_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.v.table.setItem(row, 0, order_item)
         status_item = QTableWidgetItem(status_text + validation_warning)
         if validation_warning:

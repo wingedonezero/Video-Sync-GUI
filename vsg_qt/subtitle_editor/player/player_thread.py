@@ -168,7 +168,7 @@ class PlayerThread(QThread):
                                 rgb_img.tobytes(),
                                 rgb_img.width,
                                 rgb_img.height,
-                                QImage.Format_RGB888,
+                                QImage.Format.Format_RGB888,
                             )
 
                             self.new_frame.emit(q_image, self._cached_frame_timestamp)
@@ -233,7 +233,7 @@ class PlayerThread(QThread):
                                 rgb_img.tobytes(),
                                 rgb_img.width,
                                 rgb_img.height,
-                                QImage.Format_RGB888,
+                                QImage.Format.Format_RGB888,
                             )
 
                             self._current_time_ms = int(target_timestamp_sec * 1000)
@@ -278,7 +278,7 @@ class PlayerThread(QThread):
                     rgb_img.tobytes(),
                     rgb_img.width,
                     rgb_img.height,
-                    QImage.Format_RGB888,
+                    QImage.Format.Format_RGB888,
                 )
 
                 self.new_frame.emit(q_image, timestamp_sec)

@@ -106,12 +106,12 @@ class SubtitleEditorWindow(QDialog):
         # Allow maximize
         self.setWindowFlags(
             self.windowFlags()
-            | Qt.WindowMaximizeButtonHint
-            | Qt.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowMinimizeButtonHint
         )
 
         # Ensure proper cleanup when closed
-        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
     def _build_ui(self) -> None:
         """Build the main UI layout."""
@@ -120,10 +120,10 @@ class SubtitleEditorWindow(QDialog):
         main_layout.setContentsMargins(8, 8, 8, 8)
 
         # Main splitter (top/bottom)
-        self._main_splitter = QSplitter(Qt.Vertical)
+        self._main_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Top section: Video | Tabs
-        top_widget = QSplitter(Qt.Horizontal)
+        top_widget = QSplitter(Qt.Orientation.Horizontal)
 
         # Video panel (50%)
         self._video_panel = VideoPanel()
@@ -149,7 +149,7 @@ class SubtitleEditorWindow(QDialog):
 
         # Dialog buttons
         self._button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         self._button_box.accepted.connect(self.accept)
         self._button_box.rejected.connect(self.reject)

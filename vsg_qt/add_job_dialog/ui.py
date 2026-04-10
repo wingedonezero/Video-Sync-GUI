@@ -101,8 +101,8 @@ class AddJobDialog(QDialog):
         add_source_btn.clicked.connect(self.add_source_input)
         layout.addWidget(add_source_btn)
 
-        dialog_btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        ok_button = dialog_btns.button(QDialogButtonBox.Ok)
+        dialog_btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        ok_button = dialog_btns.button(QDialogButtonBox.StandardButton.Ok)
         ok_button.setText("Find & Add Jobs")
 
         ok_button.clicked.connect(self.find_and_accept)
