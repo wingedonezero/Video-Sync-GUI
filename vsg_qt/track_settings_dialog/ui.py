@@ -77,7 +77,7 @@ class TrackSettingsDialog(QDialog):
         subtitle_layout.addWidget(self.sync_exclusion_btn)
         layout.addWidget(self.subtitle_group)
 
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)

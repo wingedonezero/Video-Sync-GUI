@@ -8,7 +8,7 @@ Provides style editing functionality migrated from StyleEditorDialog.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -144,7 +144,7 @@ class StylesTab(BaseTab):
             load_btn.setText("\u25bc")  # Down triangle
             load_btn.setFixedSize(28, 28)
             load_btn.setToolTip("Load from favorites")
-            load_btn.setPopupMode(QToolButton.InstantPopup)
+            load_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             load_btn.clicked.connect(
                 lambda checked, k=color_key: self._show_favorites_menu(k)
             )
@@ -291,38 +291,38 @@ class StylesTab(BaseTab):
         for widget in self._style_widgets.values():
             widget.blockSignals(True)
 
-        self._style_widgets["fontname"].setText(attrs.get("fontname", ""))
-        self._style_widgets["fontsize"].setValue(attrs.get("fontsize", 0))
+        cast("QLineEdit", self._style_widgets["fontname"]).setText(attrs.get("fontname", ""))
+        cast("QDoubleSpinBox", self._style_widgets["fontsize"]).setValue(attrs.get("fontsize", 0))
 
         # Colors (now in Qt format)
         self._set_color_button(
-            self._style_widgets["primarycolor"], attrs.get("primarycolor", "#FFFFFFFF")
+            cast("QPushButton", self._style_widgets["primarycolor"]), attrs.get("primarycolor", "#FFFFFFFF")
         )
         self._set_color_button(
-            self._style_widgets["secondarycolor"],
+            cast("QPushButton", self._style_widgets["secondarycolor"]),
             attrs.get("secondarycolor", "#FFFFFFFF"),
         )
         self._set_color_button(
-            self._style_widgets["outlinecolor"], attrs.get("outlinecolor", "#FF000000")
+            cast("QPushButton", self._style_widgets["outlinecolor"]), attrs.get("outlinecolor", "#FF000000")
         )
         self._set_color_button(
-            self._style_widgets["backcolor"], attrs.get("backcolor", "#FF000000")
+            cast("QPushButton", self._style_widgets["backcolor"]), attrs.get("backcolor", "#FF000000")
         )
 
         # Text style (now bool)
-        self._style_widgets["bold"].setChecked(attrs.get("bold", False))
-        self._style_widgets["italic"].setChecked(attrs.get("italic", False))
-        self._style_widgets["underline"].setChecked(attrs.get("underline", False))
-        self._style_widgets["strikeout"].setChecked(attrs.get("strikeout", False))
+        cast("QCheckBox", self._style_widgets["bold"]).setChecked(attrs.get("bold", False))
+        cast("QCheckBox", self._style_widgets["italic"]).setChecked(attrs.get("italic", False))
+        cast("QCheckBox", self._style_widgets["underline"]).setChecked(attrs.get("underline", False))
+        cast("QCheckBox", self._style_widgets["strikeout"]).setChecked(attrs.get("strikeout", False))
 
         # Border
-        self._style_widgets["outline"].setValue(attrs.get("outline", 0))
-        self._style_widgets["shadow"].setValue(attrs.get("shadow", 0))
+        cast("QDoubleSpinBox", self._style_widgets["outline"]).setValue(attrs.get("outline", 0))
+        cast("QDoubleSpinBox", self._style_widgets["shadow"]).setValue(attrs.get("shadow", 0))
 
         # Margins
-        self._style_widgets["marginl"].setValue(attrs.get("marginl", 0))
-        self._style_widgets["marginr"].setValue(attrs.get("marginr", 0))
-        self._style_widgets["marginv"].setValue(attrs.get("marginv", 0))
+        cast("QSpinBox", self._style_widgets["marginl"]).setValue(attrs.get("marginl", 0))
+        cast("QSpinBox", self._style_widgets["marginr"]).setValue(attrs.get("marginr", 0))
+        cast("QSpinBox", self._style_widgets["marginv"]).setValue(attrs.get("marginv", 0))
 
         for widget in self._style_widgets.values():
             widget.blockSignals(False)
@@ -389,27 +389,27 @@ class StylesTab(BaseTab):
     def _get_ui_attrs(self) -> dict[str, Any]:
         """Get all style attributes from UI."""
         return {
-            "fontname": self._style_widgets["fontname"].text(),
-            "fontsize": self._style_widgets["fontsize"].value(),
+            "fontname": cast("QLineEdit", self._style_widgets["fontname"]).text(),
+            "fontsize": cast("QDoubleSpinBox", self._style_widgets["fontsize"]).value(),
             "primarycolor": self._get_color_from_button(
-                self._style_widgets["primarycolor"]
+                cast("QPushButton", self._style_widgets["primarycolor"])
             ),
             "secondarycolor": self._get_color_from_button(
-                self._style_widgets["secondarycolor"]
+                cast("QPushButton", self._style_widgets["secondarycolor"])
             ),
             "outlinecolor": self._get_color_from_button(
-                self._style_widgets["outlinecolor"]
+                cast("QPushButton", self._style_widgets["outlinecolor"])
             ),
-            "backcolor": self._get_color_from_button(self._style_widgets["backcolor"]),
-            "bold": self._style_widgets["bold"].isChecked(),
-            "italic": self._style_widgets["italic"].isChecked(),
-            "underline": self._style_widgets["underline"].isChecked(),
-            "strikeout": self._style_widgets["strikeout"].isChecked(),
-            "outline": self._style_widgets["outline"].value(),
-            "shadow": self._style_widgets["shadow"].value(),
-            "marginl": self._style_widgets["marginl"].value(),
-            "marginr": self._style_widgets["marginr"].value(),
-            "marginv": self._style_widgets["marginv"].value(),
+            "backcolor": self._get_color_from_button(cast("QPushButton", self._style_widgets["backcolor"])),
+            "bold": cast("QCheckBox", self._style_widgets["bold"]).isChecked(),
+            "italic": cast("QCheckBox", self._style_widgets["italic"]).isChecked(),
+            "underline": cast("QCheckBox", self._style_widgets["underline"]).isChecked(),
+            "strikeout": cast("QCheckBox", self._style_widgets["strikeout"]).isChecked(),
+            "outline": cast("QDoubleSpinBox", self._style_widgets["outline"]).value(),
+            "shadow": cast("QDoubleSpinBox", self._style_widgets["shadow"]).value(),
+            "marginl": cast("QSpinBox", self._style_widgets["marginl"]).value(),
+            "marginr": cast("QSpinBox", self._style_widgets["marginr"]).value(),
+            "marginv": cast("QSpinBox", self._style_widgets["marginv"]).value(),
         }
 
     def _reset_current_style(self) -> None:
@@ -423,16 +423,16 @@ class StylesTab(BaseTab):
 
     def _pick_color(self, color_key: str) -> None:
         """Open color picker for a color attribute."""
-        button = self._style_widgets[color_key]
+        button = cast("QPushButton", self._style_widgets[color_key])
         # Get initial color from stored property
         stored_hex = button.property("hex_color") or "#FFFFFFFF"
         initial = QColor(stored_hex)
 
         color = QColorDialog.getColor(
-            initial, self, "Select Color", QColorDialog.ShowAlphaChannel
+            initial, self, "Select Color", QColorDialog.ColorDialogOption.ShowAlphaChannel
         )
         if color.isValid():
-            self._set_color_button(button, color.name(QColor.HexArgb))
+            self._set_color_button(button, color.name(QColor.NameFormat.HexArgb))
             self._update_style()
 
     def _save_to_favorites(self, color_key: str) -> None:
@@ -440,7 +440,7 @@ class StylesTab(BaseTab):
         if not self._favorites_manager:
             return
 
-        button = self._style_widgets[color_key]
+        button = cast("QPushButton", self._style_widgets[color_key])
         hex_color = self._get_color_from_button(button)
 
         name, ok = QInputDialog.getText(
@@ -484,12 +484,14 @@ class StylesTab(BaseTab):
             if action == manage_action:
                 self._open_favorites_manager()
             elif action.data():
-                color_btn = self._style_widgets[color_key]
+                color_btn = cast("QPushButton", self._style_widgets[color_key])
                 self._set_color_button(color_btn, action.data())
                 self._update_style()
 
     def _open_favorites_manager(self) -> None:
         """Open the favorites manager dialog."""
+        if not self._favorites_manager:
+            return
         from vsg_qt.favorites_dialog import FavoritesManagerDialog
 
         dialog = FavoritesManagerDialog(self._favorites_manager, self)

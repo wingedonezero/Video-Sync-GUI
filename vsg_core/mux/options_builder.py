@@ -244,6 +244,8 @@ class MkvmergeOptionsBuilder:
             return 0
 
         sync_key = item.sync_to if tr.source == "External" else tr.source
+        if sync_key is None:
+            return 0
 
         # SUBTITLE-SPECIFIC DELAYS: Check if this subtitle has a sync-mode-specific delay
         # (e.g., from video-verified mode). These are separate from audio delays.

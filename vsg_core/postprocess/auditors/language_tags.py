@@ -15,7 +15,7 @@ class LanguageTagsAuditor(BaseAuditor):
         Returns the number of issues found.
         """
         final_tracks = final_mkvmerge_data.get("tracks", [])
-        plan_items = self.ctx.extracted_items
+        plan_items = self.ctx.extracted_items or []
 
         for i, item in enumerate(plan_items):
             if i >= len(final_tracks):

@@ -91,7 +91,7 @@ class Qwen35Base(VLMBackend):
         regions: list[Region],
         raw_image: np.ndarray | None = None,
     ) -> list[VLMRegionResult]:
-        if self.model is None:
+        if self.model is None or self.processor is None:
             raise RuntimeError("Model not loaded. Call load() first.")
 
         pil_img = Image.fromarray(image) if isinstance(image, np.ndarray) else image

@@ -34,7 +34,7 @@ class SubtitleClampingAuditor(BaseAuditor):
         clamped_tracks = []
 
         # Check all subtitle items for clamping info
-        for item in self.ctx.extracted_items:
+        for item in (self.ctx.extracted_items or []):
             if item.track.type != "subtitles":
                 continue
 

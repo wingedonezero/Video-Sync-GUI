@@ -19,7 +19,7 @@ class AudioChannelsAuditor(BaseAuditor):
 
         actual_streams = final_ffprobe_data.get("streams", [])
         audio_items = [
-            item for item in self.ctx.extracted_items if item.track.type == "audio"
+            item for item in (self.ctx.extracted_items or []) if item.track.type == "audio"
         ]
 
         for plan_item in audio_items:
@@ -57,7 +57,7 @@ class AudioChannelsAuditor(BaseAuditor):
             ]
             actual_audio = None
             audio_index = 0
-            for item in self.ctx.extracted_items:
+            for item in (self.ctx.extracted_items or []):
                 if item.track.type == "audio":
                     if item == plan_item and audio_index < len(actual_audio_streams):
                         actual_audio = actual_audio_streams[audio_index]

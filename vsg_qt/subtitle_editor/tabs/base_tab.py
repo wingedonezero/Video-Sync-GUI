@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
     from ..state import EditorState
@@ -35,7 +35,7 @@ class BaseTab(QScrollArea):
 
         # Set up scrollable area
         self.setWidgetResizable(True)
-        self.setFrameShape(QScrollArea.NoFrame)
+        self.setFrameShape(QFrame.Shape.NoFrame)
 
         # Content widget
         self._content = QWidget()

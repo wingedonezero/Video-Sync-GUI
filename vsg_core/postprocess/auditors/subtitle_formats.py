@@ -26,7 +26,7 @@ class SubtitleFormatsAuditor(BaseAuditor):
         Returns the number of issues found.
         """
         subtitle_items = [
-            item for item in self.ctx.extracted_items if item.track.type == "subtitles"
+            item for item in (self.ctx.extracted_items or []) if item.track.type == "subtitles"
         ]
 
         if not subtitle_items:

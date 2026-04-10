@@ -113,21 +113,21 @@ class EventsTable(QWidget):
         )
 
         # Selection behavior
-        self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setAutoScroll(False)
 
         # Column sizing
         header = self._table.horizontalHeader()
-        header.setSectionResizeMode(self.COL_NUM, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(self.COL_LAYER, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(self.COL_START, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(self.COL_END, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(self.COL_CPS, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(self.COL_STYLE, QHeaderView.Interactive)
-        header.setSectionResizeMode(self.COL_ACTOR, QHeaderView.Interactive)
-        header.setSectionResizeMode(self.COL_TEXT, QHeaderView.Stretch)
+        header.setSectionResizeMode(self.COL_NUM, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self.COL_LAYER, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self.COL_START, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self.COL_END, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self.COL_CPS, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self.COL_STYLE, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(self.COL_ACTOR, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(self.COL_TEXT, QHeaderView.ResizeMode.Stretch)
 
         # Set reasonable default widths
         self._table.setColumnWidth(self.COL_STYLE, 100)
@@ -139,7 +139,7 @@ class EventsTable(QWidget):
         # Connect signals
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         self._table.itemDoubleClicked.connect(self._on_double_click)
-        self._table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._show_context_menu)
 
         layout.addWidget(self._table)
@@ -188,7 +188,7 @@ class EventsTable(QWidget):
                 row_text = f"⚠️ {row + 1}"
 
         num_item = QTableWidgetItem(row_text)
-        num_item.setTextAlignment(Qt.AlignCenter)
+        num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         if "⚠️" in row_text:
             num_item.setToolTip(
                 "This excluded line has positioning/effect tags.\n"
@@ -199,24 +199,24 @@ class EventsTable(QWidget):
 
         # Layer
         layer_item = QTableWidgetItem(str(event.layer))
-        layer_item.setTextAlignment(Qt.AlignCenter)
+        layer_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(row, self.COL_LAYER, layer_item)
 
         # Start time (H:MM:SS.cc format)
         start_item = QTableWidgetItem(ms_to_ass_time(event.start_ms))
-        start_item.setTextAlignment(Qt.AlignCenter)
+        start_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(row, self.COL_START, start_item)
 
         # End time
         end_item = QTableWidgetItem(ms_to_ass_time(event.end_ms))
-        end_item.setTextAlignment(Qt.AlignCenter)
+        end_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(row, self.COL_END, end_item)
 
         # CPS (characters per second)
         duration_ms = event.end_ms - event.start_ms
         cps = calculate_cps(event.text, duration_ms)
         cps_item = QTableWidgetItem(f"{cps:.0f}" if cps > 0 else "-")
-        cps_item.setTextAlignment(Qt.AlignCenter)
+        cps_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         cps_item.setToolTip(cps_tooltip(cps) if cps > 0 else "")
 
         # Color the CPS cell based on reading speed

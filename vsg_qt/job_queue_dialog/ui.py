@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtCore import QItemSelectionModel, QPoint, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -71,12 +71,12 @@ class JobQueueDialog(QDialog):
         layout = QVBoxLayout(self)
         self.table = QTableWidget()
         self.table.setAcceptDrops(True)
-        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         layout.addWidget(self.table)
 
         button_layout = QHBoxLayout()
@@ -92,8 +92,8 @@ class JobQueueDialog(QDialog):
         button_layout.addWidget(self.remove_btn)
         layout.addLayout(button_layout)
 
-        dialog_btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.ok_button = dialog_btns.button(QDialogButtonBox.Ok)
+        dialog_btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.ok_button = dialog_btns.button(QDialogButtonBox.StandardButton.Ok)
         self.ok_button.setText("Start Processing Queue")
         layout.addWidget(dialog_btns)
 
@@ -110,10 +110,10 @@ class JobQueueDialog(QDialog):
         self.move_up_btn.clicked.connect(lambda: self.move_selected_jobs(-1))
         self.move_down_btn.clicked.connect(lambda: self.move_selected_jobs(1))
         QShortcut(
-            QKeySequence(Qt.CTRL | Qt.Key_Up), self, lambda: self.move_selected_jobs(-1)
+            QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Up), self, lambda: self.move_selected_jobs(-1)
         )
         QShortcut(
-            QKeySequence(Qt.CTRL | Qt.Key_Down),
+            QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Down),
             self,
             lambda: self.move_selected_jobs(1),
         )
@@ -142,14 +142,14 @@ class JobQueueDialog(QDialog):
         for i in range(len(selected_rows)):
             index = self.table.model().index(new_selection_start + i, 0)
             selection_model.select(
-                index, QItemSelectionModel.Select | QItemSelectionModel.Rows
+                index, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
             )
 
     def populate_table(self) -> None:
         self.table.selectionModel().clear()
         self._logic.populate_table()
 
-    def _show_context_menu(self, pos: Qt.Point) -> None:
+    def _show_context_menu(self, pos: QPoint) -> None:
         selected_rows = self.table.selectionModel().selectedRows()
         if not selected_rows:
             return

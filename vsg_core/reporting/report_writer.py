@@ -19,6 +19,7 @@ try:
 
     HAS_NUMPY = True
 except ImportError:
+    np = None
     HAS_NUMPY = False
 
 
@@ -26,7 +27,7 @@ class NumpyEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles numpy types."""
 
     def default(self, obj):
-        if HAS_NUMPY:
+        if HAS_NUMPY and np is not None:
             if isinstance(obj, np.integer):
                 return int(obj)
             if isinstance(obj, np.floating):

@@ -61,7 +61,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         # Find audio tracks from this source to correct
         target_items = [
             item
-            for item in ctx.extracted_items
+            for item in (ctx.extracted_items or [])
             if item.track.source == source_key
             and item.track.type == "audio"
             and not item.is_preserved
@@ -198,7 +198,12 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                 del ctx.stepping_edls[source_key]
                 continue
 
-            passed, qa_meta = verify_correction(
+            if ref_file_path is None:
+                log("[SteppingCorrection] No Source 1 file — skipping QA check.")
+                del ctx.stepping_edls[source_key]
+                continue
+
+            passed, _qa_meta = verify_correction(
                 corrected_path=str(qa_path),
                 ref_file_path=ref_file_path,
                 base_delay_ms=anchor_ms,
@@ -242,6 +247,9 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                 f"{len(target_items)} audio track(s)."
             )
             for target_item in target_items:
+                if target_item.extracted_path is None:
+                    log("[ERROR] Skipping track with no extracted path.")
+                    continue
                 corrected_path = ctx.temp_dir / (
                     f"corrected_{target_item.extracted_path.stem}.flac"
                 )
@@ -318,7 +326,7 @@ def _find_analysis_track(
 
     extracted_audio_map = {
         f"{item.track.source}_{item.track.id}": item
-        for item in ctx.extracted_items
+        for item in (ctx.extracted_items or [])
         if item.track.type == "audio"
     }
 
@@ -330,6 +338,11 @@ def _find_analysis_track(
     source_key = analysis_track_key.split("_", maxsplit=1)[0]
     track_id = int(analysis_track_key.split("_")[1])
     source_path = ctx.sources.get(source_key)
+    if source_path is None:
+        runner._log_message(
+            f"[ERROR] No source path for {source_key} — cannot extract analysis track."
+        )
+        return None
 
     runner._log_message(
         f"[SteppingCorrection] Analysis track {analysis_track_key} "
@@ -416,6 +429,7 @@ def _swap_corrected_track(
         ),
     )
     target_item.apply_track_name = True  # type: ignore[attr-defined]
-    ctx.extracted_items.append(preserved)  # type: ignore[arg-type]
+    if ctx.extracted_items is not None:
+        ctx.extracted_items.append(preserved)  # type: ignore[arg-type]
 
     log(f"[SUCCESS] Stepping correction applied for {original_props.name or 'track'}")

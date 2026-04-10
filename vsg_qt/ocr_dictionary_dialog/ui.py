@@ -376,8 +376,10 @@ class ReplacementsTab(QWidget):
             self.table.setItem(row, 5, desc_item)
 
             # Store rule object and user flag in first column
-            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, rule_obj)
-            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole + 1, is_user)
+            first_item = self.table.item(row, 0)
+            if first_item is not None:
+                first_item.setData(Qt.ItemDataRole.UserRole, rule_obj)
+                first_item.setData(Qt.ItemDataRole.UserRole + 1, is_user)
 
         # Update count label
         user_count = sum(1 for r in all_rows if r[7])
@@ -397,6 +399,8 @@ class ReplacementsTab(QWidget):
         if has_selection:
             row = rows[0].row()
             source_item = self.table.item(row, 0)
+            if source_item is None:
+                return
             rule = source_item.data(Qt.ItemDataRole.UserRole)
             is_user = source_item.data(Qt.ItemDataRole.UserRole + 1)
 
@@ -464,6 +468,8 @@ class ReplacementsTab(QWidget):
 
         row = rows[0].row()
         source_item = self.table.item(row, 0)
+        if source_item is None:
+            return
         old_rule = source_item.data(Qt.ItemDataRole.UserRole)
         is_user = source_item.data(Qt.ItemDataRole.UserRole + 1)
 
@@ -491,6 +497,8 @@ class ReplacementsTab(QWidget):
 
         row = rows[0].row()
         source_item = self.table.item(row, 0)
+        if source_item is None:
+            return
         rule = source_item.data(Qt.ItemDataRole.UserRole)
         is_user = source_item.data(Qt.ItemDataRole.UserRole + 1)
 

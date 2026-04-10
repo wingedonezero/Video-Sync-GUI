@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
             )
         )
         analyze_btn = QPushButton("Analyze Only")
-        analysis_layout.addWidget(analyze_btn, 0, Qt.AlignRight)
+        analysis_layout.addWidget(analyze_btn, 0, Qt.AlignmentFlag.AlignRight)
         main_layout.addWidget(analysis_group)
 
         # Connect signals

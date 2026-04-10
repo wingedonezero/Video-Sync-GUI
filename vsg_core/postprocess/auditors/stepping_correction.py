@@ -4,6 +4,7 @@ Auditor for verifying stepping corrections quality and flagging potential issues
 """
 
 from pathlib import Path
+from typing import cast
 
 from .base import BaseAuditor
 
@@ -60,17 +61,17 @@ class SteppingCorrectionAuditor(BaseAuditor):
             source_issues_start = len(self.issues)
 
             for idx, boundary in enumerate(audit_metadata, 1):
-                target_time_s = boundary.get("target_time_s", 0)
-                delay_change_ms = boundary.get("delay_change_ms", 0)
-                zone_start = boundary.get("zone_start", 0)
-                zone_end = boundary.get("zone_end", 0)
+                target_time_s = cast("float", boundary.get("target_time_s", 0))
+                delay_change_ms = cast("float", boundary.get("delay_change_ms", 0))
+                zone_start = cast("float", boundary.get("zone_start", 0))
+                zone_end = cast("float", boundary.get("zone_end", 0))
                 zone_duration = zone_end - zone_start
-                score = boundary.get("score", 0)
-                overlaps_speech = boundary.get("overlaps_speech", False)
-                near_transient = boundary.get("near_transient", False)
-                avg_db = boundary.get("avg_db", 0)
-                no_silence_found = boundary.get("no_silence_found", False)
-                video_snap_skipped = boundary.get("video_snap_skipped", False)
+                score = cast("float", boundary.get("score", 0))
+                overlaps_speech = cast("bool", boundary.get("overlaps_speech", False))
+                near_transient = cast("bool", boundary.get("near_transient", False))
+                avg_db = cast("float", boundary.get("avg_db", 0))
+                no_silence_found = cast("bool", boundary.get("no_silence_found", False))
+                video_snap_skipped = cast("bool", boundary.get("video_snap_skipped", False))
 
                 # Determine action type
                 # When delay increases (positive): target is falling behind → INSERT silence

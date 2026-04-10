@@ -52,7 +52,7 @@ class ResampleDialog(QDialog):
         from_video_btn.clicked.connect(self._probe_video_resolution)
         dest_form.addRow(from_video_btn)
 
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 

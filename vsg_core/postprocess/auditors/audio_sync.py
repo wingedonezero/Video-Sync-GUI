@@ -40,7 +40,7 @@ class AudioSyncAuditor(BaseAuditor):
 
         # Build a mapping of track index to plan item
         audio_plan_items = [
-            item for item in self.ctx.extracted_items if item.track.type == "audio"
+            item for item in (self.ctx.extracted_items or []) if item.track.type == "audio"
         ]
 
         # Get audio tracks from final file

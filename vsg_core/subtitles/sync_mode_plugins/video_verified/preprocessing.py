@@ -342,7 +342,7 @@ def run_per_source_preprocessing(
 
     # Find unique sources that have subtitle tracks
     sources_with_subs = set()
-    for item in ctx.extracted_items:
+    for item in (ctx.extracted_items or []):
         if item.track.type == "subtitles":
             source_key = (
                 item.sync_to if item.track.source == "External" else item.track.source

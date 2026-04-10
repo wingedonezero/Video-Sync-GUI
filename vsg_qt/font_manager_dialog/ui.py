@@ -89,7 +89,7 @@ class FontManagerDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Main splitter for left/right panes
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Left pane: Styles in file
         left_group = QGroupBox("Styles in Subtitle File")
@@ -98,7 +98,7 @@ class FontManagerDialog(QDialog):
         self.file_fonts_tree = QTreeWidget()
         self.file_fonts_tree.setHeaderLabels(["Style Name", "Current Font"])
         self.file_fonts_tree.setAlternatingRowColors(True)
-        self.file_fonts_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.file_fonts_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         left_layout.addWidget(self.file_fonts_tree)
 
         # Inline fonts warning
@@ -121,7 +121,7 @@ class FontManagerDialog(QDialog):
         self.user_fonts_tree = QTreeWidget()
         self.user_fonts_tree.setHeaderLabels(["Font Family", "Style", "File"])
         self.user_fonts_tree.setAlternatingRowColors(True)
-        self.user_fonts_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.user_fonts_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         right_layout.addWidget(self.user_fonts_tree)
 
         self.open_folder_btn = QPushButton("Open Fonts Folder")
@@ -135,8 +135,8 @@ class FontManagerDialog(QDialog):
 
         # Separator
         separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Sunken)
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(separator)
 
         # Replacement controls
@@ -227,8 +227,8 @@ class FontManagerDialog(QDialog):
 
         for style_name, font_name in sorted(self.styles_info.items()):
             item = QTreeWidgetItem([style_name, font_name])
-            item.setData(0, Qt.UserRole, style_name)  # Store style name
-            item.setData(1, Qt.UserRole, font_name)  # Store original font
+            item.setData(0, Qt.ItemDataRole.UserRole, style_name)  # Store style name
+            item.setData(1, Qt.ItemDataRole.UserRole, font_name)  # Store original font
             self.file_fonts_tree.addTopLevelItem(item)
 
         # Check for inline fonts
@@ -267,7 +267,7 @@ class FontManagerDialog(QDialog):
 
         if not fonts:
             item = QTreeWidgetItem(["No fonts found", "", ""])
-            item.setForeground(0, Qt.gray)
+            item.setForeground(0, Qt.GlobalColor.gray)
             self.user_fonts_tree.addTopLevelItem(item)
             return
 
@@ -292,7 +292,7 @@ class FontManagerDialog(QDialog):
                 item = QTreeWidgetItem(
                     [font.family_name, font.subfamily or "Regular", font.filename]
                 )
-                item.setData(0, Qt.UserRole, font)
+                item.setData(0, Qt.ItemDataRole.UserRole, font)
 
                 # Apply the font to display in its own typeface
                 qt_family = self._loaded_fonts.get(str(font.file_path))
@@ -307,7 +307,7 @@ class FontManagerDialog(QDialog):
                 family_item = QTreeWidgetItem(
                     [family_name, f"{len(family_fonts)} variants", ""]
                 )
-                family_item.setData(0, Qt.UserRole, None)
+                family_item.setData(0, Qt.ItemDataRole.UserRole, None)
 
                 # Apply font to family header using first variant
                 first_font = family_fonts[0]
@@ -321,7 +321,7 @@ class FontManagerDialog(QDialog):
                     child = QTreeWidgetItem(
                         ["", font.subfamily or "Regular", font.filename]
                     )
-                    child.setData(0, Qt.UserRole, font)
+                    child.setData(0, Qt.ItemDataRole.UserRole, font)
 
                     # Apply font to child item
                     qt_family = self._loaded_fonts.get(str(font.file_path))
@@ -344,7 +344,7 @@ class FontManagerDialog(QDialog):
             item = QTreeWidgetItem(
                 [style_name, repl_data["original_font"], repl_data["new_font_name"]]
             )
-            item.setData(0, Qt.UserRole, style_name)
+            item.setData(0, Qt.ItemDataRole.UserRole, style_name)
             self.replacements_tree.addTopLevelItem(item)
 
         self.remove_replacement_btn.setEnabled(False)
@@ -374,7 +374,7 @@ class FontManagerDialog(QDialog):
     def _on_file_font_selected(self, current, previous) -> None:
         """Handle selection in styles tree."""
         if current:
-            style_name = current.data(0, Qt.UserRole)
+            style_name = current.data(0, Qt.ItemDataRole.UserRole)
             if style_name:
                 # Select in style combo
                 idx = self.style_combo.findData(style_name)
@@ -384,7 +384,7 @@ class FontManagerDialog(QDialog):
     def _on_user_font_selected(self, current, previous) -> None:
         """Handle selection in user fonts tree."""
         if current:
-            font_info = current.data(0, Qt.UserRole)
+            font_info = current.data(0, Qt.ItemDataRole.UserRole)
             if font_info:
                 # Find and select in combo
                 for i in range(self.replacement_font_combo.count()):
@@ -446,7 +446,7 @@ class FontManagerDialog(QDialog):
         """Remove the selected replacement."""
         current = self.replacements_tree.currentItem()
         if current:
-            style_name = current.data(0, Qt.UserRole)
+            style_name = current.data(0, Qt.ItemDataRole.UserRole)
             if style_name:
                 self.replacement_manager.remove_replacement(style_name)
                 self._refresh_replacements()
@@ -459,10 +459,10 @@ class FontManagerDialog(QDialog):
                 self,
                 "Clear All",
                 "Remove all font replacements?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
-            if reply == QMessageBox.Yes:
+            if reply == QMessageBox.StandardButton.Yes:
                 self.replacement_manager.clear_replacements()
                 self._refresh_replacements()
                 self._update_combos()

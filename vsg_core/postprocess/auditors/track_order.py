@@ -15,7 +15,7 @@ class TrackOrderAuditor(BaseAuditor):
         Returns the number of issues found.
         """
         final_tracks = final_mkvmerge_data.get("tracks", [])
-        plan_items = self.ctx.extracted_items
+        plan_items = self.ctx.extracted_items or []
 
         # Build expected order by type
         type_order = []

@@ -237,9 +237,9 @@ class BaseAuditor:
 
         # Check subtitle-specific delays first (e.g., from video-verified mode)
         if tr.type == "subtitles" and sync_key in self.ctx.subtitle_delays_ms:
-            delay = self.ctx.subtitle_delays_ms.get(sync_key, 0)
+            delay = self.ctx.subtitle_delays_ms.get(sync_key or "", 0)
         else:
-            delay = self.ctx.delays.source_delays_ms.get(sync_key, 0)
+            delay = self.ctx.delays.source_delays_ms.get(sync_key or "", 0) if self.ctx.delays else 0
 
         return float(delay)
 

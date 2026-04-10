@@ -50,11 +50,11 @@ class VideoWidget(QWidget):
             return
 
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
         # Scale pixmap to fit widget while maintaining aspect ratio
         scaled = self._pixmap.scaled(
-            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
         )
 
         # Center the scaled pixmap
@@ -105,7 +105,7 @@ class VideoPanel(QWidget):
         controls_layout.addWidget(self._play_btn)
 
         # Seek slider
-        self._seek_slider = QSlider(Qt.Horizontal)
+        self._seek_slider = QSlider(Qt.Orientation.Horizontal)
         self._seek_slider.setRange(0, 1000)
         self._seek_slider.sliderPressed.connect(self._on_slider_pressed)
         self._seek_slider.sliderReleased.connect(self._on_slider_released)

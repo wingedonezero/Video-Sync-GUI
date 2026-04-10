@@ -57,7 +57,7 @@ class AudioCorrectionStep:
 
             audio_tracks_from_source = [
                 item
-                for item in ctx.extracted_items
+                for item in (ctx.extracted_items or [])
                 if (
                     item.track.source == source_key
                     and item.track.type == "audio"
@@ -101,7 +101,7 @@ class AudioCorrectionStep:
 
             audio_tracks_from_source = [
                 item
-                for item in ctx.extracted_items
+                for item in (ctx.extracted_items or [])
                 if (
                     item.track.source == source_key
                     and item.track.type == "audio"
@@ -145,7 +145,7 @@ class AudioCorrectionStep:
 
             audio_tracks_from_source = [
                 item
-                for item in ctx.extracted_items
+                for item in (ctx.extracted_items or [])
                 if (
                     item.track.source == source_key
                     and item.track.type == "audio"

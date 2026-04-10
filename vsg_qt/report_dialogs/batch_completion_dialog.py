@@ -103,7 +103,7 @@ class BatchCompletionDialog(QDialog):
 
         icon_label = QLabel(icon_text)
         icon_label.setFixedSize(48, 48)
-        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setStyleSheet(f"""
             QLabel {{
                 background-color: {icon_color};
@@ -129,7 +129,7 @@ class BatchCompletionDialog(QDialog):
 
         # Summary section
         summary_frame = QFrame()
-        summary_frame.setFrameShape(QFrame.StyledPanel)
+        summary_frame.setFrameShape(QFrame.Shape.StyledPanel)
         summary_layout = QVBoxLayout(summary_frame)
 
         summary_label = QLabel("Batch Summary")
@@ -159,7 +159,7 @@ class BatchCompletionDialog(QDialog):
         # Stepping info section (if applicable)
         if stepping_jobs:
             stepping_frame = QFrame()
-            stepping_frame.setFrameShape(QFrame.StyledPanel)
+            stepping_frame.setFrameShape(QFrame.Shape.StyledPanel)
             stepping_layout = QVBoxLayout(stepping_frame)
 
             stepping_label = QLabel(
@@ -191,7 +191,7 @@ class BatchCompletionDialog(QDialog):
         # Stepping disabled warning section
         if stepping_disabled_jobs:
             warning_frame = QFrame()
-            warning_frame.setFrameShape(QFrame.StyledPanel)
+            warning_frame.setFrameShape(QFrame.Shape.StyledPanel)
             warning_layout = QVBoxLayout(warning_frame)
 
             warning_label = QLabel(

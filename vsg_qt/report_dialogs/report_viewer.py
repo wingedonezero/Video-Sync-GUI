@@ -78,7 +78,7 @@ class ReportViewer(QDialog):
         layout.addWidget(header)
 
         # Main content splitter (table + details)
-        splitter = QSplitter(Qt.Vertical)
+        splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Job table
         self.table = self._create_table()
@@ -110,7 +110,7 @@ class ReportViewer(QDialog):
     def _create_header(self) -> QWidget:
         """Create the header widget with summary info."""
         header = QFrame()
-        header.setFrameShape(QFrame.StyledPanel)
+        header.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QHBoxLayout(header)
 
         # Summary stats
@@ -153,20 +153,20 @@ class ReportViewer(QDialog):
         )
 
         # Configure table
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table.setAlternatingRowColors(True)
         table.verticalHeader().setVisible(False)
 
         # Column widths
         header = table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # #
-        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Name
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Status
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Issues
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Stepping
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Stability
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Delays
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # #
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Status
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Issues
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Stepping
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Stability
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Delays
 
         # Connect selection changed
         table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -176,7 +176,7 @@ class ReportViewer(QDialog):
     def _create_details_panel(self) -> QWidget:
         """Create the details panel."""
         panel = QFrame()
-        panel.setFrameShape(QFrame.StyledPanel)
+        panel.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QVBoxLayout(panel)
 
         # Title
@@ -201,7 +201,7 @@ class ReportViewer(QDialog):
         for row, job in enumerate(jobs):
             # Index
             idx_item = QTableWidgetItem(str(job.get("index", row + 1)))
-            idx_item.setTextAlignment(Qt.AlignCenter)
+            idx_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 0, idx_item)
 
             # Name
@@ -212,7 +212,7 @@ class ReportViewer(QDialog):
             status = job.get("status", "Unknown")
             status_text = ReportWriter.get_job_status_summary(job)
             status_item = QTableWidgetItem(status_text)
-            status_item.setTextAlignment(Qt.AlignCenter)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             # Color coding
             if status == "Failed":
@@ -230,7 +230,7 @@ class ReportViewer(QDialog):
             # Issues count
             issues = job.get("audit_results", {}).get("total_issues", 0)
             issues_item = QTableWidgetItem(str(issues) if issues > 0 else "-")
-            issues_item.setTextAlignment(Qt.AlignCenter)
+            issues_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if issues > 0:
                 issues_item.setForeground(QColor("#856404"))
             self.table.setItem(row, 3, issues_item)
@@ -238,13 +238,13 @@ class ReportViewer(QDialog):
             # Stepping
             stepping_text = ReportWriter.get_stepping_summary(job)
             stepping_item = QTableWidgetItem(stepping_text)
-            stepping_item.setTextAlignment(Qt.AlignCenter)
+            stepping_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 4, stepping_item)
 
             # Stability
             stability_text = ReportWriter.get_sync_stability_summary(job)
             stability_item = QTableWidgetItem(stability_text)
-            stability_item.setTextAlignment(Qt.AlignCenter)
+            stability_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             # Color coding for stability issues
             if stability_text not in {"-", "OK"}:
                 stability_item.setForeground(QColor("#856404"))
@@ -253,7 +253,7 @@ class ReportViewer(QDialog):
             # Delays
             delays_text = ReportWriter.get_delays_summary(job)
             delays_item = QTableWidgetItem(delays_text)
-            delays_item.setTextAlignment(Qt.AlignCenter)
+            delays_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 6, delays_item)
 
         # Select first row if any

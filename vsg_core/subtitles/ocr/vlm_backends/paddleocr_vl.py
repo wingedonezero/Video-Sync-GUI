@@ -218,6 +218,7 @@ class PaddleOCRVL(VLMBackend):
 
                 data_uri = _image_to_data_uri(line_crop)
 
+                assert self.llm is not None, "Model not loaded"
                 result = self.llm.create_chat_completion(
                     messages=[
                         {
@@ -337,6 +338,7 @@ class PaddleOCRVL(VLMBackend):
 
         data_uri = _image_to_data_uri(source)
 
+        assert self.llm is not None, "Model not loaded"
         result = self.llm.create_chat_completion(
             messages=[
                 {

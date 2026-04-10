@@ -17,6 +17,7 @@ This step is a pure coordinator - all business logic is in subtitle modules.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -35,7 +36,8 @@ class SubtitlesStep:
         if not ctx.and_merge or not ctx.extracted_items:
             return ctx
 
-        source1_file = ctx.sources.get("Source 1")
+        source1_file_str = ctx.sources.get("Source 1")
+        source1_file = Path(source1_file_str) if source1_file_str else None
         if not source1_file:
             runner._log_message(
                 "[WARN] No Source 1 file found for subtitle processing reference."

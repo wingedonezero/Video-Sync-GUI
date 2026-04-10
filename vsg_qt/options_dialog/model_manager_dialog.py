@@ -320,6 +320,8 @@ class ModelManagerDialog(QDialog):
             return
 
         item = self.table.item(selected[0].row(), 0)
+        if item is None:
+            return
         model = item.data(Qt.ItemDataRole.UserRole)
 
         # Build info text
@@ -403,7 +405,7 @@ class ModelManagerDialog(QDialog):
         self.progress_label.setVisible(False)
         self.refresh_btn.setEnabled(True)
 
-        if success:
+        if success and downloaded_model is not None:
             print(
                 f"[Model Manager] Download successful: {downloaded_model.get('filename')}"
             )

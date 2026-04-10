@@ -844,7 +844,7 @@ class VobSubParser(SubtitleImageParser):
                 r, g, b, a = 0, 0, 0, 0
 
             # Draw pixels for this run
-            for i in range(run_length):
+            for _ in range(run_length):
                 if x >= width:
                     # Line wrap - align to byte boundary
                     if only_half:
@@ -916,7 +916,7 @@ class VobSubParser(SubtitleImageParser):
             gray = colors[color] if color < len(colors) else 255
 
             # Draw pixels for this run
-            for i in range(run_length):
+            for _ in range(run_length):
                 if x >= width:
                     # Line wrap - align to byte boundary
                     if only_half:

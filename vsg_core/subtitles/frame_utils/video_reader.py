@@ -569,6 +569,7 @@ class VideoReader:
 
     def _get_pts_vapoursynth(self, frame_num: int) -> float | None:
         """Get PTS using VapourSynth frame properties."""
+        assert self.vs_clip is not None
         try:
             # Clamp to valid range
             frame_num = max(0, min(frame_num, len(self.vs_clip) - 1))
@@ -595,6 +596,7 @@ class VideoReader:
 
     def _get_pts_ffms2(self, frame_num: int) -> float | None:
         """Get PTS using FFMS2 track info."""
+        assert self.source is not None
         try:
             # Clamp to valid range
             frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
@@ -657,6 +659,7 @@ class VideoReader:
 
     def _get_frame_vapoursynth_by_index(self, frame_num: int) -> Image.Image | None:
         """Extract frame by index using VapourSynth (frame-accurate)."""
+        assert self.vs_clip is not None
         try:
             import numpy as np
             from PIL import Image
@@ -693,6 +696,7 @@ class VideoReader:
 
     def _get_frame_ffms2_by_index(self, frame_num: int) -> Image.Image | None:
         """Extract frame by index using FFMS2 (frame-accurate)."""
+        assert self.source is not None
         try:
             import numpy as np
             from PIL import Image
@@ -732,6 +736,7 @@ class VideoReader:
         Extracts only the luma (Y) plane as grayscale for better perceptual hashing.
         Luma contains most of the perceptual information and avoids color conversion artifacts.
         """
+        assert self.vs_clip is not None
         try:
             import numpy as np
             from PIL import Image
@@ -770,6 +775,7 @@ class VideoReader:
 
     def _get_frame_ffms2(self, time_ms: int) -> Image.Image | None:
         """Extract frame using FFMS2 (instant indexed seeking)."""
+        assert self.source is not None
         try:
             import numpy as np
             from PIL import Image
@@ -806,6 +812,7 @@ class VideoReader:
 
     def _get_frame_opencv(self, time_ms: int) -> Image.Image | None:
         """Extract frame using opencv (fast)."""
+        assert self.cap is not None
         try:
             from PIL import Image
 

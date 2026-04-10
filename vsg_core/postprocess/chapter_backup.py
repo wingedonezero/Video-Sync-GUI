@@ -14,6 +14,8 @@ def extract_chapters_xml(
         xml_content = runner.run(
             ["mkvextract", str(mkv_path), "chapters", "-"], tool_paths
         )
+        if not isinstance(xml_content, str):
+            return None
         if (
             xml_content
             and xml_content.strip()

@@ -37,7 +37,7 @@ class EnhancedSignatureGenerator:
             # Strict signature: includes codec, language, and position to differentiate identical tracks.
             signature_items = []
             type_counters = {}
-            for source_key, tracks in track_info.items():
+            for _source_key, tracks in track_info.items():
                 for track in tracks:
                     track_type = track.get("type", "unknown")
                     position = type_counters.get(track_type, 0)
