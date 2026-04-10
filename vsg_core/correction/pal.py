@@ -13,13 +13,13 @@ if TYPE_CHECKING:
 
 def run_pal_correction(ctx: Context, runner: CommandRunner) -> Context:
     """Corrects audio drift due to PAL speed-up using a pitch-corrected resample."""
-    for analysis_track_key, flag_info in ctx.pal_drift_flags.items():
+    for analysis_track_key, _flag_info in ctx.pal_drift_flags.items():
         source_key = analysis_track_key.split("_")[0]
 
         # FIXED: Find ALL audio tracks from this source, not just first
         target_items = [
             item
-            for item in ctx.extracted_items
+            for item in (ctx.extracted_items or [])
             if item.track.source == source_key
             and item.track.type == "audio"
             and not item.is_preserved
@@ -38,6 +38,11 @@ def run_pal_correction(ctx: Context, runner: CommandRunner) -> Context:
         # FIXED: Apply correction to ALL audio tracks from this source
         for target_item in target_items:
             original_path = target_item.extracted_path
+            if original_path is None:
+                runner._log_message(
+                    f"[PALCorrector] Skipping track with no extracted path for {source_key}."
+                )
+                continue
             corrected_path = (
                 original_path.parent / f"pal_corrected_{original_path.stem}.flac"
             )
@@ -105,6 +110,7 @@ def run_pal_correction(ctx: Context, runner: CommandRunner) -> Context:
             )
             target_item.apply_track_name = True
 
-            ctx.extracted_items.append(preserved_item)
+            if ctx.extracted_items is not None:
+                ctx.extracted_items.append(preserved_item)
 
     return ctx

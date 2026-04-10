@@ -81,13 +81,14 @@ class OptionsLogic:
                 return data
             return widget.currentText()
         # Composite [QWidget] with (QLineEdit, QPushButton) for file/dir pickers
-        if (
-            isinstance(widget, QWidget)
-            and widget.layout()
-            and widget.layout().itemAt(0)
-            and isinstance(widget.layout().itemAt(0).widget(), QLineEdit)
-        ):
-            return widget.layout().itemAt(0).widget().text()
+        if isinstance(widget, QWidget):
+            _layout = widget.layout()
+            if _layout is not None:
+                _layout_item = _layout.itemAt(0)
+                if _layout_item is not None and isinstance(_layout_item.widget(), QLineEdit):
+                    _layout_widget = _layout_item.widget()
+                    if _layout_widget is not None:
+                        return _layout_widget.text()
         return widget.text() if isinstance(widget, QLineEdit) else None
 
     def _set_widget_val(self, widget, value) -> None:
@@ -129,9 +130,11 @@ class OptionsLogic:
                 widget.setCurrentText(str(value))
         elif isinstance(widget, QLineEdit):
             widget.setText(str(value))
-        elif (
-            isinstance(widget, QWidget)
-            and widget.layout()
-            and isinstance(widget.layout().itemAt(0).widget(), QLineEdit)
-        ):
-            widget.layout().itemAt(0).widget().setText(str(value))
+        elif isinstance(widget, QWidget):
+            _layout = widget.layout()
+            if _layout is not None:
+                _layout_item = _layout.itemAt(0)
+                if _layout_item is not None and isinstance(_layout_item.widget(), QLineEdit):
+                    _layout_widget = _layout_item.widget()
+                    if _layout_widget is not None:
+                        _layout_widget.setText(str(value))

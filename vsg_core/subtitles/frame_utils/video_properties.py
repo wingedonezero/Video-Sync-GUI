@@ -146,14 +146,14 @@ def _classify_content_type(
     # ffprobe signals
     fp_interlaced = ffprobe_props.get("interlaced", False)
     fp_field_order = ffprobe_props.get("field_order", "unknown")
-    fp_fps = ffprobe_props.get("fps", 0.0)
+    _fp_fps = ffprobe_props.get("fps", 0.0)
     fp_is_vfr = ffprobe_props.get("is_vfr", False)
 
     # MediaInfo signals
     mi_fps_mode = mi_props.get("mi_fps_mode", "")
     mi_scan_type = mi_props.get("mi_scan_type", "")
     mi_scan_order = mi_props.get("mi_scan_order", "")
-    mi_original_fps = mi_props.get("mi_original_fps")
+    _mi_original_fps = mi_props.get("mi_original_fps")
     has_mediainfo = bool(mi_props)
 
     # ──────────────────────────────────────────────────────────────

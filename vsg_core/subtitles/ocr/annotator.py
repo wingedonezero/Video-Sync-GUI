@@ -66,7 +66,7 @@ def annotate_image(
 
         # Draw region number label above the box
         label = str(region.region_id)
-        (tw, th), baseline = cv2.getTextSize(
+        (tw, th), _baseline = cv2.getTextSize(
             label, cv2.FONT_HERSHEY_SIMPLEX, label_size, 2
         )
 

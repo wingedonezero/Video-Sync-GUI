@@ -482,7 +482,7 @@ class JMdictParser:
             with open_func(file_path) as f:
                 entry_count = 0
 
-                for event, elem in ET.iterparse(f, events=("end",)):
+                for _event, elem in ET.iterparse(f, events=("end",)):
                     if elem.tag == "entry":
                         entry_count += 1
 
@@ -531,7 +531,7 @@ class JMdictParser:
         entry_count = 0
 
         try:
-            for event, elem in ET.iterparse(stream, events=("end",)):
+            for _event, elem in ET.iterparse(stream, events=("end",)):
                 if elem.tag == "entry":
                     entry_count += 1
 

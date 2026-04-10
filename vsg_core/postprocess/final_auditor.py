@@ -76,7 +76,7 @@ class FinalAuditor:
         self.needs_enhanced_probe = False
         max_applied_delay = 0
 
-        for item in self.ctx.extracted_items:
+        for item in (self.ctx.extracted_items or []):
             # Calculate the actual delay applied (using same logic as options_builder)
             global_shift = self.ctx.delays.global_shift_ms if self.ctx.delays else 0
 
@@ -93,10 +93,10 @@ class FinalAuditor:
                     item.track.type == "subtitles"
                     and sync_key in self.ctx.subtitle_delays_ms
                 ):
-                    actual_delay = round(self.ctx.subtitle_delays_ms.get(sync_key, 0))
+                    actual_delay = round(self.ctx.subtitle_delays_ms.get(sync_key or "", 0))
                 else:
                     actual_delay = (
-                        self.ctx.delays.source_delays_ms.get(sync_key, 0)
+                        self.ctx.delays.source_delays_ms.get(sync_key or "", 0)
                         if self.ctx.delays
                         else 0
                     )
@@ -117,7 +117,7 @@ class FinalAuditor:
         final_tracks = final_mkvmerge_data.get("tracks", [])
 
         has_preserved_tracks = any(
-            item.is_preserved for item in self.ctx.extracted_items
+            item.is_preserved for item in (self.ctx.extracted_items or [])
         )
 
         if has_preserved_tracks:
@@ -125,7 +125,7 @@ class FinalAuditor:
                 "[INFO] Preserved tracks found. Re-sorting audit plan to match final mux order."
             )
 
-            original_plan_items = self.ctx.extracted_items
+            original_plan_items = self.ctx.extracted_items or []
 
             final_items = [
                 item for item in original_plan_items if not item.is_preserved
@@ -165,7 +165,7 @@ class FinalAuditor:
 
             self.ctx.extracted_items = final_items
 
-        final_plan_items = self.ctx.extracted_items
+        final_plan_items = self.ctx.extracted_items or []
 
         if len(final_tracks) != len(final_plan_items):
             msg = (

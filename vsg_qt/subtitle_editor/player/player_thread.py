@@ -160,6 +160,7 @@ class PlayerThread(QThread):
 
                         # Re-render the cached frame through the new filter
                         if self._cached_raw_frame is not None:
+                            assert self._graph is not None
                             self._graph.push(self._cached_raw_frame)
                             filtered_frame = self._graph.pull()
                             pillow_img = filtered_frame.to_image()
@@ -211,6 +212,7 @@ class PlayerThread(QThread):
                             frame_time_ms = timestamp_sec * 1000
 
                             # Push through subtitle filter to keep it in sync
+                            assert self._graph is not None
                             self._graph.push(frame)
                             filtered_frame = self._graph.pull()
 
@@ -270,6 +272,7 @@ class PlayerThread(QThread):
                 self._cached_raw_frame = frame
                 self._cached_frame_timestamp = timestamp_sec
 
+                assert self._graph is not None
                 self._graph.push(frame)
                 filtered_frame = self._graph.pull()
                 pillow_img = filtered_frame.to_image()

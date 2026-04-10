@@ -32,6 +32,7 @@ try:
 
     ENCHANT_AVAILABLE = True
 except ImportError:
+    enchant = None
     ENCHANT_AVAILABLE = False
 
 
@@ -126,7 +127,7 @@ class OCRPostProcessor:
     def _init_spell_checker(self):
         """Initialize spell-check dictionary and ValidationManager."""
         self.dictionary = None
-        if ENCHANT_AVAILABLE and self.config.enable_dictionary_validation:
+        if ENCHANT_AVAILABLE and enchant is not None and self.config.enable_dictionary_validation:
             try:
                 self.dictionary = enchant.Dict("en_US")
                 # Add user dictionary words and names

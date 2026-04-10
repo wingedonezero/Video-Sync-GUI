@@ -16,6 +16,7 @@ try:
 
     FONTTOOLS_AVAILABLE = True
 except ImportError:
+    TTFont = None
     FONTTOOLS_AVAILABLE = False
 
 

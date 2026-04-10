@@ -22,6 +22,7 @@ try:
 
     ENCHANT_AVAILABLE = True
 except ImportError:
+    enchant = None
     ENCHANT_AVAILABLE = False
 
 
@@ -222,7 +223,7 @@ class OCRReport:
 
     def _get_suggestions(self, word: str) -> list[str]:
         """Get dictionary suggestions for a word."""
-        if not ENCHANT_AVAILABLE:
+        if not ENCHANT_AVAILABLE or enchant is None:
             return []
         try:
             d = enchant.Dict("en_US")

@@ -51,7 +51,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
         # FIXED: Find ALL audio tracks from this source, not just first
         target_items = [
             item
-            for item in ctx.extracted_items
+            for item in (ctx.extracted_items or [])
             if item.track.source == source_key
             and item.track.type == "audio"
             and not item.is_preserved
@@ -70,6 +70,11 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
         # FIXED: Apply correction to ALL audio tracks from this source
         for target_item in target_items:
             original_path = target_item.extracted_path
+            if original_path is None:
+                runner._log_message(
+                    f"[LinearCorrector] Skipping track with no extracted path for {source_key}."
+                )
+                continue
             corrected_path = (
                 original_path.parent / f"drift_corrected_{original_path.stem}.flac"
             )
@@ -173,6 +178,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
             )
             target_item.apply_track_name = True
 
-            ctx.extracted_items.append(preserved_item)
+            if ctx.extracted_items is not None:
+                ctx.extracted_items.append(preserved_item)
 
     return ctx

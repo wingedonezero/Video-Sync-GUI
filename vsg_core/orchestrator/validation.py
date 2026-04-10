@@ -90,7 +90,7 @@ class StepValidator:
             source_key = analysis_key.split("_")[0]
             corrected_items = [
                 item
-                for item in ctx.extracted_items
+                for item in (ctx.extracted_items or [])
                 if (
                     item.track.source == source_key
                     and item.track.type == "audio"
@@ -119,7 +119,7 @@ class StepValidator:
             source_key = analysis_key.split("_")[0]
             corrected_items = [
                 item
-                for item in ctx.extracted_items
+                for item in (ctx.extracted_items or [])
                 if (
                     item.track.source == source_key
                     and item.track.type == "audio"
@@ -159,7 +159,7 @@ class StepValidator:
 
             corrected_items = [
                 item
-                for item in ctx.extracted_items
+                for item in (ctx.extracted_items or [])
                 if (
                     item.track.source == source_key
                     and item.track.type == "audio"
@@ -200,7 +200,7 @@ class StepValidator:
 
         subtitle_items = [
             item
-            for item in ctx.extracted_items
+            for item in (ctx.extracted_items or [])
             if item.track.type == "subtitles"
         ]
 

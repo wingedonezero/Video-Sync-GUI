@@ -19,7 +19,7 @@ class AudioObjectBasedAuditor(BaseAuditor):
 
         actual_streams = final_ffprobe_data.get("streams", [])
         audio_items = [
-            item for item in self.ctx.extracted_items if item.track.type == "audio"
+            item for item in (self.ctx.extracted_items or []) if item.track.type == "audio"
         ]
 
         for plan_item in audio_items:
@@ -57,7 +57,7 @@ class AudioObjectBasedAuditor(BaseAuditor):
             ]
             actual_audio = None
             for i, item in enumerate(
-                [it for it in self.ctx.extracted_items if it.track.type == "audio"]
+                [it for it in (self.ctx.extracted_items or []) if it.track.type == "audio"]
             ):
                 if item == plan_item and i < len(actual_audio_streams):
                     actual_audio = actual_audio_streams[i]

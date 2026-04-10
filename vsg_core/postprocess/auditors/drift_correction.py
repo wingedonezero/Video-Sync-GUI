@@ -51,7 +51,7 @@ class DriftCorrectionAuditor(BaseAuditor):
 
             corrected_items = [
                 item
-                for item in self.ctx.extracted_items
+                for item in (self.ctx.extracted_items or [])
                 if (
                     item.track.source == source_key
                     and item.track.type == "audio"
@@ -86,7 +86,7 @@ class DriftCorrectionAuditor(BaseAuditor):
 
                 preserved_items = [
                     p
-                    for p in self.ctx.extracted_items
+                    for p in (self.ctx.extracted_items or [])
                     if (
                         p.track.source == source_key
                         and p.track.type == "audio"

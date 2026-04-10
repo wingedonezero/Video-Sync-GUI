@@ -80,7 +80,7 @@ class ManualSelectionDialog(QDialog):
         self.source_lists: dict[str, SourceList] = {}
         self.attachment_checkboxes: dict[str, QCheckBox] = {}
         self.available_sources = sorted(
-            track_info.keys(), key=lambda k: int(re.search(r"\d+", k).group())
+            track_info.keys(), key=lambda k: int(m.group()) if (m := re.search(r"\d+", k)) else 0
         )
 
         self._build_ui(previous_attachment_sources)

@@ -117,6 +117,7 @@ class CommandRunner:
             if not is_binary and stdout_data:
                 out_buf_list = stdout_data.splitlines(keepends=True)
 
+            tail_buffer = None
             if compact and not is_binary:
                 from collections import deque
 

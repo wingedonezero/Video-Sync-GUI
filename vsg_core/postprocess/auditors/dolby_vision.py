@@ -19,7 +19,7 @@ class DolbyVisionAuditor(BaseAuditor):
 
         actual_streams = final_ffprobe_data.get("streams", [])
         video_items = [
-            item for item in self.ctx.extracted_items if item.track.type == "video"
+            item for item in (self.ctx.extracted_items or []) if item.track.type == "video"
         ]
 
         for plan_item in video_items:
@@ -63,9 +63,9 @@ class DolbyVisionAuditor(BaseAuditor):
                 next(
                     (
                         s
-                        for s in self._get_metadata(
-                            self.ctx.sources.get(item.track.source), "ffprobe"
-                        ).get("streams", [])
+                        for s in (self._get_metadata(
+                            self.ctx.sources.get(item.track.source) or "", "ffprobe"
+                        ) or {}).get("streams", [])
                         if s.get("codec_type") == "video"
                     ),
                     {},
