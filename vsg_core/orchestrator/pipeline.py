@@ -182,6 +182,17 @@ class Orchestrator:
         except Exception as e:
             log(f"[WARNING] Attachments phase had issues (non-fatal): {e}")
 
+        if ctx.settings.trim_audio_to_video_duration:
+            log("--- Audio Duration Trim Phase ---")
+            from vsg_core.orchestrator.steps.audio_trim import (
+                trim_audio_to_video,
+            )
+
+            try:
+                ctx = trim_audio_to_video(ctx, runner, log)
+            except Exception as e:
+                log(f"[WARNING] Audio trim phase had issues (non-fatal): {e}")
+
         log("--- Merge Planning Phase ---")
         progress(0.75)
         try:
