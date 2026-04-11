@@ -53,7 +53,14 @@ def trim_audio_to_video(
         log("[AudioTrim] No video track found — skipping.")
         return ctx
 
+    # Extracted video is often a raw elementary stream (.h264/.hevc) with no
+    # container metadata, so ffprobe can't report its duration.  Fall back to
+    # probing the source MKV which always has a container duration.
     video_dur_s = _probe_duration_s(video_item.extracted_path, runner)
+    if video_dur_s is None:
+        source_path = ctx.sources.get(video_item.track.source)
+        if source_path:
+            video_dur_s = _probe_duration_s(source_path, runner)
     if video_dur_s is None:
         log("[AudioTrim] Could not probe video duration — skipping.")
         return ctx
@@ -67,10 +74,13 @@ def trim_audio_to_video(
         f"effective end: {video_end_s:.3f}s"
     )
 
-    # --- Check each audio track ---
+    # --- Check each non-Source-1 audio track ---
     trimmed_count = 0
     for item in items:
         if item.track.type != "audio" or item.extracted_path is None:
+            continue
+        # Never trim Source 1 audio — it is the reference timeline.
+        if item.track.source == "Source 1":
             continue
 
         audio_dur_s = _probe_duration_s(item.extracted_path, runner)
@@ -142,8 +152,8 @@ def _find_video_item(items: list[PlanItem]) -> PlanItem | None:
     return None
 
 
-def _probe_duration_s(path: Path, runner: CommandRunner) -> float | None:
-    """Probe the duration of an extracted track file via ffprobe."""
+def _probe_duration_s(path: Path | str, runner: CommandRunner) -> float | None:
+    """Probe the duration of a media file via ffprobe."""
     cmd = [
         "ffprobe",
         "-v",
