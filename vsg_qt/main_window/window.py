@@ -9,9 +9,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -42,9 +42,12 @@ class MainWindow(QMainWindow):
         self.ter_input = QLineEdit()
 
         # Log and Status
-        self.log_output = QTextEdit()
+        self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setFontFamily("monospace")
+        self.log_output.setMaximumBlockCount(10000)
+        font = self.log_output.font()
+        font.setFamily("monospace")
+        self.log_output.setFont(font)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
