@@ -58,7 +58,7 @@ class MainController:
 
     def append_log(self, message: str) -> None:
         v = self.v
-        v.log_output.append(message)
+        v.log_output.appendPlainText(message)
         if self.config.get("log_autoscroll", True):
             v.log_output.verticalScrollBar().setValue(
                 v.log_output.verticalScrollBar().maximum()
@@ -181,7 +181,9 @@ class MainController:
         # Concurrent access to the shared object (even read-only) can cause segfaults
         # in PySide6/shiboken6 when the GIL is released during C++ calls.
         worker_settings = self.config.settings.model_copy(deep=True)
-        self.worker = JobWorker(worker_settings, jobs, and_merge, output_dir, self.debug_manager)
+        self.worker = JobWorker(
+            worker_settings, jobs, and_merge, output_dir, self.debug_manager
+        )
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.progress.connect(self.update_progress)
         self.worker.signals.status.connect(self.update_status)
