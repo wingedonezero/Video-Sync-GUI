@@ -126,6 +126,7 @@ class AppSettings(BaseModel):
     apply_dialog_norm_gain: bool = False
     disable_track_statistics_tags: bool = False
     disable_header_compression: bool = True
+    trim_audio_to_video_duration: bool = False
 
     # =========================================================================
     # Post-Mux Settings

@@ -139,7 +139,9 @@ class OCRTab(QWidget):
         )
 
         self.widgets["ocr_engine"] = QComboBox()
-        self.widgets["ocr_engine"].addItem("PaddleOCR-VL 1.5 (Spotting + Positions)", "paddleocr-vl")
+        self.widgets["ocr_engine"].addItem(
+            "PaddleOCR-VL 1.5 (Spotting + Positions)", "paddleocr-vl"
+        )
         self.widgets["ocr_engine"].setToolTip(
             "OCR engine to use.\n"
             "• PaddleOCR-VL 1.5: Fast VLM via llama.cpp with line detection + positions (239ms/sub, 1.7GB VRAM)."
@@ -273,9 +275,7 @@ class OCRTab(QWidget):
             "it as a color override in the ASS output."
         )
 
-        self.widgets["ocr_pgs_keep_top_colors"] = QCheckBox(
-            "Keep top dialogue colors"
-        )
+        self.widgets["ocr_pgs_keep_top_colors"] = QCheckBox("Keep top dialogue colors")
         self.widgets["ocr_pgs_keep_top_colors"].setToolTip(
             "Preserve original subtitle colors for top (title card) lines."
         )
@@ -1331,9 +1331,7 @@ class SteppingTab(QWidget):
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Quality Assurance</b>"))
         segment_layout.addRow(
-            QLabel(
-                "<i>Post-correction verification via fresh dense correlation</i>"
-            )
+            QLabel("<i>Post-correction verification via fresh dense correlation</i>")
         )
 
         self.widgets["stepping_qa_threshold"] = QDoubleSpinBox()
@@ -1750,9 +1748,7 @@ class SubtitleSyncTab(QWidget):
             "• 9 (Default): Strong consensus\n"
             "• 13+: Very thorough, diminishing returns"
         )
-        vv_layout.addRow(
-            "Num Positions:", self.widgets["video_verified_num_positions"]
-        )
+        vv_layout.addRow("Num Positions:", self.widgets["video_verified_num_positions"])
 
         self.widgets["video_verified_batch_size"] = QSpinBox()
         self.widgets["video_verified_batch_size"].setRange(1, 128)
@@ -1765,9 +1761,7 @@ class SubtitleSyncTab(QWidget):
             "• 32 (Default): Standard GPUs (6+ GB)\n"
             "• 64+: High VRAM GPUs (12+ GB)"
         )
-        vv_layout.addRow(
-            "GPU Batch Size:", self.widgets["video_verified_batch_size"]
-        )
+        vv_layout.addRow("GPU Batch Size:", self.widgets["video_verified_batch_size"])
 
         # --- Runtime settings ---
 
@@ -1805,9 +1799,7 @@ class SubtitleSyncTab(QWidget):
             "backend name so primary and cross-check don't collide.\n\n"
             "Useful for diagnosing matching issues or validating results."
         )
-        vv_layout.addRow(
-            "Debug Report:", self.widgets["video_verified_debug_report"]
-        )
+        vv_layout.addRow("Debug Report:", self.widgets["video_verified_debug_report"])
 
         # --- Diagnostics (unchanged from legacy) ---
 
@@ -1883,12 +1875,9 @@ class SubtitleSyncTab(QWidget):
         is_video_verified = text == "video-verified"
 
         # Look up the currently-selected backend + cross-check backend.
-        backend = (
-            self.widgets["video_verified_backend"].currentData() or "isc"
-        )
+        backend = self.widgets["video_verified_backend"].currentData() or "isc"
         cross = (
-            self.widgets["video_verified_cross_check_backend"].currentData()
-            or "none"
+            self.widgets["video_verified_cross_check_backend"].currentData() or "none"
         )
 
         # Time-based specific
@@ -1910,9 +1899,9 @@ class SubtitleSyncTab(QWidget):
             self.widgets[key].setEnabled(is_video_verified)
 
         # Cross-check tolerance — only meaningful when cross-check is active.
-        self.widgets[
-            "video_verified_cross_check_tolerance_frames"
-        ].setEnabled(is_video_verified and cross != "none")
+        self.widgets["video_verified_cross_check_tolerance_frames"].setEnabled(
+            is_video_verified and cross != "none"
+        )
 
         # Hash size — only relevant when primary OR cross-check uses a hash backend.
         needs_hash = backend in ("phash", "dhash") or cross in ("phash", "dhash")
@@ -1994,9 +1983,18 @@ class MergeBehaviorTab(QWidget):
         self.widgets["disable_header_compression"].setToolTip(
             "Prevents mkvmerge from using header removal compression.\nThis is enabled by default as it can sometimes cause issues."
         )
+        self.widgets["trim_audio_to_video_duration"] = QCheckBox(
+            "Trim audio tracks that extend past video end"
+        )
+        self.widgets["trim_audio_to_video_duration"].setToolTip(
+            "When audio is longer than video (e.g. streaming OP/ED not on disc),\n"
+            "trim it to match the video duration before muxing.\n"
+            "Uses lossless stream copy — no re-encoding."
+        )
         form1.addWidget(self.widgets["apply_dialog_norm_gain"])
         form1.addWidget(self.widgets["disable_track_statistics_tags"])
         form1.addWidget(self.widgets["disable_header_compression"])
+        form1.addWidget(self.widgets["trim_audio_to_video_duration"])
         main_layout.addWidget(general_group)
         post_merge_group = QGroupBox("Post-Merge Finalization")
         form2 = QFormLayout(post_merge_group)
