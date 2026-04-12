@@ -953,15 +953,22 @@ class SubtitleData:
 
         return write_ass_file(self, Path(path), rounding=rounding, fps=fps)
 
-    def save_srt(self, path: Path | str, rounding: str = "round") -> None:
+    def save_srt(
+        self,
+        path: Path | str,
+        rounding: str = "round",
+        fps: float | None = None,
+    ) -> SurgicalBatchStats | None:
         """
         Save as SRT file.
 
         Float ms → integer ms happens here.
+        When fps is provided, surgical frame-aware rounding is applied
+        at 1ms precision via the ``rounded_ms`` path.
         """
         from .writers.srt_writer import write_srt_file
 
-        write_srt_file(self, Path(path), rounding=rounding)
+        return write_srt_file(self, Path(path), rounding=rounding, fps=fps)
 
     def save(
         self,
@@ -987,8 +994,7 @@ class SubtitleData:
         if ext in (".ass", ".ssa"):
             return self.save_ass(path, rounding=rounding_mode, fps=fps)
         elif ext == ".srt":
-            self.save_srt(path, rounding=rounding_mode)
-            return None
+            return self.save_srt(path, rounding=rounding_mode, fps=fps)
         else:
             raise ValueError(f"Unsupported output format: {ext}")
 
