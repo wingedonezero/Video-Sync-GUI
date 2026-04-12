@@ -74,10 +74,13 @@ def trim_audio_to_video(
         f"effective end: {video_end_s:.3f}s"
     )
 
-    # --- Check each audio track ---
+    # --- Check each non-Source-1 audio track ---
     trimmed_count = 0
     for item in items:
         if item.track.type != "audio" or item.extracted_path is None:
+            continue
+        # Never trim Source 1 audio — it is the reference timeline.
+        if item.track.source == "Source 1":
             continue
 
         audio_dur_s = _probe_duration_s(item.extracted_path, runner)
