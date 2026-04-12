@@ -18,6 +18,7 @@ from vsg_core.orchestrator.steps.context import Context
 from .auditors import (
     AttachmentsAuditor,
     AudioChannelsAuditor,
+    AudioDurationAuditor,
     AudioObjectBasedAuditor,
     AudioQualityAuditor,
     AudioSyncAuditor,
@@ -76,7 +77,7 @@ class FinalAuditor:
         self.needs_enhanced_probe = False
         max_applied_delay = 0
 
-        for item in (self.ctx.extracted_items or []):
+        for item in self.ctx.extracted_items or []:
             # Calculate the actual delay applied (using same logic as options_builder)
             global_shift = self.ctx.delays.global_shift_ms if self.ctx.delays else 0
 
@@ -93,7 +94,9 @@ class FinalAuditor:
                     item.track.type == "subtitles"
                     and sync_key in self.ctx.subtitle_delays_ms
                 ):
-                    actual_delay = round(self.ctx.subtitle_delays_ms.get(sync_key or "", 0))
+                    actual_delay = round(
+                        self.ctx.subtitle_delays_ms.get(sync_key or "", 0)
+                    )
                 else:
                     actual_delay = (
                         self.ctx.delays.source_delays_ms.get(sync_key or "", 0)
@@ -206,6 +209,7 @@ class FinalAuditor:
             ),
             ("Global Shift", GlobalShiftAuditor, False),
             ("Audio Sync Delays", AudioSyncAuditor, False),
+            ("Audio Duration vs Video", AudioDurationAuditor, True),
             ("Subtitle Formats", SubtitleFormatsAuditor, False),
             (
                 "Sliding-Window Verification Confidence",

@@ -2,6 +2,7 @@
 
 from .attachments import AttachmentsAuditor
 from .audio_channels import AudioChannelsAuditor
+from .audio_duration import AudioDurationAuditor
 from .audio_object_based import AudioObjectBasedAuditor
 from .audio_quality import AudioQualityAuditor
 from .audio_sync import AudioSyncAuditor
@@ -28,6 +29,7 @@ from .video_metadata import VideoMetadataAuditor
 __all__ = [
     "AttachmentsAuditor",
     "AudioChannelsAuditor",
+    "AudioDurationAuditor",
     "AudioObjectBasedAuditor",
     "AudioQualityAuditor",
     "AudioSyncAuditor",
