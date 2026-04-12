@@ -35,7 +35,8 @@ EPSILON = 1e-6
 class SurgicalRoundResult:
     """Result of surgical rounding for a single timestamp."""
 
-    centisecond_ms: int  # Final rounded value in ms (centisecond-aligned)
+    centisecond_ms: int  # Final rounded value in ms (centisecond-aligned, ASS path)
+    rounded_ms: int  # Final rounded value in ms (precision-aligned, generic path)
     was_adjusted: bool  # True if ceil was used instead of floor
     target_frame: int  # Frame the exact time maps to
     floor_frame: int  # Frame floor rounding would produce
@@ -76,9 +77,10 @@ def _time_to_frame(time_ms: float, frame_duration_ms: float) -> int:
 def surgical_round_single(
     exact_ms: float,
     frame_duration_ms: float,
+    precision_ms: int = 10,
 ) -> SurgicalRoundResult:
     """
-    Surgically round a single timestamp to centiseconds.
+    Surgically round a single timestamp to the given precision.
 
     Uses floor by default. Only switches to ceil when floor
     would land on the wrong frame.
@@ -86,19 +88,24 @@ def surgical_round_single(
     Args:
         exact_ms: Exact time in milliseconds (float, after offset applied)
         frame_duration_ms: Duration of one frame in milliseconds
+        precision_ms: Rounding granularity — 10 for ASS (centiseconds),
+                      1 for SRT/ms-based formats.  Defaults to 10 so all
+                      existing ASS call sites are unchanged.
 
     Returns:
         SurgicalRoundResult with the rounded value and metadata
     """
+    p = precision_ms
     target_frame = _time_to_frame(exact_ms, frame_duration_ms)
 
     # Try floor first (current default behavior)
-    floor_cs = math.floor(exact_ms / 10) * 10
-    floor_frame = _time_to_frame(floor_cs, frame_duration_ms)
+    floor_val = math.floor(exact_ms / p) * p
+    floor_frame = _time_to_frame(floor_val, frame_duration_ms)
 
     if floor_frame == target_frame:
         return SurgicalRoundResult(
-            centisecond_ms=floor_cs,
+            centisecond_ms=math.floor(exact_ms / 10) * 10,
+            rounded_ms=floor_val,
             was_adjusted=False,
             target_frame=target_frame,
             floor_frame=floor_frame,
@@ -106,10 +113,11 @@ def surgical_round_single(
         )
 
     # Floor failed - try ceil
-    ceil_cs = math.ceil(exact_ms / 10) * 10
-    if _time_to_frame(ceil_cs, frame_duration_ms) == target_frame:
+    ceil_val = math.ceil(exact_ms / p) * p
+    if _time_to_frame(ceil_val, frame_duration_ms) == target_frame:
         return SurgicalRoundResult(
-            centisecond_ms=ceil_cs,
+            centisecond_ms=math.ceil(exact_ms / 10) * 10,
+            rounded_ms=ceil_val,
             was_adjusted=True,
             target_frame=target_frame,
             floor_frame=floor_frame,
@@ -118,9 +126,10 @@ def surgical_round_single(
 
     # Fallback: ceil of frame start boundary
     frame_start = target_frame * frame_duration_ms
-    fallback_cs = math.ceil(frame_start / 10) * 10
+    fallback_val = math.ceil(frame_start / p) * p
     return SurgicalRoundResult(
-        centisecond_ms=fallback_cs,
+        centisecond_ms=math.ceil(frame_start / 10) * 10,
+        rounded_ms=fallback_val,
         was_adjusted=True,
         target_frame=target_frame,
         floor_frame=floor_frame,
@@ -132,6 +141,7 @@ def surgical_round_event(
     start_ms: float,
     end_ms: float,
     frame_duration_ms: float,
+    precision_ms: int = 10,
 ) -> SurgicalEventResult:
     """
     Surgically round an event's start and end with coordination.
@@ -148,34 +158,38 @@ def surgical_round_event(
         start_ms: Exact start time in milliseconds
         end_ms: Exact end time in milliseconds
         frame_duration_ms: Duration of one frame in milliseconds
+        precision_ms: Rounding granularity (10 for ASS, 1 for SRT)
 
     Returns:
         SurgicalEventResult with both rounded values and coordination info
     """
+    p = precision_ms
+
     # Round start
-    start_result = surgical_round_single(start_ms, frame_duration_ms)
+    start_result = surgical_round_single(start_ms, frame_duration_ms, p)
 
     # Round end independently first
-    end_result = surgical_round_single(end_ms, frame_duration_ms)
+    end_result = surgical_round_single(end_ms, frame_duration_ms, p)
 
     # Coordination: if start was adjusted and end was NOT adjusted
     coordination_applied = False
     if start_result.was_adjusted and not end_result.was_adjusted:
         # What would floor-floor duration have been?
-        floor_start = math.floor(start_ms / 10) * 10
-        floor_end = math.floor(end_ms / 10) * 10
+        floor_start = math.floor(start_ms / p) * p
+        floor_end = math.floor(end_ms / p) * p
         original_floor_duration = floor_end - floor_start
 
         # Try ceil for end too
-        ceil_end = math.ceil(end_ms / 10) * 10
+        ceil_end = math.ceil(end_ms / p) * p
         end_target_frame = _time_to_frame(end_ms, frame_duration_ms)
 
         if _time_to_frame(ceil_end, frame_duration_ms) == end_target_frame:
             # Ceil end is on correct frame — check duration
-            coordinated_duration = ceil_end - start_result.centisecond_ms
+            coordinated_duration = ceil_end - start_result.rounded_ms
             if coordinated_duration == original_floor_duration:
                 end_result = SurgicalRoundResult(
-                    centisecond_ms=ceil_end,
+                    centisecond_ms=math.ceil(end_ms / 10) * 10,
+                    rounded_ms=ceil_end,
                     was_adjusted=True,
                     target_frame=end_target_frame,
                     floor_frame=end_result.floor_frame,
@@ -184,10 +198,10 @@ def surgical_round_event(
                 coordination_applied = True
 
     # Check duration preservation against floor-floor baseline
-    floor_start = math.floor(start_ms / 10) * 10
-    floor_end = math.floor(end_ms / 10) * 10
+    floor_start = math.floor(start_ms / p) * p
+    floor_end = math.floor(end_ms / p) * p
     floor_duration = floor_end - floor_start
-    output_duration = end_result.centisecond_ms - start_result.centisecond_ms
+    output_duration = end_result.rounded_ms - start_result.rounded_ms
     duration_preserved = output_duration == floor_duration
 
     return SurgicalEventResult(
@@ -201,6 +215,7 @@ def surgical_round_event(
 def surgical_round_batch(
     events: Sequence[SubtitleEvent],
     frame_duration_ms: float,
+    precision_ms: int = 10,
 ) -> tuple[dict[int, SurgicalEventResult], SurgicalBatchStats]:
     """
     Apply surgical rounding to all non-comment events.
@@ -208,6 +223,7 @@ def surgical_round_batch(
     Args:
         events: Sequence of SubtitleEvent objects
         frame_duration_ms: Duration of one frame in milliseconds
+        precision_ms: Rounding granularity (10 for ASS, 1 for SRT)
 
     Returns:
         Tuple of (results_by_index, aggregate_stats).
@@ -228,6 +244,7 @@ def surgical_round_batch(
             event.start_ms,
             event.end_ms,
             frame_duration_ms,
+            precision_ms,
         )
         results[idx] = result
 
