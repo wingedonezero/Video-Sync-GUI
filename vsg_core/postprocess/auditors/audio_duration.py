@@ -90,16 +90,16 @@ class AudioDurationAuditor(BaseAuditor):
                         f"{track_label} still extends {overhang_s:.1f}s past "
                         f"video despite trimming being enabled"
                     )
-                elif overhang_s > 0.1:
-                    # Trim was applied and audio is within tolerance — surface
-                    # in the batch report so the user knows it was used.
+                elif overhang_s > 0.0:
+                    # Any positive overhang when trim is on means the trim was
+                    # applied.  Surface in the batch report so the user sees it.
                     self.log(
                         f"  {track_label}: trimmed to {audio_end:.3f}s — "
                         f"{overhang_s:+.3f}s past video (within tolerance)"
                     )
                     self._track_issue(
                         f"{track_label} was trimmed to match video duration "
-                        f"({overhang_s:+.1f}s remaining)",
+                        f"(delta {overhang_s:+.3f}s)",
                         "warning",
                     )
                 else:
