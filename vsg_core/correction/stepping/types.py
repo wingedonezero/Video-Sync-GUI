@@ -39,6 +39,8 @@ class SteppingData:
     track_id: int
     windows: list[ChunkResult]
     clusters: list[ClusterDiagnostic]
+    # DBSCAN noise points: (time_s, delay_ms) pairs for recovery
+    noise_points: tuple[tuple[float, float], ...] = ()
 
 
 # ---------------------------------------------------------------------------
