@@ -77,6 +77,12 @@ class BoundaryResult:
     score: float  # Composite score from _pick_best_zone (0 if no zone)
     near_transient: bool  # True if transients detected near the chosen zone
     overlaps_speech: bool  # True if zone is RMS-only (VAD detected speech there)
+    # Extended audit data from new pipeline (optional for backward compat)
+    video_scene: SceneDetectResult | None = None
+    overlap_start_s: float | None = None
+    overlap_end_s: float | None = None
+    overlap_dur_ms: float = 0.0
+    track_validations: tuple[TrackValidation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,3 +97,51 @@ class SplicePoint:
     silence_zone: SilenceZone | None  # Best silence zone for splice
     boundary_result: BoundaryResult | None = None  # Rich audit data
     snap_metadata: dict[str, object] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Video scene detection types
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class SceneCut:
+    """A detected video scene cut from frame histogram comparison."""
+
+    time_s: float  # Timestamp of the cut frame
+    frame: int  # Frame number
+    diff: float  # Histogram difference (0-1, higher = more different)
+    mean: float  # Mean Y value of the frame
+    cut_type: str  # "HARD_CUT" or "BLACK"
+
+
+@dataclass(frozen=True, slots=True)
+class BlackZone:
+    """A detected black frame zone in video."""
+
+    start_s: float
+    end_s: float
+    dur_ms: float
+
+
+@dataclass(frozen=True, slots=True)
+class SceneDetectResult:
+    """Combined result from video scene detection."""
+
+    cuts: list[SceneCut]
+    black_zones: list[BlackZone]
+
+
+# ---------------------------------------------------------------------------
+# Track validation types
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class TrackValidation:
+    """Safety check result for a single audio track at an edit point."""
+
+    track_name: str
+    db: float  # RMS energy at the edit point
+    is_speech: bool  # True if Silero VAD detected speech
+    status: str  # "TRUE SILENCE", "SILENCE", "QUIET", "CROSSFADE", "SPEECH"

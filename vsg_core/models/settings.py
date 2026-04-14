@@ -255,10 +255,16 @@ class AppSettings(BaseModel):
 
     # Boundary Refinement — Silence Detection
     stepping_silence_search_window_s: float = 5.0
-    stepping_silence_threshold_db: float = -40.0
-    stepping_silence_min_duration_ms: float = 100.0
+    stepping_silence_threshold_db: float = -70.0
+    stepping_silence_min_duration_ms: float = 30.0
 
-    # Boundary Refinement — VAD (Voice Activity Detection)
+    # Boundary Refinement — Scene Detection + Silero VAD
+    stepping_scene_detection_enabled: bool = True
+    stepping_silero_vad_enabled: bool = True
+    stepping_silero_vad_threshold: float = 0.5
+    stepping_noise_recovery_enabled: bool = True
+
+    # Boundary Refinement — VAD (Voice Activity Detection / WebRTC fallback)
     stepping_vad_enabled: bool = True
     stepping_vad_aggressiveness: int = 2
 
