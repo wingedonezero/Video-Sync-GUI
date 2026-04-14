@@ -156,6 +156,10 @@ class SteppingDiagnosis:
     )
     correction_mode: str = "full"
     fallback_mode: str | None = None
+    # Noise points from DBSCAN (not assigned to any cluster).
+    # Each entry is (time_s, delay_ms).  Used for noise recovery
+    # against chapter markers in the boundary refinement pipeline.
+    noise_points: tuple[tuple[float, float], ...] = ()
 
 
 # Union of all possible diagnosis outcomes
