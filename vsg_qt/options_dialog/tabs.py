@@ -1172,27 +1172,38 @@ class SteppingTab(QWidget):
             )
         )
 
-        # VAD settings
-        self.widgets["stepping_vad_enabled"] = QCheckBox(
-            "Enable speech protection (VAD)"
+        # Scene detection settings
+        self.widgets["stepping_scene_detection_enabled"] = QCheckBox(
+            "Enable video scene detection"
         )
-        self.widgets["stepping_vad_enabled"].setToolTip(
-            "Uses WebRTC Voice Activity Detection to find non-speech gaps.\n"
-            "Combined with RMS silence detection - the intersection of\n"
-            "both (quiet AND no speech) produces the safest splice points.\n"
-            "Requires: pip install webrtcvad-wheels\n"
+        self.widgets["stepping_scene_detection_enabled"].setToolTip(
+            "Uses VapourSynth to detect video scene cuts and black frame\n"
+            "zones in Source 2, providing frame-exact boundaries for edits.\n"
+            "Combined with audio silence detection for precise placement.\n"
+            "Only works on progressive H.264/H.265 content (skipped for DVD).\n"
             "Default: Enabled"
         )
 
-        self.widgets["stepping_vad_aggressiveness"] = QSpinBox()
-        self.widgets["stepping_vad_aggressiveness"].setRange(0, 3)
-        self.widgets["stepping_vad_aggressiveness"].setToolTip(
-            "VAD aggressiveness level (0-3):\n"
-            "0 = Least aggressive (classifies more audio as speech)\n"
-            "1 = Moderate\n"
-            "2 = Aggressive (recommended)\n"
-            "3 = Very aggressive (may miss some speech)\n"
-            "Default: 2"
+        self.widgets["stepping_silero_vad_enabled"] = QCheckBox(
+            "Enable speech protection (Silero VAD)"
+        )
+        self.widgets["stepping_silero_vad_enabled"].setToolTip(
+            "Uses Silero VAD v6 neural model for speech detection.\n"
+            "Validates all language tracks at each edit point to ensure\n"
+            "no speech is cut. More accurate than WebRTC VAD on anime.\n"
+            "Model downloads automatically on first use (2.2 MB).\n"
+            "Default: Enabled"
+        )
+
+        self.widgets["stepping_noise_recovery_enabled"] = QCheckBox(
+            "Enable noise cluster recovery"
+        )
+        self.widgets["stepping_noise_recovery_enabled"].setToolTip(
+            "Recovers small clusters that DBSCAN classified as noise\n"
+            "by checking if they align with chapter markers. Catches\n"
+            "short segments (e.g. end credits) that would otherwise be\n"
+            "missed, leaving them uncorrected.\n"
+            "Default: Enabled"
         )
 
         # Silence detection settings
@@ -1201,54 +1212,35 @@ class SteppingTab(QWidget):
         self.widgets["stepping_silence_search_window_s"].setSuffix(" s")
         self.widgets["stepping_silence_search_window_s"].setDecimals(1)
         self.widgets["stepping_silence_search_window_s"].setToolTip(
-            "Search radius around each transition midpoint (in seconds).\n"
-            "Larger = more flexibility finding silence, but splice moves further\n"
-            "Smaller = keeps splice closer to the detected transition\n"
+            "Search radius around each transition zone (in seconds).\n"
+            "Scans this far beyond the cluster gap for silence zones.\n"
             "Default: 5.0s"
         )
 
         self.widgets["stepping_silence_threshold_db"] = QDoubleSpinBox()
-        self.widgets["stepping_silence_threshold_db"].setRange(-60.0, -20.0)
+        self.widgets["stepping_silence_threshold_db"].setRange(-120.0, -20.0)
         self.widgets["stepping_silence_threshold_db"].setSuffix(" dB")
         self.widgets["stepping_silence_threshold_db"].setDecimals(1)
         self.widgets["stepping_silence_threshold_db"].setToolTip(
             "RMS energy threshold to consider audio as 'silence'.\n"
             "More negative = stricter (quieter required)\n"
             "Less negative = more lenient\n"
-            "Default: -40.0 dB"
+            "Default: -70.0 dB"
         )
 
         self.widgets["stepping_silence_min_duration_ms"] = QDoubleSpinBox()
-        self.widgets["stepping_silence_min_duration_ms"].setRange(50.0, 1000.0)
+        self.widgets["stepping_silence_min_duration_ms"].setRange(10.0, 1000.0)
         self.widgets["stepping_silence_min_duration_ms"].setSuffix(" ms")
         self.widgets["stepping_silence_min_duration_ms"].setDecimals(0)
         self.widgets["stepping_silence_min_duration_ms"].setToolTip(
             "Minimum silence duration for a zone to be a splice candidate.\n"
-            "Prevents splicing in brief pauses between words.\n"
-            "Default: 100ms"
+            "Default: 30ms"
         )
 
-        # Scoring weights
-        self.widgets["stepping_fusion_weight_silence"] = QSpinBox()
-        self.widgets["stepping_fusion_weight_silence"].setRange(0, 20)
-        self.widgets["stepping_fusion_weight_silence"].setToolTip(
-            "Weight for silence depth when scoring splice candidates.\n"
-            "Higher = prefer quieter zones more strongly.\n"
-            "Default: 10"
-        )
-
-        self.widgets["stepping_fusion_weight_duration"] = QSpinBox()
-        self.widgets["stepping_fusion_weight_duration"].setRange(0, 20)
-        self.widgets["stepping_fusion_weight_duration"].setToolTip(
-            "Weight for zone duration when scoring splice candidates.\n"
-            "Higher = prefer longer silence zones.\n"
-            "Default: 2"
-        )
-
-        segment_layout.addRow(self.widgets["stepping_vad_enabled"])
-        segment_layout.addRow(
-            "  VAD Aggressiveness:", self.widgets["stepping_vad_aggressiveness"]
-        )
+        segment_layout.addRow(self.widgets["stepping_scene_detection_enabled"])
+        segment_layout.addRow(self.widgets["stepping_silero_vad_enabled"])
+        segment_layout.addRow(self.widgets["stepping_noise_recovery_enabled"])
+        segment_layout.addRow(QLabel(""))
         segment_layout.addRow(
             "Search Window:", self.widgets["stepping_silence_search_window_s"]
         )
