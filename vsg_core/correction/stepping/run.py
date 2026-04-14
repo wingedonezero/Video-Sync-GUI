@@ -31,9 +31,6 @@ from .boundary_refiner import refine_boundaries
 from .data_io import load_stepping_data
 from .edl_builder import build_segments_from_splice_points, find_transition_zones
 from .qa_check import verify_correction
-from .types import (
-    AudioSegment,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,6 +38,7 @@ if TYPE_CHECKING:
     from ...io.runner import CommandRunner
     from ...models.settings import AppSettings
     from ...orchestrator.steps.context import Context
+    from .types import AudioSegment
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +98,10 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
 
         # --- Build transition zones from clusters ---
         zones = find_transition_zones(
-            stepping_data, flag_info, settings, log,
+            stepping_data,
+            flag_info,
+            settings,
+            log,
             chapter_times=chapter_times,
         )
 
@@ -154,10 +155,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             # Build track map from extracted items
             track_map: dict[str, int] = {}
             for item in ctx.extracted_items or []:
-                if (
-                    item.track.source == source_key
-                    and item.track.type == "audio"
-                ):
+                if item.track.source == source_key and item.track.type == "audio":
                     label = f"{item.track.language}_{item.track.codec}"
                     if label not in track_map:
                         track_map[label] = item.track.stream_index
@@ -286,9 +284,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                         ),
                     }
                     boundary_audit.append(entry)
-                ctx.segment_flags[analysis_track_key]["audit_metadata"] = (
-                    boundary_audit
-                )
+                ctx.segment_flags[analysis_track_key]["audit_metadata"] = boundary_audit
 
             # --- Apply to all audio tracks from this source ---
             log(

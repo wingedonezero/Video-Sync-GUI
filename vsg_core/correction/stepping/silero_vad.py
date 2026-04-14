@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-import numpy as np
+import numpy as np  # noqa: TC002 — used at runtime in detect_speech_regions
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -79,9 +79,7 @@ def ensure_silero_model(
 
     try:
         with urlopen(request, timeout=60) as response:
-            fd, tmp_path = tempfile.mkstemp(
-                suffix=".jit.tmp", dir=model_path.parent
-            )
+            fd, tmp_path = tempfile.mkstemp(suffix=".jit.tmp", dir=model_path.parent)
             try:
                 downloaded = 0
                 with os.fdopen(fd, "wb") as f:
@@ -110,9 +108,7 @@ def ensure_silero_model(
         ) from exc
 
     if log:
-        log(
-            f"[Silero VAD] Model downloaded ({model_path.stat().st_size} bytes)"
-        )
+        log(f"[Silero VAD] Model downloaded ({model_path.stat().st_size} bytes)")
 
     return model_path
 

@@ -18,7 +18,6 @@ detection is not available (MPEG-2, interlaced, VapourSynth missing).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -35,6 +34,7 @@ from .types import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from ...models.settings import AppSettings
 
@@ -100,28 +100,20 @@ def refine_boundaries(
         )
 
         # Convert gap boundaries to Source 2 timeline
-        gap_start_src2 = timeline.ref_to_src2(
-            zone.ref_start_s, zone.delay_before_ms
-        )
-        gap_end_src2 = timeline.ref_to_src2(
-            zone.ref_end_s, zone.delay_before_ms
-        )
+        gap_start_src2 = timeline.ref_to_src2(zone.ref_start_s, zone.delay_before_ms)
+        gap_end_src2 = timeline.ref_to_src2(zone.ref_end_s, zone.delay_before_ms)
         scan_pad = settings.stepping_silence_search_window_s
         scan_start = max(0.0, gap_start_src2 - scan_pad)
         scan_end = gap_end_src2 + scan_pad
 
-        log(
-            f"    Gap (ref): {zone.ref_start_s:.1f}s - {zone.ref_end_s:.1f}s"
-        )
+        log(f"    Gap (ref): {zone.ref_start_s:.1f}s - {zone.ref_end_s:.1f}s")
         log(f"    Gap (src2): {gap_start_src2:.1f}s - {gap_end_src2:.1f}s")
 
         # ── Video scene detection ──
         video_result: SceneDetectResult | None = None
         if use_video:
             assert src2_video_path is not None
-            video_result = detect_scenes(
-                src2_video_path, scan_start, scan_end, log
-            )
+            video_result = detect_scenes(src2_video_path, scan_start, scan_end, log)
             if video_result.black_zones:
                 for bz in video_result.black_zones:
                     log(
@@ -129,9 +121,7 @@ def refine_boundaries(
                         f"{bz.end_s:.3f}s ({bz.dur_ms:.0f}ms)"
                     )
             cuts_in_zone = [
-                c
-                for c in video_result.cuts
-                if scan_start <= c.time_s <= scan_end
+                c for c in video_result.cuts if scan_start <= c.time_s <= scan_end
             ]
             if cuts_in_zone:
                 # Log top cuts only (avoid noise)
@@ -149,8 +139,12 @@ def refine_boundaries(
         threshold_db = settings.stepping_silence_threshold_db
         min_dur_ms = settings.stepping_silence_min_duration_ms
         rms_zones = find_silence_zones_rms(
-            src2_pcm, src2_sr, scan_start, scan_end,
-            threshold_db, min_dur_ms,
+            src2_pcm,
+            src2_sr,
+            scan_start,
+            scan_end,
+            threshold_db,
+            min_dur_ms,
         )
         if rms_zones:
             for z in rms_zones:
@@ -168,7 +162,7 @@ def refine_boundaries(
         overlap_dur = 0.0
 
         if video_result and rms_zones:
-            all_video_cuts = (video_result.cuts or [])
+            all_video_cuts = video_result.cuts or []
             for vc in all_video_cuts:
                 for az in rms_zones:
                     # Check if video cut falls within ±500ms of silence zone
@@ -201,10 +195,7 @@ def refine_boundaries(
         best_zone: SilenceZone | None = None
         if rms_zones:
             # Prefer the zone that fits the correction amount and is longest
-            fitting = [
-                z for z in rms_zones
-                if z.duration_ms >= abs(zone.correction_ms)
-            ]
+            fitting = [z for z in rms_zones if z.duration_ms >= abs(zone.correction_ms)]
             if fitting:
                 best_zone = max(fitting, key=lambda z: z.duration_ms)
             else:
@@ -225,10 +216,7 @@ def refine_boundaries(
             # Fallback: midpoint of gap
             ref_mid = (zone.ref_start_s + zone.ref_end_s) / 2.0
             splice_src2 = timeline.ref_to_src2(ref_mid, zone.delay_before_ms)
-            log(
-                f"    [Edit] ⚠ No silence — fallback midpoint: "
-                f"{splice_src2:.3f}s src2"
-            )
+            log(f"    [Edit] ⚠ No silence — fallback midpoint: {splice_src2:.3f}s src2")
 
         # ── Silero VAD track validation ──
         track_vals: list[TrackValidation] = []
@@ -255,7 +243,10 @@ def refine_boundaries(
         near_transient = False
         if settings.stepping_transient_detection_enabled:
             transient_times = detect_transients(
-                src2_pcm, src2_sr, scan_start, scan_end,
+                src2_pcm,
+                src2_sr,
+                scan_start,
+                scan_end,
                 threshold_db=settings.stepping_transient_threshold,
             )
             if transient_times:
@@ -287,23 +278,17 @@ def refine_boundaries(
             and tool_paths
             and runner is not None
         ):
-            splice_ref = timeline.src2_to_ref(
-                splice_src2, zone.delay_before_ms
-            )
+            splice_ref = timeline.src2_to_ref(splice_src2, zone.delay_before_ms)
             snapped_ref = _snap_to_video_frame(
                 splice_ref, ref_video_path, settings, tool_paths, runner, log
             )
             if snapped_ref is not None and snapped_ref != splice_ref:
-                snapped_src2 = timeline.ref_to_src2(
-                    snapped_ref, zone.delay_before_ms
-                )
+                snapped_src2 = timeline.ref_to_src2(snapped_ref, zone.delay_before_ms)
                 if best_zone is not None:
                     if best_zone.start_s <= snapped_src2 <= best_zone.end_s:
                         splice_src2 = snapped_src2
                         snap_meta["video_snapped"] = True
-                        snap_meta["video_snap_offset_s"] = (
-                            snapped_ref - splice_ref
-                        )
+                        snap_meta["video_snap_offset_s"] = snapped_ref - splice_ref
                         log(
                             f"    [Snap] Video keyframe: "
                             f"{splice_ref:.3f}s → {snapped_ref:.3f}s"
@@ -315,9 +300,7 @@ def refine_boundaries(
                         )
 
         # ── Build SplicePoint ──
-        splice_ref_final = timeline.src2_to_ref(
-            splice_src2, zone.delay_before_ms
-        )
+        splice_ref_final = timeline.src2_to_ref(splice_src2, zone.delay_before_ms)
 
         boundary = BoundaryResult(
             zone=best_zone,
@@ -371,15 +354,25 @@ def _validate_tracks_silero(
     for track_name, stream_idx in track_streams.items():
         # Decode 2 seconds around the edit point
         cmd = [
-            "ffmpeg", "-v", "error",
-            "-ss", str(max(0, edit_time_s - 1)),
-            "-t", "2",
-            "-i", src2_file_path,
-            "-map", f"0:a:{stream_idx}",
-            "-ac", "1",
-            "-ar", "16000",
-            "-f", "f32le",
-            "-acodec", "pcm_f32le",
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            str(max(0, edit_time_s - 1)),
+            "-t",
+            "2",
+            "-i",
+            src2_file_path,
+            "-map",
+            f"0:a:{stream_idx}",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
             "pipe:1",
         ]
         try:
@@ -388,21 +381,25 @@ def _validate_tracks_silero(
         except Exception:
             validations.append(
                 TrackValidation(
-                    track_name=track_name, db=-120.0,
-                    is_speech=False, status="DECODE_ERROR",
+                    track_name=track_name,
+                    db=-120.0,
+                    is_speech=False,
+                    status="DECODE_ERROR",
                 )
             )
             continue
 
         # Check speech
         speech_regions = detect_speech_regions(
-            pcm_16k, 16000, model_path, threshold=threshold,
+            pcm_16k,
+            16000,
+            model_path,
+            threshold=threshold,
         )
         # Adjust to absolute time
         base_t = max(0, edit_time_s - 1)
         is_speech = any(
-            base_t + s <= edit_time_s <= base_t + e
-            for s, e in speech_regions
+            base_t + s <= edit_time_s <= base_t + e for s, e in speech_regions
         )
 
         # Check RMS at the edit point (center of the 2s window)
@@ -428,8 +425,10 @@ def _validate_tracks_silero(
 
         validations.append(
             TrackValidation(
-                track_name=track_name, db=db,
-                is_speech=is_speech, status=status,
+                track_name=track_name,
+                db=db,
+                is_speech=is_speech,
+                status=status,
             )
         )
         log(

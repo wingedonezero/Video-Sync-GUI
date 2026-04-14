@@ -117,7 +117,7 @@ def detect_scenes(
     log:
         Logging callable.
     cut_threshold:
-        Minimum histogram difference (0–1) for a scene cut.
+        Minimum histogram difference (0-1) for a scene cut.
     black_threshold:
         Maximum mean Y value to classify a frame as black.
 
@@ -147,9 +147,7 @@ def detect_scenes(
     elif clip.format is None:
         # Unknown format — try converting anyway
         try:
-            clip = core.resize.Bicubic(
-                clip, format=vs.YUV420P8, matrix_s="709"
-            )
+            clip = core.resize.Bicubic(clip, format=vs.YUV420P8, matrix_s="709")
         except Exception:
             if log:
                 log("[Scene Detect] Cannot convert clip format — skipping")
