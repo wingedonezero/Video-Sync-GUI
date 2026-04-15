@@ -553,7 +553,12 @@ def _swap_corrected_track(
             name=corrected_name,
         ),
     )
-    target_item.apply_track_name = True  # type: ignore[attr-defined]
+    # Inherit apply_track_name from the user's manual-selection layout
+    # (same treatment the preserved track gets via deep-copy).  If the
+    # user had "keep name" unchecked, the corrected FLAC comes out
+    # unnamed in the final MKV — options_builder skips --track-name when
+    # apply_track_name is False and custom_name is empty.  The stepping
+    # correction shouldn't unilaterally override a per-track choice.
     if ctx.extracted_items is not None:
         ctx.extracted_items.append(preserved)  # type: ignore[arg-type]
 
