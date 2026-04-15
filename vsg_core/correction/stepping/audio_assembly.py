@@ -171,11 +171,26 @@ def assemble_corrected_audio(
     assembly_dir.mkdir(exist_ok=True)
 
     segment_files: list[str] = []
-    base_delay_ms = edl[0].delay_ms
-    current_delay = base_delay_ms
+    # Bake the first-cluster delay (edl[0].delay_ms) directly into the FLAC's
+    # PCM content so the output is pre-aligned to Source 1's audio-content
+    # timeline.  Starting current_delay at 0 makes the first loop iteration
+    # compute gap_ms = edl[0].delay_ms - 0, which then takes the existing
+    # silence-prepend branch (positive delay) or the skip-leading-samples
+    # branch (negative delay).  After the mux step sees an is_pre_aligned
+    # track, it applies only Source 1's audio container delay — no negative
+    # --sync, no FLAC-block-alignment residual.
+    current_delay = 0
 
     try:
         pcm_duration_s = len(target_pcm) / float(sample_rate * channels)
+        first_delay_ms = edl[0].delay_ms
+        pcm_duration_ms = pcm_duration_s * 1000.0
+        if first_delay_ms < 0 and abs(first_delay_ms) >= pcm_duration_ms:
+            raise RuntimeError(
+                f"First-cluster delay ({first_delay_ms}ms) is >= audio "
+                f"duration ({pcm_duration_ms:.0f}ms) — cannot pre-align "
+                f"(would skip past end of file)."
+            )
 
         for i, segment in enumerate(edl):
             gap_ms = segment.delay_ms - current_delay

@@ -222,6 +222,17 @@ class MkvmergeOptionsBuilder:
         if tr.source == "Source 1" and tr.type == "video":
             return plan.delays.global_shift_ms
 
+        # SPECIAL CASE: Stepping-corrected audio tracks whose content is
+        # already shifted to Source 1's audio-content timeline.  The
+        # correlation delay is baked into the FLAC samples (prepended silence
+        # for positive delays, skipped leading samples for negative), so
+        # applying it again via --sync would double-shift.  Only apply Source
+        # 1's audio-container delay (stashed in container_delay_ms by
+        # _swap_corrected_track) so the corrected track lands at the same
+        # container timeline as Source 1's audio.
+        if item.is_pre_aligned:
+            return round(item.container_delay_ms)
+
         # All other tracks: Use the correlation delay from analysis
         # This includes:
         # - Source 1 subtitles (delay is 0 + global shift)

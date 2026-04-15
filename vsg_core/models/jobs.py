@@ -49,6 +49,12 @@ class PlanItem:
     sync_to: str | None = None
     is_preserved: bool = False
     is_corrected: bool = False
+    # Set on stepping-corrected tracks whose content is already shifted to
+    # Source 1's audio-content timeline.  For these, mkvmerge must apply
+    # `container_delay_ms` directly (which we store as Source 1's audio
+    # container delay) instead of the correlation-based source delay, because
+    # the correlation shift is already baked into the FLAC samples.
+    is_pre_aligned: bool = False
     correction_source: str | None = None
     perform_ocr: bool = False
     container_delay_ms: int = 0
