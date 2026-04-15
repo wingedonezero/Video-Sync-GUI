@@ -35,10 +35,12 @@ from .qa_check import verify_correction
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import numpy as np
+
     from ...io.runner import CommandRunner
     from ...models.settings import AppSettings
     from ...orchestrator.steps.context import Context
-    from .types import AudioSegment
+    from .types import AudioSegment, SplicePoint
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +180,53 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                     "[SteppingCorrection] Boundary refinement produced no splice points."
                 )
                 continue
+
+            # --- Per-transition verification against Source 1 content ---
+            # Emits [Verify] log lines and records any mismatches as quality
+            # issues.  Replicates Stage 3 of the research test script
+            # (test_combined_final.py): cross-correlate 1 s windows at
+            # ±{5, 3, 1} s around each splice and confirm lag ≈ 0 on both
+            # sides at the expected delay.
+            if ref_file_path is not None:
+                _run_splice_verification(
+                    ref_file_path=ref_file_path,
+                    src2_pcm=src2_pcm,
+                    src2_sr=src2_sr,
+                    splice_points=splice_points,
+                    source_key=source_key,
+                    settings=settings,
+                    runner=runner,
+                    tool_paths=ctx.tool_paths,
+                    ctx=ctx,
+                    log=log,
+                )
+
+            # Record zone-overflow quality issues from the refiner
+            for sp in splice_points:
+                overflow = (
+                    sp.boundary_result.zone_overflow_ms if sp.boundary_result else 0.0
+                )
+                if overflow > 0:
+                    ctx.stepping_quality_issues.append(
+                        {
+                            "source": source_key,
+                            "issue_type": "silence_overflow",
+                            "severity": "medium",
+                            "message": (
+                                f"Transition @ {sp.src2_time_s:.3f}s: "
+                                f"silence zone {sp.silence_zone.duration_ms:.0f}ms "
+                                f"too small for {abs(sp.correction_ms):.0f}ms "
+                                f"correction — {overflow:.0f}ms overflow into "
+                                f"audio content"
+                                if sp.silence_zone
+                                else f"Transition @ {sp.src2_time_s:.3f}s: zone overflow"
+                            ),
+                            "details": {
+                                "expected_silence_at": sp.src2_time_s,
+                                "threshold_exceeded_by": overflow,
+                            },
+                        }
+                    )
 
             # --- Build final EDL ---
             # Anchor = first cluster's delay
@@ -390,6 +439,108 @@ def _extract_chapter_times(
         return times or None
     except Exception:
         return None
+
+
+def _run_splice_verification(
+    ref_file_path: str,
+    src2_pcm: np.ndarray,
+    src2_sr: int,
+    splice_points: list[SplicePoint],
+    source_key: str,
+    settings: AppSettings,
+    runner: CommandRunner,
+    tool_paths: dict[str, str | None],
+    ctx: Context,
+    log: Callable[[str], None],
+) -> None:
+    """Decode Source 1 once, run per-transition verification.
+
+    Records any mismatches as ``SteppingQualityIssue`` entries on ctx.
+    Failures are logged but do NOT abort the correction — end-of-run
+    dense QA (``verify_correction``) is still the hard gate.
+    """
+    from ...analysis.correlation import (
+        DEFAULT_SR,
+        decode_audio,
+        get_audio_stream_info,
+        normalize_lang,
+    )
+    from .verify_splices import verify_splice_points
+
+    ref_lang = normalize_lang(settings.analysis_lang_source1)
+    idx_ref, _ = get_audio_stream_info(ref_file_path, ref_lang, runner, tool_paths)
+    if idx_ref is None:
+        log("  [Verify] Source 1 audio stream not found — skipping verification")
+        return
+
+    log(
+        "[SteppingCorrection] Verifying each splice against Source 1 "
+        f"(decoding {Path(ref_file_path).name})..."
+    )
+
+    try:
+        ref_pcm = decode_audio(
+            ref_file_path, idx_ref, DEFAULT_SR, settings.use_soxr, runner, tool_paths
+        )
+    except Exception as exc:
+        log(f"  [Verify] Source 1 decode failed: {exc} — skipping verification")
+        return
+
+    # src2_pcm is int32 at src2_sr; ref_pcm from decode_audio is float32 at
+    # DEFAULT_SR.  They need to match on sample rate for xcorr to be valid.
+    if src2_sr != DEFAULT_SR:
+        log(
+            f"  [Verify] sample rate mismatch ({src2_sr} vs {DEFAULT_SR}) "
+            "— skipping verification"
+        )
+        return
+
+    issues = verify_splice_points(
+        ref_pcm=ref_pcm,
+        src2_pcm=src2_pcm,
+        sample_rate=DEFAULT_SR,
+        splice_points=splice_points,
+        log=log,
+    )
+
+    if not issues:
+        log("  [Verify] All transitions match Source 1 timeline ✓")
+        return
+
+    for issue in issues:
+        transition_idx = issue["transition_index"]
+        src2_t = issue["src2_time_s"]
+        before_n = issue["before_failures"]
+        after_n = issue["after_failures"]
+        details_list = issue["details"]
+
+        severity = "high" if (before_n + after_n) >= 3 else "medium"  # type: ignore[operator]
+        message = (
+            f"Transition {transition_idx} @ {src2_t:.3f}s: "
+            f"{before_n} BEFORE window(s) and {after_n} AFTER window(s) "
+            f"failed Source 1 match (see [Verify] log lines)"
+        )
+        log(f"  [Verify] ⚠ {message}")
+        if isinstance(details_list, list):
+            for d in details_list:
+                log(f"    - {d}")
+
+        ctx.stepping_quality_issues.append(
+            {
+                "source": source_key,
+                "issue_type": "boundary_mismatch",
+                "severity": severity,
+                "message": message,
+                "details": {
+                    "segment_index": int(transition_idx)  # type: ignore[arg-type]
+                    if isinstance(transition_idx, (int, float))
+                    else 0,
+                    "expected_silence_at": float(src2_t)  # type: ignore[arg-type]
+                    if isinstance(src2_t, (int, float))
+                    else 0.0,
+                },
+            }
+        )
 
 
 def _build_audio_track_map(

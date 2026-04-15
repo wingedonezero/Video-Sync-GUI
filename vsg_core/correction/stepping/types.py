@@ -85,6 +85,11 @@ class BoundaryResult:
     overlap_end_s: float | None = None
     overlap_dur_ms: float = 0.0
     track_validations: tuple[TrackValidation, ...] = ()
+    # How much the correction overflows the selected silence zone.
+    # 0 = zone large enough to fully absorb the correction. Positive
+    # means the insert/trim will bleed that many ms into real audio
+    # content on one side of the silence region.
+    zone_overflow_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
