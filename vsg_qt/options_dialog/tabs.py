@@ -1251,12 +1251,6 @@ class SteppingTab(QWidget):
             "Min Silence Duration:",
             self.widgets["stepping_silence_min_duration_ms"],
         )
-        segment_layout.addRow(
-            "Silence Weight:", self.widgets["stepping_fusion_weight_silence"]
-        )
-        segment_layout.addRow(
-            "Duration Weight:", self.widgets["stepping_fusion_weight_duration"]
-        )
 
         # Transient detection settings
         segment_layout.addRow(QLabel(""))
