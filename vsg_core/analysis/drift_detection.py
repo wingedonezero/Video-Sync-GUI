@@ -417,6 +417,13 @@ def diagnose_audio_issue(
                     cluster_members[label] = []
                 cluster_members[label].append(i)
 
+        # Collect DBSCAN noise points for potential recovery downstream
+        _noise_pts = tuple(
+            (float(times[i]), float(delays[i]))
+            for i, label in enumerate(db.labels_)
+            if label == -1
+        )
+
         # Get correction mode and quality thresholds
         correction_mode = settings.stepping_correction_mode
         quality_mode = settings.stepping_quality_mode
@@ -517,6 +524,7 @@ def diagnose_audio_issue(
                 invalid_clusters=invalid_clusters,
                 validation_results=validation_results,
                 correction_mode=correction_mode,
+                noise_points=_noise_pts,
             )
 
         elif correction_mode == "filtered":
@@ -550,6 +558,7 @@ def diagnose_audio_issue(
                 validation_results=validation_results,
                 correction_mode=correction_mode,
                 fallback_mode=fallback_mode,
+                noise_points=_noise_pts,
             )
 
         else:
@@ -566,6 +575,7 @@ def diagnose_audio_issue(
                 return SteppingDiagnosis(
                     cluster_count=len(unique_clusters),
                     cluster_details=cluster_details,
+                    noise_points=_noise_pts,
                 )
             else:
                 return UniformDiagnosis()

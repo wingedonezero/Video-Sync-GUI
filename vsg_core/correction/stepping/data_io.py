@@ -63,9 +63,12 @@ def save_stepping_data(
             }
             for c in diagnosis.cluster_details
         ],
+        "noise_points": [[t, d] for t, d in diagnosis.noise_points],
     }
 
-    out_path.write_text(json.dumps(payload, indent=2, cls=NumpyJSONEncoder), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(payload, indent=2, cls=NumpyJSONEncoder), encoding="utf-8"
+    )
     return out_path
 
 
@@ -99,9 +102,13 @@ def load_stepping_data(path: str | Path) -> SteppingData:
         for c in raw["clusters"]
     ]
 
+    # Load noise points (backward-compatible: may not exist in older files)
+    noise_pts = tuple((float(p[0]), float(p[1])) for p in raw.get("noise_points", []))
+
     return SteppingData(
         source_key=raw["source_key"],
         track_id=raw["track_id"],
         windows=windows,
         clusters=clusters,
+        noise_points=noise_pts,
     )

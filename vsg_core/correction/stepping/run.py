@@ -31,9 +31,6 @@ from .boundary_refiner import refine_boundaries
 from .data_io import load_stepping_data
 from .edl_builder import build_segments_from_splice_points, find_transition_zones
 from .qa_check import verify_correction
-from .types import (
-    AudioSegment,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,6 +38,7 @@ if TYPE_CHECKING:
     from ...io.runner import CommandRunner
     from ...models.settings import AppSettings
     from ...orchestrator.steps.context import Context
+    from .types import AudioSegment
 
 
 # ---------------------------------------------------------------------------
@@ -90,8 +88,22 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             f"{len(stepping_data.clusters)} clusters"
         )
 
+        # --- Extract Source 2 chapter markers for noise recovery ---
+        chapter_times: list[float] | None = None
+        src2_path_for_chapters = ctx.sources.get(source_key)
+        if src2_path_for_chapters and settings.stepping_noise_recovery_enabled:
+            chapter_times = _extract_chapter_times(
+                src2_path_for_chapters, runner, ctx.tool_paths, log
+            )
+
         # --- Build transition zones from clusters ---
-        zones = find_transition_zones(stepping_data, flag_info, settings, log)
+        zones = find_transition_zones(
+            stepping_data,
+            flag_info,
+            settings,
+            log,
+            chapter_times=chapter_times,
+        )
 
         if not zones:
             # No transitions detected — uniform delay
@@ -119,8 +131,39 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         if src2_pcm is None:
             continue
 
+        # Resolve Source 2 video path for scene detection
+        src2_video_path = ctx.sources.get(source_key)
+
+        # Ensure Silero VAD model if enabled
+        silero_model_path: str | None = None
+        if settings.stepping_silero_vad_enabled:
+            try:
+                from .silero_vad import ensure_silero_model
+
+                silero_model_path = str(ensure_silero_model(log=log))
+            except Exception as exc:
+                log(
+                    f"[SteppingCorrection] Silero VAD unavailable: {exc} "
+                    "— falling back to WebRTC VAD"
+                )
+
+        # Collect multi-track stream indices for validation
+        src2_track_streams: dict[str, int] | None = None
+        src2_file_str: str | None = None
+        if silero_model_path and src2_video_path:
+            src2_file_str = src2_video_path
+            # Build track map from extracted items
+            track_map: dict[str, int] = {}
+            for item in ctx.extracted_items or []:
+                if item.track.source == source_key and item.track.type == "audio":
+                    label = f"{item.track.language}_{item.track.codec}"
+                    if label not in track_map:
+                        track_map[label] = item.track.stream_index
+            if track_map:
+                src2_track_streams = track_map
+
         try:
-            # --- Refine boundaries (silence detection in Source 2) ---
+            # --- Refine boundaries (scene detection + silence + VAD) ---
             splice_points = refine_boundaries(
                 transition_zones=zones,
                 src2_pcm=src2_pcm,
@@ -130,6 +173,10 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                 ref_video_path=ref_file_path,
                 tool_paths=ctx.tool_paths,
                 runner=runner,
+                src2_video_path=src2_video_path,
+                silero_model_path=silero_model_path,
+                src2_track_streams=src2_track_streams,
+                src2_file_path=src2_file_str,
             )
 
             if not splice_points:
@@ -237,9 +284,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                         ),
                     }
                     boundary_audit.append(entry)
-                ctx.segment_flags[analysis_track_key]["audit_metadata"] = (
-                    boundary_audit
-                )
+                ctx.segment_flags[analysis_track_key]["audit_metadata"] = boundary_audit
 
             # --- Apply to all audio tracks from this source ---
             log(
@@ -314,6 +359,40 @@ def apply_plan_to_file(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _extract_chapter_times(
+    video_path: str,
+    runner: CommandRunner,
+    tool_paths: dict[str, str | None],
+    log: Callable[[str], None],
+) -> list[float] | None:
+    """Extract chapter start times from a video file via ffprobe."""
+    import json as _json
+
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_chapters",
+        "-of",
+        "json",
+        video_path,
+    ]
+    try:
+        out = runner.run(cmd, tool_paths)
+        if not out:
+            return None
+        data = _json.loads(out)
+        chapters = data.get("chapters", [])
+        if not chapters:
+            return None
+        times = [float(c["start_time"]) for c in chapters if "start_time" in c]
+        if times:
+            log(f"[SteppingCorrection] {len(times)} chapter markers found")
+        return times or None
+    except Exception:
+        return None
 
 
 def _find_analysis_track(

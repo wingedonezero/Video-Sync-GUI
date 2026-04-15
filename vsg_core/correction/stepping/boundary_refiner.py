@@ -4,11 +4,15 @@ Find precise splice points at transition boundaries.
 
 For each transition zone the EDL builder identified, this module:
   1. Converts to Source 2 timeline (correct subtract convention)
-  2. Searches Source 2 PCM for silence (RMS + VAD combined)
-  3. Detects transients (drum hits, impacts) to avoid them
-  4. Snaps to the CENTER of the best silence zone
-  5. Nudges to nearest zero-crossing to prevent clicks
-  6. Optionally aligns to a video keyframe
+  2. Runs video scene detection on Source 2 (progressive content only)
+  3. Searches Source 2 PCM for audio silence zones
+  4. Finds overlap between video scene cuts and audio silence
+  5. Validates all language tracks at the edit point (Silero VAD + RMS)
+  6. Nudges to nearest zero-crossing to prevent clicks
+  7. Optionally aligns to a video keyframe
+
+Falls back to the legacy midpoint + silence search when video scene
+detection is not available (MPEG-2, interlaced, VapourSynth missing).
 """
 
 from __future__ import annotations
@@ -19,10 +23,18 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from . import timeline
-from .types import BoundaryResult, SilenceZone, SplicePoint, TransitionZone
+from .scene_detect import SceneDetectResult, can_detect_scenes, detect_scenes
+from .types import (
+    BoundaryResult,
+    SilenceZone,
+    SplicePoint,
+    TrackValidation,
+    TransitionZone,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from ...models.settings import AppSettings
 
@@ -41,6 +53,10 @@ def refine_boundaries(
     ref_video_path: str | None = None,
     tool_paths: dict[str, str | None] | None = None,
     runner: object | None = None,
+    src2_video_path: str | None = None,
+    silero_model_path: str | Path | None = None,
+    src2_track_streams: dict[str, int] | None = None,
+    src2_file_path: str | None = None,
 ) -> list[SplicePoint]:
     """For each transition zone, find the best splice point in Source 2 audio.
 
@@ -50,63 +66,210 @@ def refine_boundaries(
         Mono int32 PCM of Source 2 (the target / analysis track).
     src2_sr : int
         Sample rate of src2_pcm.
+    src2_video_path : str | None
+        Path to Source 2 video for scene detection.
+    silero_model_path : str | Path | None
+        Path to Silero VAD .jit model for speech detection.
+    src2_track_streams : dict[str, int] | None
+        Mapping of track names → ffmpeg audio stream indices for
+        multi-track validation (e.g. {"JPN": 2, "ENG": 0}).
+    src2_file_path : str | None
+        Path to Source 2 file for multi-track audio decoding.
     """
+    # Determine if video scene detection is available
+    use_video = (
+        settings.stepping_scene_detection_enabled
+        and src2_video_path is not None
+        and can_detect_scenes(src2_video_path, runner)
+    )
+    if settings.stepping_scene_detection_enabled and not use_video:
+        if src2_video_path is None:
+            log("  [Scene Detect] No Source 2 video path — skipping video layer")
+        else:
+            log(
+                "  [Scene Detect] Source 2 is MPEG-2 or interlaced — "
+                "skipping video layer (audio-only mode)"
+            )
+
     splice_points: list[SplicePoint] = []
 
     for i, zone in enumerate(transition_zones):
         log(
-            f"  [Boundary {i + 1}] Refining transition "
-            f"(correction {zone.correction_ms:+.0f}ms)..."
+            f"  [Transition {i + 1}] {zone.correction_ms:+.0f}ms "
+            f"({zone.delay_before_ms:+.0f}ms → {zone.delay_after_ms:+.0f}ms)"
         )
 
-        # Midpoint of the transition zone in ref timeline
-        ref_mid = (zone.ref_start_s + zone.ref_end_s) / 2.0
-        # Convert to Source 2 timeline using delay BEFORE the transition
-        src2_mid = timeline.ref_to_src2(ref_mid, zone.delay_before_ms)
+        # Convert gap boundaries to Source 2 timeline
+        gap_start_src2 = timeline.ref_to_src2(zone.ref_start_s, zone.delay_before_ms)
+        gap_end_src2 = timeline.ref_to_src2(zone.ref_end_s, zone.delay_before_ms)
+        scan_pad = settings.stepping_silence_search_window_s
+        scan_start = max(0.0, gap_start_src2 - scan_pad)
+        scan_end = gap_end_src2 + scan_pad
 
-        search_window_s = settings.stepping_silence_search_window_s
-        search_start = max(0.0, src2_mid - search_window_s)
-        search_end = src2_mid + search_window_s
+        log(f"    Gap (ref): {zone.ref_start_s:.1f}s - {zone.ref_end_s:.1f}s")
+        log(f"    Gap (src2): {gap_start_src2:.1f}s - {gap_end_src2:.1f}s")
 
-        log(
-            f"    Ref midpoint: {ref_mid:.2f}s → "
-            f"Src2 search: [{search_start:.2f}s - {search_end:.2f}s]"
-        )
+        # ── Video scene detection ──
+        video_result: SceneDetectResult | None = None
+        if use_video:
+            assert src2_video_path is not None
+            video_result = detect_scenes(src2_video_path, scan_start, scan_end, log)
+            if video_result.black_zones:
+                for bz in video_result.black_zones:
+                    log(
+                        f"    [Video] BLACK: {bz.start_s:.3f}s - "
+                        f"{bz.end_s:.3f}s ({bz.dur_ms:.0f}ms)"
+                    )
+            cuts_in_zone = [
+                c for c in video_result.cuts if scan_start <= c.time_s <= scan_end
+            ]
+            if cuts_in_zone:
+                # Log top cuts only (avoid noise)
+                for c in cuts_in_zone[:5]:
+                    log(
+                        f"    [Video] {c.cut_type}: {c.time_s:.3f}s "
+                        f"(diff={c.diff:.3f}, mean={c.mean:.0f})"
+                    )
+                if len(cuts_in_zone) > 5:
+                    log(f"    [Video] ... and {len(cuts_in_zone) - 5} more")
+            elif not video_result.black_zones:
+                log("    [Video] No scene changes detected in zone")
 
-        # --- Find silence zones ---
-        boundary = _find_best_silence(
+        # ── Audio silence detection ──
+        threshold_db = settings.stepping_silence_threshold_db
+        min_dur_ms = settings.stepping_silence_min_duration_ms
+        rms_zones = find_silence_zones_rms(
             src2_pcm,
             src2_sr,
-            search_start,
-            search_end,
-            src2_mid,
-            settings,
-            log,
+            scan_start,
+            scan_end,
+            threshold_db,
+            min_dur_ms,
         )
-        best_zone = boundary.zone
+        if rms_zones:
+            for z in rms_zones:
+                fits = " ✓ FITS" if z.duration_ms >= abs(zone.correction_ms) else ""
+                log(
+                    f"    [Audio] Silence: {z.start_s:.3f}s - {z.end_s:.3f}s "
+                    f"({z.duration_ms:.0f}ms, {z.avg_db:.0f}dB){fits}"
+                )
+        else:
+            log("    [Audio] No silence zones found")
 
-        # Determine splice time
-        if best_zone is not None:
-            splice_src2 = best_zone.center_s
+        # ── Find video + audio overlap ──
+        overlap_start: float | None = None
+        overlap_end: float | None = None
+        overlap_dur = 0.0
+
+        if video_result and rms_zones:
+            all_video_cuts = video_result.cuts or []
+            for vc in all_video_cuts:
+                for az in rms_zones:
+                    # Check if video cut falls within ±500ms of silence zone
+                    if az.start_s - 0.5 <= vc.time_s <= az.end_s + 0.5:
+                        ol_s = max(vc.time_s, az.start_s)
+                        ol_e = az.end_s
+                        if video_result.black_zones:
+                            for bz in video_result.black_zones:
+                                if bz.start_s <= vc.time_s <= bz.end_s + 0.5:
+                                    ol_e = min(ol_e, bz.end_s)
+                        if ol_e > ol_s or abs(ol_e - ol_s) < 0.05:
+                            overlap_start = ol_s
+                            overlap_end = ol_e
+                            overlap_dur = max(0.0, (ol_e - ol_s) * 1000)
+                            break
+                if overlap_start is not None:
+                    break
+
+        if overlap_start is not None:
             log(
-                f"    Splice: {splice_src2:.3f}s  "
-                f"(silence {best_zone.duration_ms:.0f}ms @ {best_zone.avg_db:.1f}dB, "
-                f"source={best_zone.source}, score={boundary.score:.1f})"
+                f"    [Overlap] Video + Audio: {overlap_start:.3f}s - "
+                f"{overlap_end:.3f}s ({overlap_dur:.0f}ms)"
+            )
+        elif video_result and rms_zones:
+            log("    [Overlap] ⚠ No direct overlap — using best audio silence")
+        elif not video_result and rms_zones:
+            log("    [Overlap] Video skipped — using audio silence only")
+
+        # ── Determine edit point ──
+        best_zone: SilenceZone | None = None
+        if rms_zones:
+            # Prefer the zone that fits the correction amount and is longest
+            fitting = [z for z in rms_zones if z.duration_ms >= abs(zone.correction_ms)]
+            if fitting:
+                best_zone = max(fitting, key=lambda z: z.duration_ms)
+            else:
+                best_zone = max(rms_zones, key=lambda z: z.duration_ms)
+
+        if best_zone is not None:
+            splice_src2 = best_zone.start_s
+            log(
+                f"    [Edit] Position: {splice_src2:.3f}s src2 | "
+                f"{'INSERT' if zone.correction_ms > 0 else 'TRIM'} "
+                f"{abs(zone.correction_ms):.1f}ms"
+            )
+            log(
+                f"    [Edit] In silence: {best_zone.start_s:.3f}s - "
+                f"{best_zone.end_s:.3f}s ({best_zone.duration_ms:.0f}ms)"
             )
         else:
-            splice_src2 = src2_mid
-            log(f"    ⚠  No silence found — using raw midpoint {splice_src2:.3f}s")
+            # Fallback: midpoint of gap
+            ref_mid = (zone.ref_start_s + zone.ref_end_s) / 2.0
+            splice_src2 = timeline.ref_to_src2(ref_mid, zone.delay_before_ms)
+            log(f"    [Edit] ⚠ No silence — fallback midpoint: {splice_src2:.3f}s src2")
 
-        # --- Zero-crossing snap (prevents waveform discontinuity clicks) ---
+        # ── Silero VAD track validation ──
+        track_vals: list[TrackValidation] = []
+        if (
+            settings.stepping_silero_vad_enabled
+            and silero_model_path
+            and src2_track_streams
+            and src2_file_path
+        ):
+            track_vals = _validate_tracks_silero(
+                src2_file_path,
+                src2_track_streams,
+                splice_src2,
+                src2_sr,
+                silero_model_path,
+                settings.stepping_silero_vad_threshold,
+                log,
+            )
+        else:
+            log("    [Tracks] Silero VAD not available — track validation skipped")
+
+        # ── Transient detection ──
+        near_transient = False
+        if settings.stepping_transient_detection_enabled:
+            transient_times = detect_transients(
+                src2_pcm,
+                src2_sr,
+                scan_start,
+                scan_end,
+                threshold_db=settings.stepping_transient_threshold,
+            )
+            if transient_times:
+                # Check if edit point is near a transient
+                margin = 0.05
+                near_transient = any(
+                    abs(t - splice_src2) < margin for t in transient_times
+                )
+                if near_transient:
+                    log(
+                        f"    [Transient] ⚠ Transient detected near edit "
+                        f"({splice_src2:.3f}s)"
+                    )
+
+        # ── Zero-crossing snap ──
         pre_zc = splice_src2
         splice_src2 = _snap_to_zero_crossing(src2_pcm, src2_sr, splice_src2)
         if splice_src2 != pre_zc:
             log(
-                f"    Zero-crossing snap: {pre_zc:.4f}s -> {splice_src2:.4f}s "
-                f"(shift {(splice_src2 - pre_zc) * 1000:.2f}ms)"
+                f"    [Snap] Zero-crossing: {pre_zc:.4f}s → {splice_src2:.4f}s "
+                f"({(splice_src2 - pre_zc) * 1000:.2f}ms)"
             )
 
-        # --- Optional video snap ---
+        # ── Optional video keyframe snap ──
         snap_meta: dict[str, object] = {}
         if (
             settings.stepping_snap_to_video_frames
@@ -119,8 +282,6 @@ def refine_boundaries(
                 splice_ref, ref_video_path, settings, tool_paths, runner, log
             )
             if snapped_ref is not None and snapped_ref != splice_ref:
-                # Ensure the snapped position is still within (or near) the
-                # silence zone so we don't create a click.
                 snapped_src2 = timeline.ref_to_src2(snapped_ref, zone.delay_before_ms)
                 if best_zone is not None:
                     if best_zone.start_s <= snapped_src2 <= best_zone.end_s:
@@ -128,16 +289,30 @@ def refine_boundaries(
                         snap_meta["video_snapped"] = True
                         snap_meta["video_snap_offset_s"] = snapped_ref - splice_ref
                         log(
-                            f"    Video snap: {splice_ref:.3f}s → {snapped_ref:.3f}s "
-                            "(within silence zone)"
+                            f"    [Snap] Video keyframe: "
+                            f"{splice_ref:.3f}s → {snapped_ref:.3f}s"
                         )
                     else:
                         log(
-                            f"    Video snap rejected: {snapped_src2:.3f}s "
-                            "falls outside silence zone"
+                            f"    [Snap] Video keyframe rejected: "
+                            f"{snapped_src2:.3f}s outside silence zone"
                         )
 
+        # ── Build SplicePoint ──
         splice_ref_final = timeline.src2_to_ref(splice_src2, zone.delay_before_ms)
+
+        boundary = BoundaryResult(
+            zone=best_zone,
+            score=best_zone.duration_ms if best_zone else 0.0,
+            near_transient=near_transient,
+            overlaps_speech=any(tv.is_speech for tv in track_vals),
+            video_scene=video_result,
+            overlap_start_s=overlap_start,
+            overlap_end_s=overlap_end,
+            overlap_dur_ms=overlap_dur,
+            track_validations=tuple(track_vals),
+        )
+
         splice_points.append(
             SplicePoint(
                 ref_time_s=splice_ref_final,
@@ -155,101 +330,116 @@ def refine_boundaries(
 
 
 # ---------------------------------------------------------------------------
-# Combined silence finder
+# Silero VAD track validation
 # ---------------------------------------------------------------------------
 
 
-def _find_best_silence(
-    pcm: np.ndarray,
-    sr: int,
-    start_s: float,
-    end_s: float,
-    target_s: float,
-    settings: AppSettings,
+def _validate_tracks_silero(
+    src2_file_path: str,
+    track_streams: dict[str, int],
+    edit_time_s: float,
+    sample_rate: int,
+    model_path: str | Path,
+    threshold: float,
     log: Callable[[str], None],
-) -> BoundaryResult:
-    """Find the best splice-worthy silence zone near *target_s*.
+) -> list[TrackValidation]:
+    """Validate all language tracks at the edit point using Silero VAD."""
+    import subprocess
 
-    Combines RMS energy detection, WebRTC VAD, and transient avoidance.
-    The intersection of "RMS quiet" + "VAD non-speech" gives the safest
-    splice candidates.  Falls back to RMS-only or VAD-only if the
-    intersection is empty.
+    from .silero_vad import detect_speech_regions
 
-    Returns a BoundaryResult with the zone, score, and audit flags.
-    """
-    threshold_db = settings.stepping_silence_threshold_db
-    min_duration_ms = settings.stepping_silence_min_duration_ms
+    validations: list[TrackValidation] = []
 
-    # RMS silence detection
-    rms_zones = find_silence_zones_rms(
-        pcm, sr, start_s, end_s, threshold_db, min_duration_ms
-    )
-    log(f"    RMS: {len(rms_zones)} silence zone(s)")
+    for track_name, stream_idx in track_streams.items():
+        # Decode 2 seconds around the edit point
+        cmd = [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            str(max(0, edit_time_s - 1)),
+            "-t",
+            "2",
+            "-i",
+            src2_file_path,
+            "-map",
+            f"0:a:{stream_idx}",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "pipe:1",
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, check=True)
+            pcm_16k = np.frombuffer(result.stdout, dtype=np.float32)
+        except Exception:
+            validations.append(
+                TrackValidation(
+                    track_name=track_name,
+                    db=-120.0,
+                    is_speech=False,
+                    status="DECODE_ERROR",
+                )
+            )
+            continue
 
-    # VAD non-speech gap detection
-    vad_gaps: list[SilenceZone] = []
-    if settings.stepping_vad_enabled:
-        vad_gaps = find_vad_gaps(
-            pcm,
-            sr,
-            start_s,
-            end_s,
-            settings.stepping_vad_aggressiveness,
-            min_gap_ms=min_duration_ms,
+        # Check speech
+        speech_regions = detect_speech_regions(
+            pcm_16k,
+            16000,
+            model_path,
+            threshold=threshold,
         )
-        log(f"    VAD: {len(vad_gaps)} non-speech gap(s)")
-
-    # Transient detection
-    transient_times: list[float] = []
-    if settings.stepping_transient_detection_enabled:
-        transient_times = detect_transients(
-            pcm,
-            sr,
-            start_s,
-            end_s,
-            threshold_db=settings.stepping_transient_threshold,
-        )
-        if transient_times:
-            log(f"    Transients: {len(transient_times)} detected")
-
-    # Try intersection first
-    combined = _intersect_zones(rms_zones, vad_gaps) if vad_gaps else []
-    log(f"    Combined: {len(combined)} overlapping zone(s)")
-
-    # Pick best from combined -> rms -> vad (preference order)
-    candidates = combined or rms_zones or vad_gaps
-    if not candidates:
-        return BoundaryResult(
-            zone=None, score=0.0, near_transient=False, overlaps_speech=False
+        # Adjust to absolute time
+        base_t = max(0, edit_time_s - 1)
+        is_speech = any(
+            base_t + s <= edit_time_s <= base_t + e for s, e in speech_regions
         )
 
-    best_zone, score, near_transient = _pick_best_zone(
-        candidates,
-        target_s,
-        settings,
-        log,
-        transient_times=transient_times,
-    )
+        # Check RMS at the edit point (center of the 2s window)
+        center_sample = min(len(pcm_16k) - 1600, 16000)  # ~1s into buffer
+        chunk = pcm_16k[center_sample : center_sample + 1600]
+        if len(chunk) > 0:
+            rms = float(np.sqrt(np.mean(chunk.astype(np.float64) ** 2)))
+            db = 20.0 * np.log10(rms) if rms > 1e-10 else -120.0
+        else:
+            db = -120.0
 
-    # If VAD was enabled and we fell back to RMS-only (no combined zones),
-    # the winning zone likely overlaps speech detected by VAD.
-    overlaps_speech = (
-        settings.stepping_vad_enabled
-        and len(vad_gaps) > 0
-        and len(combined) == 0
-        and best_zone.source == "rms"
-    )
+        # Classify
+        if db < -100:
+            status = "TRUE SILENCE"
+        elif db < -70:
+            status = "SILENCE"
+        elif not is_speech and db < -40:
+            status = "QUIET"
+        elif not is_speech:
+            status = "CROSSFADE"
+        else:
+            status = "⚠ SPEECH"
 
-    return BoundaryResult(
-        zone=best_zone,
-        score=score,
-        near_transient=near_transient,
-        overlaps_speech=overlaps_speech,
-    )
+        validations.append(
+            TrackValidation(
+                track_name=track_name,
+                db=db,
+                is_speech=is_speech,
+                status=status,
+            )
+        )
+        log(
+            f"    [Tracks] {track_name:>12}: {db:>7.1f}dB  "
+            f"VAD={'SPEECH' if is_speech else 'clear':>6}  → {status}"
+        )
+
+    return validations
 
 
 # ---------------------------------------------------------------------------
-# RMS silence detection (extracted from old _find_silence_zones)
+# RMS silence detection
 # ---------------------------------------------------------------------------
 
 
@@ -313,191 +503,6 @@ def find_silence_zones_rms(
         )
 
     return zones
-
-
-# ---------------------------------------------------------------------------
-# VAD non-speech gap detection
-# ---------------------------------------------------------------------------
-
-
-def find_vad_gaps(
-    pcm: np.ndarray,
-    sample_rate: int,
-    start_s: float,
-    end_s: float,
-    aggressiveness: int = 2,
-    min_gap_ms: float = 30.0,
-) -> list[SilenceZone]:
-    """Find non-speech gaps using WebRTC VAD.
-
-    Returns the *gaps* (regions where VAD says no speech), each tagged
-    with the RMS energy measured from the original PCM.
-    """
-    try:
-        import webrtcvad
-    except ImportError:
-        return []
-
-    vad_sr = 16000 if sample_rate >= 16000 else 8000
-    frame_ms = 30
-    frame_samples = int(vad_sr * frame_ms / 1000)
-    frame_bytes = frame_samples * 2  # int16
-
-    start_sample = max(0, int(start_s * sample_rate))
-    end_sample = min(len(pcm), int(end_s * sample_rate))
-    segment = pcm[start_sample:end_sample]
-    if len(segment) == 0:
-        return []
-
-    # Downsample if needed (simple decimation)
-    if sample_rate != vad_sr:
-        step = sample_rate // vad_sr
-        segment = segment[::step]
-
-    # int32 → int16
-    audio_int16 = (segment / 65536).astype(np.int16)
-    audio_bytes = audio_int16.tobytes()
-
-    vad = webrtcvad.Vad(aggressiveness)
-
-    # Collect per-frame speech decisions
-    gap_start: float | None = None
-    gaps: list[SilenceZone] = []
-
-    for i in range(0, len(audio_bytes) - frame_bytes, frame_bytes):
-        frame = audio_bytes[i : i + frame_bytes]
-        t = start_s + (i / 2 / vad_sr)
-        is_speech = vad.is_speech(frame, vad_sr)
-
-        if not is_speech:
-            if gap_start is None:
-                gap_start = t
-        elif gap_start is not None:
-            gap_end = t
-            dur_ms = (gap_end - gap_start) * 1000.0
-            if dur_ms >= min_gap_ms:
-                avg_db = _rms_db_range(pcm, sample_rate, gap_start, gap_end)
-                gaps.append(
-                    SilenceZone(
-                        start_s=gap_start,
-                        end_s=gap_end,
-                        center_s=(gap_start + gap_end) / 2.0,
-                        avg_db=avg_db,
-                        duration_ms=dur_ms,
-                        source="vad",
-                    )
-                )
-            gap_start = None
-
-    # Close trailing gap
-    if gap_start is not None:
-        gap_end = end_s
-        dur_ms = (gap_end - gap_start) * 1000.0
-        if dur_ms >= min_gap_ms:
-            avg_db = _rms_db_range(pcm, sample_rate, gap_start, gap_end)
-            gaps.append(
-                SilenceZone(
-                    start_s=gap_start,
-                    end_s=gap_end,
-                    center_s=(gap_start + gap_end) / 2.0,
-                    avg_db=avg_db,
-                    duration_ms=dur_ms,
-                    source="vad",
-                )
-            )
-
-    return gaps
-
-
-# ---------------------------------------------------------------------------
-# Zone intersection + scoring
-# ---------------------------------------------------------------------------
-
-
-def _intersect_zones(
-    rms_zones: list[SilenceZone],
-    vad_gaps: list[SilenceZone],
-) -> list[SilenceZone]:
-    """Return the temporal overlaps between RMS zones and VAD gaps."""
-    combined: list[SilenceZone] = []
-    for rz in rms_zones:
-        for vg in vad_gaps:
-            ol_start = max(rz.start_s, vg.start_s)
-            ol_end = min(rz.end_s, vg.end_s)
-            if ol_end > ol_start:
-                dur_ms = (ol_end - ol_start) * 1000.0
-                combined.append(
-                    SilenceZone(
-                        start_s=ol_start,
-                        end_s=ol_end,
-                        center_s=(ol_start + ol_end) / 2.0,
-                        avg_db=rz.avg_db,
-                        duration_ms=dur_ms,
-                        source="combined",
-                    )
-                )
-    return combined
-
-
-def _pick_best_zone(
-    candidates: list[SilenceZone],
-    target_s: float,
-    settings: AppSettings,
-    log: Callable[[str], None],
-    transient_times: list[float] | None = None,
-) -> tuple[SilenceZone, float, bool]:
-    """Pick the best silence zone from *candidates*.
-
-    Scoring:
-      - Closeness to *target_s* (most important)
-      - Duration (longer is safer)
-      - Depth (quieter is better)
-      - Transient penalty (zones containing transients score lower)
-
-    Returns:
-        (best_zone, score, near_transient) — the winning zone, its composite
-        score, and whether transients were detected near it.
-    """
-    threshold_db = settings.stepping_silence_threshold_db
-    search_window = settings.stepping_silence_search_window_s
-
-    weight_silence = settings.stepping_fusion_weight_silence
-    weight_duration = settings.stepping_fusion_weight_duration
-    transients = transient_times or []
-
-    best: SilenceZone | None = None
-    best_score = -float("inf")
-    best_near_transient = False
-
-    for zone in candidates:
-        distance = abs(zone.center_s - target_s)
-        distance_score = max(0.0, (search_window - distance) / search_window) * 5.0
-        depth_score = max(0.0, (threshold_db - zone.avg_db) / 10.0) * weight_silence
-        dur_score = min(zone.duration_ms / 1000.0, 1.0) * weight_duration
-
-        # Transient penalty: count transients within or near (±50ms) the zone
-        transient_penalty = 0.0
-        zone_has_transient = False
-        if transients:
-            margin = 0.05  # 50ms safety margin
-            count = sum(
-                1
-                for t in transients
-                if (zone.start_s - margin) <= t <= (zone.end_s + margin)
-            )
-            zone_has_transient = count > 0
-            # Each transient near the zone applies a heavy penalty
-            transient_penalty = count * 3.0
-
-        score = distance_score + depth_score + dur_score - transient_penalty
-
-        if score > best_score:
-            best_score = score
-            best = zone
-            best_near_transient = zone_has_transient
-
-    assert best is not None  # candidates is non-empty
-    return best, best_score, best_near_transient
 
 
 # ---------------------------------------------------------------------------
