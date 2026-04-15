@@ -193,6 +193,7 @@ def refine_boundaries(
 
         # ── Determine edit point ──
         best_zone: SilenceZone | None = None
+        zone_overflow_ms = 0.0
         if rms_zones:
             # Prefer the zone that fits the correction amount and is longest
             fitting = [z for z in rms_zones if z.duration_ms >= abs(zone.correction_ms)]
@@ -200,6 +201,7 @@ def refine_boundaries(
                 best_zone = max(fitting, key=lambda z: z.duration_ms)
             else:
                 best_zone = max(rms_zones, key=lambda z: z.duration_ms)
+                zone_overflow_ms = abs(zone.correction_ms) - best_zone.duration_ms
 
         if best_zone is not None:
             splice_src2 = best_zone.start_s
@@ -212,6 +214,13 @@ def refine_boundaries(
                 f"    [Edit] In silence: {best_zone.start_s:.3f}s - "
                 f"{best_zone.end_s:.3f}s ({best_zone.duration_ms:.0f}ms)"
             )
+            if zone_overflow_ms > 0:
+                log(
+                    f"    [⚠ QUALITY] Silence zone too small for correction — "
+                    f"{best_zone.duration_ms:.0f}ms silence vs "
+                    f"{abs(zone.correction_ms):.0f}ms correction "
+                    f"(overflow {zone_overflow_ms:.0f}ms into audio content)"
+                )
         else:
             # Fallback: midpoint of gap
             ref_mid = (zone.ref_start_s + zone.ref_end_s) / 2.0
@@ -263,11 +272,19 @@ def refine_boundaries(
         # ── Zero-crossing snap ──
         pre_zc = splice_src2
         splice_src2 = _snap_to_zero_crossing(src2_pcm, src2_sr, splice_src2)
-        if splice_src2 != pre_zc:
+        shift_ms = (splice_src2 - pre_zc) * 1000.0
+        zone_info = (
+            f"zone avg {best_zone.avg_db:.0f}dB" if best_zone is not None else "no zone"
+        )
+        if abs(shift_ms) > 0.005:
             log(
                 f"    [Snap] Zero-crossing: {pre_zc:.4f}s → {splice_src2:.4f}s "
-                f"({(splice_src2 - pre_zc) * 1000:.2f}ms)"
+                f"(shift {shift_ms:+.3f}ms, {zone_info})"
             )
+        else:
+            # Either already on a zero crossing (common in deep silence) or
+            # no crossing was found within the search radius.
+            log(f"    [Snap] Zero-crossing: already aligned ({zone_info})")
 
         # ── Optional video keyframe snap ──
         snap_meta: dict[str, object] = {}
@@ -311,6 +328,7 @@ def refine_boundaries(
             overlap_end_s=overlap_end,
             overlap_dur_ms=overlap_dur,
             track_validations=tuple(track_vals),
+            zone_overflow_ms=zone_overflow_ms,
         )
 
         splice_points.append(
@@ -451,13 +469,20 @@ def find_silence_zones_rms(
     threshold_db: float,
     min_duration_ms: float,
 ) -> list[SilenceZone]:
-    """Find contiguous quiet regions using RMS energy in 50 ms windows."""
+    """Find contiguous quiet regions using RMS energy in 20 ms windows.
+
+    20 ms matches the precision of the original research/test pipeline
+    (test_combined_final.py).  Smaller windows catch silence-zone
+    boundaries more precisely — detected start/end lands on a 20 ms
+    grid instead of a 50 ms grid, which matters for tight splices
+    where the available silence only barely fits the correction amount.
+    """
     start_sample = max(0, int(start_s * sample_rate))
     end_sample = min(len(pcm), int(end_s * sample_rate))
     if end_sample <= start_sample:
         return []
 
-    window_size = max(1, int(0.05 * sample_rate))
+    window_size = max(1, int(0.02 * sample_rate))
     min_silence_samples = int((min_duration_ms / 1000.0) * sample_rate)
 
     zones: list[SilenceZone] = []
