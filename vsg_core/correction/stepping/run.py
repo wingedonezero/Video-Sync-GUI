@@ -244,10 +244,13 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                 del ctx.stepping_edls[source_key]
                 continue
 
+            # QA: the corrected FLAC is pre-aligned to Source 1's audio-content
+            # timeline, so median correlation delay should be 0 (not the
+            # first-cluster delay the way the old flow measured it).
             passed, _qa_meta = verify_correction(
                 corrected_path=str(qa_path),
                 ref_file_path=ref_file_path,
-                base_delay_ms=anchor_ms,
+                base_delay_ms=0,
                 settings=settings,
                 runner=runner,
                 tool_paths=ctx.tool_paths,
@@ -518,7 +521,17 @@ def _swap_corrected_track(
     # Update main track → corrected FLAC
     target_item.extracted_path = corrected_path  # type: ignore[attr-defined]
     target_item.is_corrected = True  # type: ignore[attr-defined]
-    target_item.container_delay_ms = 0  # type: ignore[attr-defined]
+    # The corrected FLAC is pre-aligned to Source 1's audio-content timeline.
+    # We still need to apply Source 1's own audio-container delay at mux time
+    # so the corrected track matches where Source 1's audio lands in the
+    # final MKV container.  We stash that value in container_delay_ms and
+    # flip the is_pre_aligned flag; the options builder and audio trim both
+    # read this path for pre-aligned tracks (bypassing the correlation-delay
+    # lookup, which would double-apply the shift we already baked in).
+    target_item.is_pre_aligned = True  # type: ignore[attr-defined]
+    target_item.container_delay_ms = int(  # type: ignore[attr-defined]
+        round(ctx.source1_audio_container_delay_ms)
+    )
 
     corrected_label = settings.stepping_corrected_track_label
     if corrected_label:

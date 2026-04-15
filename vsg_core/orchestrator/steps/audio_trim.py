@@ -195,6 +195,12 @@ def _effective_delay_s(
     if tr.source == "Source 1" and tr.type == "audio":
         return (round(item.container_delay_ms) + delays.global_shift_ms) / 1000.0
 
+    # Stepping-corrected tracks with pre-baked alignment: mkvmerge only applies
+    # Source 1's audio-container delay (stashed in container_delay_ms) — the
+    # correlation shift is already in the FLAC samples.  Mirror options_builder.
+    if item.is_pre_aligned:
+        return round(item.container_delay_ms) / 1000.0
+
     # Subtitles with baked-in timing get 0 delay
     if tr.type == "subtitles" and (item.stepping_adjusted or item.frame_adjusted):
         return 0.0
