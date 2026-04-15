@@ -152,15 +152,9 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         src2_file_str: str | None = None
         if silero_model_path and src2_video_path:
             src2_file_str = src2_video_path
-            # Build track map from extracted items
-            track_map: dict[str, int] = {}
-            for item in ctx.extracted_items or []:
-                if item.track.source == source_key and item.track.type == "audio":
-                    label = f"{item.track.language}_{item.track.codec}"
-                    if label not in track_map:
-                        track_map[label] = item.track.stream_index
-            if track_map:
-                src2_track_streams = track_map
+            src2_track_streams = _build_audio_track_map(
+                src2_video_path, runner, ctx.tool_paths
+            )
 
         try:
             # --- Refine boundaries (scene detection + silence + VAD) ---
@@ -393,6 +387,45 @@ def _extract_chapter_times(
         return times or None
     except Exception:
         return None
+
+
+def _build_audio_track_map(
+    src_path: str,
+    runner: CommandRunner,
+    tool_paths: dict[str, str | None],
+) -> dict[str, int] | None:
+    """Return ``{label: ffmpeg_audio_stream_idx}`` for every audio track.
+
+    Queries mkvmerge for the audio tracks in *src_path* and builds a map
+    that ``_validate_tracks_silero`` can feed to ``ffmpeg -map 0:a:N``.
+    Label format: ``LANG_CODEC`` (e.g. ``jpn_TrueHD``).  Validates ALL
+    language tracks — the disc timeline is shared, so every audio track
+    gets the same splice, and we want the speech check to cover any of
+    them that could overlap the edit point.
+    """
+    import json as _json
+
+    out = runner.run(["mkvmerge", "-J", src_path], tool_paths)
+    if not out or not isinstance(out, str):
+        return None
+    try:
+        info = _json.loads(out)
+    except Exception:
+        return None
+    audio_tracks = [t for t in info.get("tracks", []) if t.get("type") == "audio"]
+    if not audio_tracks:
+        return None
+
+    result: dict[str, int] = {}
+    for i, t in enumerate(audio_tracks):
+        props = t.get("properties", {}) or {}
+        lang = (props.get("language") or "und").lower()
+        codec = (t.get("codec") or "audio").replace(" ", "").replace("/", "")
+        label = f"{lang}_{codec}"
+        if label in result:
+            label = f"{label}_{i}"
+        result[label] = i
+    return result or None
 
 
 def _find_analysis_track(
