@@ -204,12 +204,33 @@ def refine_boundaries(
                 zone_overflow_ms = abs(zone.correction_ms) - best_zone.duration_ms
 
         if best_zone is not None:
-            splice_src2 = best_zone.start_s
-            log(
-                f"    [Edit] Position: {splice_src2:.3f}s src2 | "
-                f"{'INSERT' if zone.correction_ms > 0 else 'TRIM'} "
-                f"{abs(zone.correction_ms):.1f}ms"
-            )
+            # Prefer the video+audio overlap position when available.
+            # The overlap is where the video scene cut and audio silence
+            # coincide — that's the actual editorial boundary where one
+            # source's content differs from the other.  Placing the edit
+            # there is more correct than the silence zone start (which
+            # can be hundreds of ms before the real content change).
+            # Fall back to silence zone start when no overlap exists
+            # (e.g., video scene detection was skipped or no cuts found).
+            if (
+                overlap_start is not None
+                and best_zone.start_s <= overlap_start <= best_zone.end_s
+            ):
+                splice_src2 = overlap_start
+                log(
+                    f"    [Edit] Position: {splice_src2:.3f}s src2 | "
+                    f"{'INSERT' if zone.correction_ms > 0 else 'TRIM'} "
+                    f"{abs(zone.correction_ms):.1f}ms "
+                    f"(at video+audio overlap)"
+                )
+            else:
+                splice_src2 = best_zone.start_s
+                log(
+                    f"    [Edit] Position: {splice_src2:.3f}s src2 | "
+                    f"{'INSERT' if zone.correction_ms > 0 else 'TRIM'} "
+                    f"{abs(zone.correction_ms):.1f}ms "
+                    f"(at silence zone start)"
+                )
             log(
                 f"    [Edit] In silence: {best_zone.start_s:.3f}s - "
                 f"{best_zone.end_s:.3f}s ({best_zone.duration_ms:.0f}ms)"
