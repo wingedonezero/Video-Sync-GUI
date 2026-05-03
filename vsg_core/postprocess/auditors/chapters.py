@@ -17,14 +17,22 @@ class ChaptersAuditor(BaseAuditor):
         Audits chapters:
         - If chapters were processed: verifies final matches processed version
         - If chapters weren't processed: verifies final matches source
+        - If a non-default chapter donor was requested: surfaces a warning
+          when ChaptersStep had to fall back to Source 1 (fps mismatch,
+          donor missing, donor has no chapters, etc.)
         Returns the number of issues found.
         """
+
+        # Surface chapter donor fallback as a structured warning before
+        # the merge-vs-source verification block, so the issue lands in
+        # the batch report even when the merge itself looks fine.
+        self._report_chapter_donor_outcome()
 
         # Check if SOURCE has chapters
         source1_file = self.ctx.sources.get("Source 1")
         if not source1_file:
             self.log("✅ No Source 1 file to check for chapters.")
-            return 0
+            return len(self.issues)
 
         source_chapters_xml = self._extract_chapters(source1_file)
         source_has_chapters = bool(source_chapters_xml)
@@ -50,6 +58,43 @@ class ChaptersAuditor(BaseAuditor):
 
         return len(self.issues)
 
+    def _report_chapter_donor_outcome(self) -> None:
+        """
+        If the user picked a non-default chapter donor, surface what
+        actually happened. Successful donor uses produce an info log
+        line; fallbacks produce a structured warning that lands in
+        the batch report so users can see at a glance which jobs
+        didn't get the donor they requested and why.
+        """
+        outcome = getattr(self.ctx, "chapter_source_outcome", None)
+        if not outcome:
+            # Default path (chapter_source = "Source 1") — nothing to do.
+            return
+
+        requested = outcome.get("requested", "")
+        actual = outcome.get("actual", "")
+        reason = outcome.get("reason", "")
+        fallback = bool(outcome.get("fallback", False))
+
+        if not fallback:
+            # Donor was honored. Log it for clarity but don't add an
+            # AuditIssue — the batch report should only show problems.
+            if requested == "None":
+                self.log(
+                    "  ✓ Chapters intentionally suppressed (chapter_source = None)."
+                )
+            else:
+                self.log(f"  ✓ Chapter donor '{requested}' was honored as requested.")
+            return
+
+        # Fallback occurred — surface it in the batch report.
+        message = (
+            f"Chapter donor '{requested}' fell back to '{actual}' "
+            f"(reason: {reason or 'unknown'})"
+        )
+        self._track_issue(message, severity="warning")
+        self.log(f"[WARNING] {message}")
+
     def _verify_processed_chapters(self, final_chapters_xml: str | None) -> None:
         """
         Verify that the processed chapters made it into the final file.
@@ -59,7 +104,9 @@ class ChaptersAuditor(BaseAuditor):
         # Load the processed chapters XML
         try:
             if not self.ctx.chapters_xml:
-                self._report("chapters_xml is set but empty — cannot verify processed chapters")
+                self._report(
+                    "chapters_xml is set but empty — cannot verify processed chapters"
+                )
                 return
             processed_xml_path = Path(self.ctx.chapters_xml)
             if not processed_xml_path.exists():

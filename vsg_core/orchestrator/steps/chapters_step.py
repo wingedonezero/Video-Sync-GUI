@@ -51,12 +51,23 @@ class ChaptersStep:
 
         chapter_source = getattr(ctx, "chapter_source", "Source 1") or "Source 1"
 
+        # Track what was requested vs what we end up using. Only persisted
+        # to ctx when the user picked something other than the default
+        # ("Source 1") so we don't generate noise for unaltered jobs.
+        requested_source = chapter_source
+
         # Explicit opt-out: produce no chapters at all.
         if chapter_source == "None":
             runner._log_message(
                 "[Chapters] chapter_source = None — skipping chapters entirely."
             )
             ctx.chapters_xml = None
+            ctx.chapter_source_outcome = {
+                "requested": "None",
+                "actual": "None",
+                "reason": "",
+                "fallback": False,
+            }
             return ctx
 
         # Resolve donor file + verify compatibility. Any failure path falls
@@ -64,10 +75,14 @@ class ChaptersStep:
         # this feature.
         donor_file: str = source1_file
         donor_offset_ns: int = 0
+        fallback_reason: str = ""
 
         if chapter_source != "Source 1":
             candidate = ctx.sources.get(chapter_source)
             if not candidate:
+                fallback_reason = (
+                    f"donor '{chapter_source}' not present in this job's sources"
+                )
                 runner._log_message(
                     f"[Chapters][WARN] chapter_source '{chapter_source}' "
                     f"not present in this job's sources. Falling back to "
@@ -79,6 +94,7 @@ class ChaptersStep:
                 donor_probe = quick_probe(candidate)
                 ok, reason = is_donor_compatible(s1_probe, donor_probe)
                 if not ok:
+                    fallback_reason = reason or "incompatible donor"
                     runner._log_message(
                         f"[Chapters][WARN] Donor '{chapter_source}' is "
                         f"incompatible: {reason}. Falling back to Source 1's "
@@ -138,7 +154,10 @@ class ChaptersStep:
                     f"[Chapters] Successfully processed chapters: {xml_path}"
                 )
             elif chapter_source != "Source 1":
-                # Donor had no chapters — try Source 1 as a last resort.
+                # Donor was accepted by the gate but had no chapters of its
+                # own. Try Source 1 as a last resort and record this as a
+                # fallback so the auditor surfaces it.
+                fallback_reason = f"donor '{chapter_source}' has no chapters"
                 runner._log_message(
                     f"[Chapters][WARN] Donor '{chapter_source}' has no "
                     f"chapters. Falling back to Source 1's chapters."
@@ -152,6 +171,9 @@ class ChaptersStep:
                     shift_ms,
                 )
                 ctx.chapters_xml = xml_path
+                # The path we ended up using is Source 1, regardless of
+                # whether it had chapters or not.
+                chapter_source = "Source 1"
                 if xml_path:
                     runner._log_message(
                         f"[Chapters] Successfully processed Source 1 "
@@ -191,5 +213,16 @@ class ChaptersStep:
                 runner._log_message("       - Character encoding issues")
 
             ctx.chapters_xml = None
+
+        # Record the outcome ONLY when the user picked something other than
+        # the default. Default ("Source 1" requested + "Source 1" used) is
+        # the unmodified path — no need to surface anything.
+        if requested_source != "Source 1":
+            ctx.chapter_source_outcome = {
+                "requested": requested_source,
+                "actual": chapter_source,
+                "reason": fallback_reason,
+                "fallback": requested_source != chapter_source,
+            }
 
         return ctx

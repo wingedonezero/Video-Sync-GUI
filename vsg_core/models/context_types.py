@@ -203,6 +203,31 @@ class SyncStabilityIssue(TypedDict, total=False):
 
 
 # =============================================================================
+# Chapter Source Types (Context.chapter_source_outcome)
+# =============================================================================
+
+
+class ChapterSourceOutcome(TypedDict, total=False):
+    """Records what chapter donor the user requested and what we ended up using.
+
+    Populated by ``ChaptersStep`` so the post-merge ``ChaptersAuditor`` can
+    surface a structured warning in the batch report when the user's
+    requested donor was rejected (fps mismatch, MPEG-2/DVD, donor missing
+    from sources, donor has no chapters, etc.) and we silently fell back
+    to Source 1's chapters.
+
+    Only populated for jobs where the user explicitly chose a non-default
+    donor or "None". Default ``chapter_source = "Source 1"`` jobs leave
+    this field as None — nothing to report.
+    """
+
+    requested: str  # The chapter_source the user picked, e.g. "Source 3"
+    actual: str  # What ChaptersStep actually used, e.g. "Source 1"
+    reason: str  # Why fallback happened (empty when fallback is False)
+    fallback: bool  # True iff requested != actual
+
+
+# =============================================================================
 # PlanItem Style Types (PlanItem.style_patch, PlanItem.font_replacements)
 # =============================================================================
 
