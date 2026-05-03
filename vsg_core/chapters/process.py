@@ -242,11 +242,40 @@ def process_chapters(
     tool_paths: dict,
     settings: AppSettings,
     shift_ms: int,
+    *,
+    keyframe_ref_mkv: str | None = None,
+    donor_offset_ns: int = 0,
 ) -> str | None:
+    """
+    Extract, shift, snap, normalize, and rewrite chapters.
+
+    Args:
+        ref_mkv: File to read chapters from (mkvextract source).
+        temp_dir: Where to write the output XML.
+        runner: For shelling out and logging.
+        tool_paths: Resolved tool paths for the runner.
+        settings: AppSettings (snap behavior, rename, language config).
+        shift_ms: Integer-ms shift applied AFTER snap. Represents the
+            global container shift (matches what mkvmerge applies to the
+            video as ``--sync 0:N``). Must be integer ms for correct
+            keyframe alignment in the container.
+        keyframe_ref_mkv: File to probe keyframes from. Defaults to
+            ``ref_mkv`` for back-compat. When chapters come from a donor
+            source, pass Source 1 here so chapters snap to the actual
+            video's keyframes (donor-shifted into Source 1 video time
+            via ``donor_offset_ns`` first).
+        donor_offset_ns: Nanosecond shift applied BEFORE snap, used to
+            convert donor-source chapter timestamps into Source 1 video
+            time. Carries the full sub-ms precision of the source-delay
+            value so we don't lose accuracy at this stage. Defaults to
+            0 (Source 1 is the chapter source \u2014 no donor shift).
+    """
     xml_content = runner.run(["mkvextract", str(ref_mkv), "chapters", "-"], tool_paths)
     if not xml_content or not xml_content.strip():
         runner._log_message("No chapters found in reference file.")
         return None
+
+    keyframe_source = keyframe_ref_mkv or ref_mkv
 
     try:
         if xml_content.startswith("\ufeff"):
@@ -258,11 +287,25 @@ def process_chapters(
         # Detect namespace and get the correct prefix for XPath queries
         nsmap, prefix = _get_xpath_and_nsmap(root)
 
+        # Donor \u2192 Source 1 video-time shift (applied BEFORE snap so we
+        # snap against the keyframe-ref file's keyframes). Sub-ms
+        # precision is preserved in nanoseconds; snap will absorb residuals.
+        if donor_offset_ns != 0:
+            runner._log_message(
+                f"[Chapters] Donor offset: shifting timestamps by "
+                f"{_fmt_delta_for_log(donor_offset_ns)} "
+                f"(donor \u2192 Source 1 video time)."
+            )
+            for tag_name in ["ChapterTimeStart", "ChapterTimeEnd"]:
+                for node in root.xpath(f"//{prefix}{tag_name}", namespaces=nsmap):
+                    if node is not None and node.text:
+                        node.text = _fmt_ns(_parse_ns(node.text) + donor_offset_ns)
+
         # IMPORTANT: Snap FIRST (in video time), THEN shift to container time
         # This ensures chapters land on actual keyframes in the final muxed file
         # (Video gets container delay, so keyframe at video_time X = container_time X + shift)
         if settings.snap_chapters:
-            keyframes_ns = probe_keyframes_ns(ref_mkv, runner, tool_paths)
+            keyframes_ns = probe_keyframes_ns(keyframe_source, runner, tool_paths)
             if keyframes_ns:
                 _snap_chapter_times_inplace(
                     root, keyframes_ns, settings, runner, nsmap, prefix

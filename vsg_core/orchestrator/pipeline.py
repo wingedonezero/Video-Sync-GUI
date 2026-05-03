@@ -49,6 +49,7 @@ class Orchestrator:
         manual_layout: list[ManualLayoutItem],
         attachment_sources: list[str],
         source_settings: dict[str, dict[str, Any]] | None = None,
+        chapter_source: str = "Source 1",
         debug_paths=None,
     ) -> Context:
         """
@@ -57,6 +58,9 @@ class Orchestrator:
 
         Args:
             settings: AppSettings instance
+            chapter_source: Source key whose chapters get used. Defaults
+                to "Source 1" (existing behavior). Other source keys pull
+                chapters from a donor file. "None" suppresses chapters.
             debug_paths: DebugOutputPaths for this job
         """
         source1_file = sources.get("Source 1")
@@ -106,6 +110,7 @@ class Orchestrator:
             manual_layout=manual_layout or [],
             attachment_sources=attachment_sources,
             source_settings=source_settings or {},
+            chapter_source=chapter_source or "Source 1",
         )
 
         log("--- Analysis Phase ---")
