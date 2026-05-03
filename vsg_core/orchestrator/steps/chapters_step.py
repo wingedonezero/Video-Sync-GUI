@@ -46,10 +46,12 @@ def _resolve_donor_offset_ms(
             return float(corrected), label
 
     # 2. Live video-verified pass for the donor — gated to video-verified
-    #    sync mode so we don't surprise correlation-only users with an
-    #    extra ~100s of analysis time.
-    sync_mode = getattr(ctx, "sync_mode", "") or ""
-    if sync_mode == "video-verified":
+    #    *subtitle* sync mode (settings.subtitle_sync_mode) so we don't
+    #    surprise correlation-only users with an extra ~100s of analysis
+    #    time. Note this is NOT ctx.sync_mode (which is the *audio
+    #    timing* mode: positive_only / allow_negative / preserve_existing).
+    subtitle_sync_mode = getattr(ctx.settings, "subtitle_sync_mode", "") or ""
+    if subtitle_sync_mode == "video-verified":
         donor_video = ctx.sources.get(donor_source)
         if donor_video:
             try:
