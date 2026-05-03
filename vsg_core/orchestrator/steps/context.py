@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from vsg_core.audit import AuditTrail
     from vsg_core.correction.stepping import AudioSegment
     from vsg_core.models.context_types import (
+        ChapterSourceOutcome,
         DriftFlagsEntry,
         ManualLayoutItem,
         SegmentFlagsEntry,
@@ -47,6 +48,15 @@ class Context:
     # "Source 3", ... pull chapters from a donor source and shift them onto
     # Source 1's timeline. "None" suppresses chapters entirely.
     chapter_source: str = "Source 1"
+
+    # What ChaptersStep actually did with the chapter_source request.
+    # Only populated when the user explicitly chose a non-default donor
+    # or "None". When set, ChaptersAuditor inspects ``fallback`` and
+    # surfaces a structured warning in the batch report so users can
+    # see at a glance which jobs had their donor selection fall back
+    # (and why). Default jobs (chapter_source == "Source 1") leave this
+    # as None.
+    chapter_source_outcome: ChapterSourceOutcome | None = None
 
     # Per-source correlation settings (from job layout)
     # Format: {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}, ...}
