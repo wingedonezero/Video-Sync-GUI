@@ -11,6 +11,112 @@ if TYPE_CHECKING:
     from vsg_core.orchestrator.steps.context import Context
 
 
+def _resolve_donor_offset_ms(
+    ctx: Context,
+    runner: CommandRunner,
+    donor_source: str,
+    source1_file: str,
+) -> tuple[float, str]:
+    """
+    Pick the best available donor → Source 1 offset for chapter shifting.
+
+    Priority:
+      1. ``ctx.video_verified_sources[donor]`` (already populated when the
+         donor contributed subs that ran through video-verified).
+      2. Run video-verified for the donor *now* — but ONLY when the user
+         has chosen video-verified sync mode. This handles the
+         chapter-only donor case (donor file contributes only chapters,
+         no subs, so video-verified didn't run for it).
+      3. Fall back to ``raw_source_delays_ms[donor]`` (audio correlation).
+
+    Returns ``(offset_ms, label)`` where ``label`` is a short tag like
+    "video-verified", "video-verified (chapter donor)", or
+    "audio correlation" used purely for logging.
+    """
+    # 1. Pre-computed video-verified result wins.
+    cached = ctx.video_verified_sources.get(donor_source)
+    if cached:
+        corrected = cached.get("corrected_delay_ms")
+        if corrected is not None:
+            label = (
+                "video-verified (cached)"
+                if not cached.get("fallback")
+                else "audio correlation (video-verified fell back)"
+            )
+            return float(corrected), label
+
+    # 2. Live video-verified pass for the donor — gated to video-verified
+    #    sync mode so we don't surprise correlation-only users with an
+    #    extra ~100s of analysis time.
+    sync_mode = getattr(ctx, "sync_mode", "") or ""
+    if sync_mode == "video-verified":
+        donor_video = ctx.sources.get(donor_source)
+        if donor_video:
+            try:
+                # Imported lazily so the chapter step doesn't pull in the
+                # video-verified plugin chain unless we actually need it.
+                from vsg_core.subtitles.sync_mode_plugins.video_verified.preprocessing import (
+                    _calculate_offset_for_method,
+                )
+
+                # Audio-correlation seed: the sliding window matcher uses
+                # this as the "we expect roughly this offset" anchor and
+                # searches around it. We pass the existing source delay
+                # if there is one, else 0.
+                seed_total_delay_ms: float = 0.0
+                global_shift_ms: float = 0.0
+                if ctx.delays is not None:
+                    seed_total_delay_ms = ctx.delays.raw_source_delays_ms.get(
+                        donor_source, 0.0
+                    )
+                    global_shift_ms = ctx.delays.raw_global_shift_ms
+
+                runner._log_message(
+                    f"[Chapters] Running video-verified pass for donor "
+                    f"'{donor_source}' (chapter-only donor, no cached "
+                    f"result). Seed offset: {seed_total_delay_ms:+.3f}ms."
+                )
+
+                corrected_delay_ms, details = _calculate_offset_for_method(
+                    source_video=str(donor_video),
+                    target_video=str(source1_file),
+                    total_delay_ms=seed_total_delay_ms,
+                    global_shift_ms=global_shift_ms,
+                    source_key=donor_source,
+                    ctx=ctx,
+                    runner=runner,
+                )
+
+                if corrected_delay_ms is not None:
+                    # Cache the result so later audits / re-reads see it,
+                    # mirroring run_per_source_preprocessing's contract.
+                    ctx.video_verified_sources[donor_source] = {
+                        "original_delay_ms": seed_total_delay_ms,
+                        "corrected_delay_ms": corrected_delay_ms,
+                        "details": details,
+                        "fallback": False,
+                    }
+                    return float(corrected_delay_ms), "video-verified (chapter donor)"
+
+                runner._log_message(
+                    f"[Chapters] video-verified produced no offset for "
+                    f"donor '{donor_source}'. Falling back to audio "
+                    f"correlation."
+                )
+            except Exception as e:
+                runner._log_message(
+                    f"[Chapters][WARN] video-verified for donor "
+                    f"'{donor_source}' failed: {e}. Falling back to audio "
+                    f"correlation."
+                )
+
+    # 3. Audio correlation fallback (today's behavior).
+    raw_offset_ms: float = 0.0
+    if ctx.delays is not None:
+        raw_offset_ms = ctx.delays.raw_source_delays_ms.get(donor_source, 0.0)
+    return raw_offset_ms, "audio correlation"
+
+
 class ChaptersStep:
     """
     Extracts/modifies chapter XML for the final mux.
@@ -103,14 +209,18 @@ class ChaptersStep:
                     chapter_source = "Source 1"
                 else:
                     donor_file = candidate
-                    # Donor → Source 1 video-time offset. Use the raw
-                    # (unrounded) source delay so we keep sub-ms precision
-                    # before snap. round to ns at the boundary.
-                    raw_offset_ms: float = 0.0
-                    if ctx.delays is not None:
-                        raw_offset_ms = ctx.delays.raw_source_delays_ms.get(
-                            chapter_source, 0.0
-                        )
+                    # Donor → Source 1 video-time offset. Prefer
+                    # video-verified frame alignment when available
+                    # (cached or live); fall back to audio correlation.
+                    # Audio correlation can have a ~1 frame systematic
+                    # offset from video alignment when audio masters
+                    # differ between donor and Source 1 (e.g. broadcast
+                    # vs. Bluray) — chapters are anchored to video
+                    # scenes, not to audio, so video alignment is the
+                    # right input here.
+                    raw_offset_ms, offset_source = _resolve_donor_offset_ms(
+                        ctx, runner, chapter_source, source1_file
+                    )
                     donor_offset_ns = int(round(raw_offset_ms * 1_000_000))
                     runner._log_message(
                         f"[Chapters] Using donor '{chapter_source}' "
@@ -118,7 +228,8 @@ class ChaptersStep:
                     )
                     runner._log_message(
                         f"[Chapters] Donor offset: {raw_offset_ms:+.3f}ms "
-                        f"({donor_offset_ns:+d}ns) — donor → Source 1 video time."
+                        f"({donor_offset_ns:+d}ns) via {offset_source} — "
+                        f"donor → Source 1 video time."
                     )
 
         # CRITICAL: Chapters must be shifted by the SAME amount as video container delay
