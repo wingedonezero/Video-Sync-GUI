@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from vsg_core.chapters.compat import is_donor_compatible, quick_probe
 from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.io.runner import CommandRunner
@@ -55,6 +58,7 @@ class ManualSelectionDialog(QDialog):
         previous_layout: list[ManualLayoutItem] | None = None,
         previous_attachment_sources: list[str] | None = None,
         previous_source_settings: dict[str, dict[str, Any]] | None = None,
+        previous_chapter_source: str | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Manual Track Selection")
@@ -66,6 +70,9 @@ class ManualSelectionDialog(QDialog):
         self.manual_layout: list[ManualLayoutItem] | None = None
         self.attachment_sources: list[str] = []
         self.source_settings: dict[str, dict[str, Any]] = previous_source_settings or {}
+        # Default to "Source 1" so existing jobs (which never set this
+        # field) keep producing identical chapter output.
+        self.chapter_source: str = previous_chapter_source or "Source 1"
         self._style_edit_clipboard: dict[str, Any] | None = (
             None  # Stores style_patch and font_replacements
         )
@@ -80,7 +87,8 @@ class ManualSelectionDialog(QDialog):
         self.source_lists: dict[str, SourceList] = {}
         self.attachment_checkboxes: dict[str, QCheckBox] = {}
         self.available_sources = sorted(
-            track_info.keys(), key=lambda k: int(m.group()) if (m := re.search(r"\d+", k)) else 0
+            track_info.keys(),
+            key=lambda k: int(m.group()) if (m := re.search(r"\d+", k)) else 0,
         )
 
         self._build_ui(previous_attachment_sources)
@@ -175,12 +183,22 @@ class ManualSelectionDialog(QDialog):
             attachment_layout.addWidget(cb)
         attachment_layout.addStretch()
 
+        self.chapter_source_group = QGroupBox("Chapters")
+        chapter_layout = QHBoxLayout(self.chapter_source_group)
+        chapter_layout.addWidget(QLabel("Chapters from:"))
+        self.chapter_source_combo = self._build_chapter_source_combo()
+        chapter_layout.addWidget(self.chapter_source_combo)
+        chapter_layout.addStretch()
+
         right_pane_layout.addWidget(final_group)
         right_pane_layout.addWidget(self.attachment_group)
+        right_pane_layout.addWidget(self.chapter_source_group)
         main_hbox.addWidget(right_pane_widget, 2)
         root.addLayout(main_hbox)
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -208,15 +226,123 @@ class ManualSelectionDialog(QDialog):
     def get_manual_layout_and_attachment_sources(
         self,
     ) -> tuple[list[ManualLayoutItem], list[str], dict[str, dict[str, Any]]]:
-        """Returns (manual_layout, attachment_sources, source_settings)."""
+        """Returns (manual_layout, attachment_sources, source_settings).
+
+        Kept for back-compat. Callers that also need the chapter source
+        should use ``get_chapter_source()`` separately.
+        """
         return self.manual_layout, self.attachment_sources, self.source_settings
+
+    def get_chapter_source(self) -> str:
+        """Returns the donor source key chosen for chapters.
+
+        Always defined (defaults to "Source 1"). Read alongside
+        ``get_manual_layout_and_attachment_sources()`` after the dialog
+        is accepted.
+        """
+        return self.chapter_source or "Source 1"
 
     def accept(self) -> None:
         # FIX: Call method on the logic instance
         self.manual_layout, self.attachment_sources = (
             self._logic.get_final_layout_and_attachments()
         )
+        # Resolve chapter source from combo userData
+        combo = getattr(self, "chapter_source_combo", None)
+        if combo is not None:
+            data = combo.currentData()
+            if isinstance(data, str) and data:
+                self.chapter_source = data
         super().accept()
+
+    def _build_chapter_source_combo(self) -> QComboBox:
+        """
+        Build the 'Chapters from:' dropdown.
+
+        Probes each source's video stream once via ffprobe to determine
+        whether it can safely donate chapters to Source 1 (modern
+        progressive video, matching fps). Incompatible donors are shown
+        as disabled with a tooltip explaining why. Source 1 is always
+        enabled (default behavior). 'None' is always selectable to let
+        users explicitly suppress chapters.
+        """
+        combo = QComboBox()
+        combo.setMinimumContentsLength(28)
+        # Use a model so we can disable individual items per-row.
+        model = QStandardItemModel(combo)
+        combo.setModel(model)
+
+        # Probe Source 1 once for the compatibility comparison.
+        s1_path = ""
+        if self.track_info.get("Source 1"):
+            try:
+                s1_path = self.track_info["Source 1"][0]["original_path"]
+            except (KeyError, IndexError):
+                s1_path = ""
+        s1_probe = quick_probe(s1_path) if s1_path else None
+
+        selected_index = 0  # Index of the option to pre-select.
+
+        for idx, source_key in enumerate(self.available_sources):
+            label = source_key
+            tooltip = ""
+            enabled = True
+
+            if source_key == "Source 1":
+                label = "Source 1 (default)"
+            else:
+                # Probe donor + compare to Source 1.
+                donor_path = ""
+                if self.track_info.get(source_key):
+                    try:
+                        donor_path = self.track_info[source_key][0]["original_path"]
+                    except (KeyError, IndexError):
+                        donor_path = ""
+                if not donor_path or s1_probe is None:
+                    enabled = False
+                    label = f"{source_key} (probe unavailable)"
+                    tooltip = "Could not probe video stream for compatibility check."
+                else:
+                    donor_probe = quick_probe(donor_path)
+                    ok, reason = is_donor_compatible(s1_probe, donor_probe)
+                    if not ok:
+                        enabled = False
+                        label = f"{source_key} (incompatible: {reason})"
+                        tooltip = (
+                            f"Cannot use {source_key} as chapter donor: {reason}.\n"
+                            f"Falls back to Source 1 if selected."
+                        )
+                    else:
+                        tooltip = f"Use chapters from {source_key}."
+
+            item = QStandardItem(label)
+            item.setData(source_key, Qt.ItemDataRole.UserRole)
+            if tooltip:
+                item.setToolTip(tooltip)
+            if not enabled:
+                # Clear Selectable + Enabled flags so the row can't be picked.
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            model.appendRow(item)
+            if source_key == self.chapter_source and enabled:
+                selected_index = idx
+
+        # 'None' option — always selectable, always last.
+        none_item = QStandardItem("None (no chapters)")
+        none_item.setData("None", Qt.ItemDataRole.UserRole)
+        none_item.setToolTip("Skip chapters entirely (no chapters in output).")
+        model.appendRow(none_item)
+        if self.chapter_source == "None":
+            selected_index = model.rowCount() - 1
+
+        # If the previous selection points at a now-disabled donor (e.g.
+        # source list changed), fall back to Source 1.
+        chosen_item = model.item(selected_index)
+        if chosen_item is None or not (chosen_item.flags() & Qt.ItemFlag.ItemIsEnabled):
+            selected_index = 0  # Source 1 is always at index 0
+        combo.setCurrentIndex(selected_index)
+
+        return combo
 
     def _show_source_context_menu(
         self, pos, source_key: str, group_box: QGroupBox
@@ -317,11 +443,17 @@ class ManualSelectionDialog(QDialog):
     # ... other methods like _add_external_subtitles, keyPressEvent, etc remain the same ...
     # They are omitted here for brevity but should be kept in your file.
     def keyPressEvent(self, event) -> None:
-        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Up:
+        if (
+            event.modifiers() == Qt.KeyboardModifier.ControlModifier
+            and event.key() == Qt.Key.Key_Up
+        ):
             self.final_list._move_by(-1)
             event.accept()
             return
-        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Down:
+        if (
+            event.modifiers() == Qt.KeyboardModifier.ControlModifier
+            and event.key() == Qt.Key.Key_Down
+        ):
             self.final_list._move_by(+1)
             event.accept()
             return

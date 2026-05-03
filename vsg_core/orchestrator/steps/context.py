@@ -42,6 +42,12 @@ class Context:
     manual_layout: list[ManualLayoutItem] = field(default_factory=list)
     attachment_sources: list[str] = field(default_factory=list)
 
+    # Source key whose chapters get used in the final mux. Defaults to
+    # "Source 1" (preserve existing behavior). Other values: "Source 2",
+    # "Source 3", ... pull chapters from a donor source and shift them onto
+    # Source 1's timeline. "None" suppresses chapters entirely.
+    chapter_source: str = "Source 1"
+
     # Per-source correlation settings (from job layout)
     # Format: {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}, ...}
     source_settings: dict[str, Source1Settings | SourceNSettings] = field(

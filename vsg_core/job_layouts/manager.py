@@ -67,6 +67,7 @@ class JobLayoutManager:
         sources: dict[str, str],
         track_info: dict[str, list[dict]],
         source_settings: dict[str, dict[str, Any]] | None = None,
+        chapter_source: str = "Source 1",
     ):
         """
         Saves a job layout, generating fresh signatures and enhancing the layout data.
@@ -74,6 +75,9 @@ class JobLayoutManager:
         Args:
             source_settings: Per-source correlation settings, e.g.:
                 {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}}
+            chapter_source: Source key whose chapters end up in the
+                final mux. Defaults to "Source 1" so existing layouts
+                (which never set this field) reload identically.
         """
         try:
             enhanced_layout = self._create_enhanced_layout(layout)
@@ -88,6 +92,7 @@ class JobLayoutManager:
                 "track_signature": track_sig,
                 "structure_signature": struct_sig,
                 "source_settings": source_settings or {},
+                "chapter_source": chapter_source or "Source 1",
             }
 
             if self.persistence.save_layout(job_id, layout_data):
@@ -153,6 +158,9 @@ class JobLayoutManager:
             "source_settings": source_data.get(
                 "source_settings", {}
             ),  # Copy per-source correlation settings
+            "chapter_source": source_data.get(
+                "chapter_source", "Source 1"
+            ),  # Carry chapter donor selection across copy
             "track_signature": target_track_sig,
             "structure_signature": target_struct_sig,
             "copied_from": source_job_id,

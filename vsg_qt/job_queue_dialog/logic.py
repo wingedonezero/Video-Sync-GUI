@@ -639,6 +639,11 @@ class JobQueueLogic:
         previous_source_settings = (
             existing_layout.get("source_settings", {}) if existing_layout else {}
         )
+        previous_chapter_source = (
+            existing_layout.get("chapter_source", "Source 1")
+            if existing_layout
+            else "Source 1"
+        )
 
         dialog = ManualSelectionDialog(
             track_info,
@@ -648,11 +653,13 @@ class JobQueueLogic:
             previous_layout=previous_layout,
             previous_attachment_sources=previous_attachments,
             previous_source_settings=previous_source_settings,
+            previous_chapter_source=previous_chapter_source,
         )
         if dialog.exec():
             layout, attachment_sources, source_settings = (
                 dialog.get_manual_layout_and_attachment_sources()
             )
+            chapter_source = dialog.get_chapter_source()
             if layout:
                 save_ok = self.layout_manager.save_job_layout(
                     job_id,
@@ -661,6 +668,7 @@ class JobQueueLogic:
                     job["sources"],
                     track_info,
                     source_settings=source_settings,
+                    chapter_source=chapter_source,
                 )
                 if save_ok:
                     self._update_row(row, job)
@@ -748,6 +756,9 @@ class JobQueueLogic:
                     target_job["sources"],
                     target_track_info,
                     source_settings=self._layout_clipboard.get("source_settings", {}),
+                    chapter_source=self._layout_clipboard.get(
+                        "chapter_source", "Source 1"
+                    ),
                 )
                 if save_ok:
                     self._update_row(target_index, target_job)
@@ -832,6 +843,7 @@ class JobQueueLogic:
                 )
                 job["attachment_sources"] = layout_data.get("attachment_sources", [])
                 job["source_settings"] = layout_data.get("source_settings", {})
+                job["chapter_source"] = layout_data.get("chapter_source", "Source 1")
                 final_jobs.append(job)
             else:
                 unconfigured_names.append(Path(job["sources"]["Source 1"]).name)

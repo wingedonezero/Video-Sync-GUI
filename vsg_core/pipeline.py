@@ -60,6 +60,7 @@ class JobPipeline:
         manual_layout: list[ManualLayoutItem] | None = None,
         attachment_sources: list[str] | None = None,
         source_settings: dict[str, dict[str, Any]] | None = None,
+        chapter_source: str = "Source 1",
         debug_paths=None,
     ) -> PipelineResult:
         """
@@ -134,6 +135,7 @@ class JobPipeline:
                 manual_layout=manual_layout or [],
                 attachment_sources=attachment_sources or [],
                 source_settings=source_settings or {},
+                chapter_source=chapter_source or "Source 1",
                 debug_paths=debug_paths,
             )
             ctx_temp_dir = ctx.temp_dir

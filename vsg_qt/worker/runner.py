@@ -128,6 +128,7 @@ class JobWorker(QRunnable):
                     manual_layout=job_data.get("manual_layout"),
                     attachment_sources=job_data.get("attachment_sources"),
                     source_settings=job_data.get("source_settings"),
+                    chapter_source=job_data.get("chapter_source") or "Source 1",
                     debug_paths=debug_paths,
                 )
 

@@ -28,6 +28,7 @@ class SyncPlanner:
         manual_layout: list[ManualLayoutItem],
         attachment_sources: list[str],
         source_settings: dict[str, dict[str, Any]] | None = None,
+        chapter_source: str = "Source 1",
         debug_paths=None,
     ) -> Any:
         """
@@ -69,5 +70,6 @@ class SyncPlanner:
             manual_layout=manual_layout,
             attachment_sources=attachment_sources,
             source_settings=source_settings or {},
+            chapter_source=chapter_source or "Source 1",
             debug_paths=debug_paths,
         )
