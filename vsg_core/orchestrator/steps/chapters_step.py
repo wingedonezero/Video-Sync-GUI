@@ -249,6 +249,12 @@ class ChaptersStep:
         elif donor_offset_ns == 0:
             runner._log_message("[Chapters] No global shift needed for chapters")
 
+        # Pin first-in-order chapter to 0 only when we're using a donor
+        # (chapter_source != "Source 1"). Donor authoring shouldn't dictate
+        # where chapter 1 lands in the output — convention says it marks
+        # the file start. Default Source 1 path is unchanged: no pinning.
+        pin_first_to_zero = chapter_source != "Source 1"
+
         try:
             xml_path = process_chapters(
                 donor_file,
@@ -259,6 +265,7 @@ class ChaptersStep:
                 shift_ms,
                 keyframe_ref_mkv=source1_file,
                 donor_offset_ns=donor_offset_ns,
+                pin_first_to_zero=pin_first_to_zero,
             )
 
             if xml_path:

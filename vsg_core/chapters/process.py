@@ -245,6 +245,7 @@ def process_chapters(
     *,
     keyframe_ref_mkv: str | None = None,
     donor_offset_ns: int = 0,
+    pin_first_to_zero: bool = False,
 ) -> str | None:
     """
     Extract, shift, snap, normalize, and rewrite chapters.
@@ -269,6 +270,17 @@ def process_chapters(
             time. Carries the full sub-ms precision of the source-delay
             value so we don't lose accuracy at this stage. Defaults to
             0 (Source 1 is the chapter source \u2014 no donor shift).
+        pin_first_to_zero: When True AND the donor's chronologically-
+            first chapter was originally at 00:00:00, force it back to
+            0 after donor offset (before snap and global shift). This
+            preserves the "chapter 1 marks the start of the file"
+            convention when a positive donor offset would otherwise
+            push it past 0. Negative offsets that drive it below 0 are
+            already clamped by ``_fmt_ns``. Donors that authored chapter
+            1 at non-zero (rare/atypical) keep their authored value.
+            Snap runs after the pin so it sees the final intended
+            value; global shift is applied normally on top. Defaults
+            to False (existing Source 1 behavior preserved).
     """
     xml_content = runner.run(["mkvextract", str(ref_mkv), "chapters", "-"], tool_paths)
     if not xml_content or not xml_content.strip():
@@ -287,6 +299,27 @@ def process_chapters(
         # Detect namespace and get the correct prefix for XPath queries
         nsmap, prefix = _get_xpath_and_nsmap(root)
 
+        # Donor mode "chapter 1 = file start" preservation: capture the
+        # chronologically-first ChapterAtom and whether it was originally
+        # at exactly 00:00:00. Used later to undo a positive shift that
+        # would otherwise push it past 0. Done BEFORE any shifts so we
+        # know the donor's authored intent.
+        first_atom_orig_zero: ET.Element | None = None
+        if pin_first_to_zero:
+            atoms_pre = root.xpath(f"//{prefix}ChapterAtom", namespaces=nsmap)
+            best_atom = None
+            best_ns: int | None = None
+            for atom in atoms_pre:
+                st_el = atom.find(f"{prefix}ChapterTimeStart", namespaces=nsmap)
+                if st_el is None or not st_el.text:
+                    continue
+                cur_ns = _parse_ns(st_el.text)
+                if best_ns is None or cur_ns < best_ns:
+                    best_ns = cur_ns
+                    best_atom = atom
+            if best_atom is not None and best_ns == 0:
+                first_atom_orig_zero = best_atom
+
         # Donor \u2192 Source 1 video-time shift (applied BEFORE snap so we
         # snap against the keyframe-ref file's keyframes). Sub-ms
         # precision is preserved in nanoseconds; snap will absorb residuals.
@@ -300,6 +333,30 @@ def process_chapters(
                 for node in root.xpath(f"//{prefix}{tag_name}", namespaces=nsmap):
                     if node is not None and node.text:
                         node.text = _fmt_ns(_parse_ns(node.text) + donor_offset_ns)
+
+        # Pin first-in-order chapter back to 0 if (a) it was originally
+        # at 0 in the donor and (b) the donor offset has pushed it past 0.
+        # Negative offsets are already clamped to 0 by ``_fmt_ns``, so
+        # this only fires for positive donor offsets. Runs BEFORE snap so
+        # snap operates on the final intended values (the start-of-stream
+        # keyframe at 0 is guaranteed in MKV/H.264, so snap will keep
+        # chapter 1 at 0 cleanly). Runs BEFORE global shift so the
+        # result still ends at +global_shift in the container, matching
+        # where Source 1's video begins in positive_only mode.
+        if first_atom_orig_zero is not None:
+            first_start = first_atom_orig_zero.find(
+                f"{prefix}ChapterTimeStart", namespaces=nsmap
+            )
+            if first_start is not None and first_start.text:
+                current_ns = _parse_ns(first_start.text)
+                if current_ns != 0:
+                    runner._log_message(
+                        f"[Chapters] Pinning first-in-order chapter from "
+                        f"{_fmt_ns_for_log(current_ns)} back to "
+                        f"00:00:00.000 (was originally at 0 in donor; "
+                        f"chapter 1 marks file start)."
+                    )
+                    first_start.text = _fmt_ns(0)
 
         # IMPORTANT: Snap FIRST (in video time), THEN shift to container time
         # This ensures chapters land on actual keyframes in the final muxed file
