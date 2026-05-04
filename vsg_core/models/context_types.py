@@ -216,6 +216,11 @@ class ChapterSourceOutcome(TypedDict, total=False):
     from sources, donor has no chapters, etc.) and we silently fell back
     to Source 1's chapters.
 
+    Also tracks whether the "pin first chapter to 0" safeguard fired —
+    a rare event that means a positive donor offset would have pushed
+    chapter 1 past 0:00.000. Worth surfacing so the user can verify the
+    chapter cuts visually.
+
     Only populated for jobs where the user explicitly chose a non-default
     donor or "None". Default ``chapter_source = "Source 1"`` jobs leave
     this field as None — nothing to report.
@@ -225,6 +230,8 @@ class ChapterSourceOutcome(TypedDict, total=False):
     actual: str  # What ChaptersStep actually used, e.g. "Source 1"
     reason: str  # Why fallback happened (empty when fallback is False)
     fallback: bool  # True iff requested != actual
+    pin_fired: bool  # True iff first-chapter-to-0 pin actually moved chapter 1
+    pin_from_ns: int  # Value (in ns) chapter 1 had before the pin clamped it
 
 
 # =============================================================================

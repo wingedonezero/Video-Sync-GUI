@@ -20,6 +20,8 @@ class ChaptersAuditor(BaseAuditor):
         - If a non-default chapter donor was requested: surfaces a warning
           when ChaptersStep had to fall back to Source 1 (fps mismatch,
           donor missing, donor has no chapters, etc.)
+        - If the first-chapter-to-0 pin fired: surfaces a warning so the
+          user can sanity-check chapter 1's scene cut.
         Returns the number of issues found.
         """
 
@@ -61,10 +63,18 @@ class ChaptersAuditor(BaseAuditor):
     def _report_chapter_donor_outcome(self) -> None:
         """
         If the user picked a non-default chapter donor, surface what
-        actually happened. Successful donor uses produce an info log
-        line; fallbacks produce a structured warning that lands in
-        the batch report so users can see at a glance which jobs
-        didn't get the donor they requested and why.
+        actually happened. Three independent things to report:
+
+        1. Fallback (donor rejected, used Source 1 instead) — warning.
+        2. First-chapter pin fired (positive donor offset would have
+           pushed chapter 1 past 0; clamped back to 00:00:00) — warning,
+           because pin firing is rare and worth a visual sanity check.
+        3. Donor honored without fallback or pin — info log only, no
+           AuditIssue (batch report should only show problems).
+
+        Fallback and pin are independent. A donor can be honored AND
+        still trigger the pin (the common-case shape we expect when
+        pin actually fires).
         """
         outcome = getattr(self.ctx, "chapter_source_outcome", None)
         if not outcome:
@@ -75,25 +85,33 @@ class ChaptersAuditor(BaseAuditor):
         actual = outcome.get("actual", "")
         reason = outcome.get("reason", "")
         fallback = bool(outcome.get("fallback", False))
+        pin_fired = bool(outcome.get("pin_fired", False))
+        pin_from_ns = int(outcome.get("pin_from_ns", 0))
 
-        if not fallback:
-            # Donor was honored. Log it for clarity but don't add an
-            # AuditIssue — the batch report should only show problems.
-            if requested == "None":
-                self.log(
-                    "  ✓ Chapters intentionally suppressed (chapter_source = None)."
-                )
-            else:
-                self.log(f"  ✓ Chapter donor '{requested}' was honored as requested.")
-            return
+        if fallback:
+            message = (
+                f"Chapter donor '{requested}' fell back to '{actual}' "
+                f"(reason: {reason or 'unknown'})"
+            )
+            self._track_issue(message, severity="warning")
+            self.log(f"[WARNING] {message}")
+        elif requested == "None":
+            self.log("  ✓ Chapters intentionally suppressed (chapter_source = None).")
+        else:
+            self.log(f"  ✓ Chapter donor '{requested}' was honored as requested.")
 
-        # Fallback occurred — surface it in the batch report.
-        message = (
-            f"Chapter donor '{requested}' fell back to '{actual}' "
-            f"(reason: {reason or 'unknown'})"
-        )
-        self._track_issue(message, severity="warning")
-        self.log(f"[WARNING] {message}")
+        # Pin event is independent of fallback — it can fire during a
+        # successful donor use (the common case for pin firing).
+        if pin_fired:
+            from_ms = pin_from_ns / 1_000_000.0
+            pin_message = (
+                f"Chapter 1 from donor '{requested}' was pinned to 00:00:00 "
+                f"(would have been at {from_ms:+.3f}ms after donor offset). "
+                f"Verify that the first chapter cut still lines up with the "
+                f"intended scene."
+            )
+            self._track_issue(pin_message, severity="warning")
+            self.log(f"[WARNING] {pin_message}")
 
     def _verify_processed_chapters(self, final_chapters_xml: str | None) -> None:
         """
@@ -128,8 +146,8 @@ class ChaptersAuditor(BaseAuditor):
         try:
             parser = ET.XMLParser(remove_blank_text=True, recover=True)
 
-            processed_xml_content = processed_xml_content.lstrip("\ufeff")
-            final_chapters_xml = final_chapters_xml.lstrip("\ufeff")
+            processed_xml_content = processed_xml_content.lstrip("﻿")
+            final_chapters_xml = final_chapters_xml.lstrip("﻿")
 
             processed_root = ET.fromstring(
                 processed_xml_content.encode("utf-8"), parser
