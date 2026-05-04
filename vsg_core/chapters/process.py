@@ -272,14 +272,15 @@ def process_chapters(
             0 (Source 1 is the chapter source \u2014 no donor shift).
         pin_first_to_zero: When True AND the donor's chronologically-
             first chapter was originally at 00:00:00, force it back to
-            0 after donor offset and snap (before global shift). This
+            0 after donor offset (before snap and global shift). This
             preserves the "chapter 1 marks the start of the file"
             convention when a positive donor offset would otherwise
             push it past 0. Negative offsets that drive it below 0 are
             already clamped by ``_fmt_ns``. Donors that authored chapter
             1 at non-zero (rare/atypical) keep their authored value.
-            Global shift is applied normally on top. Defaults to False
-            (existing Source 1 behavior preserved).
+            Snap runs after the pin so it sees the final intended
+            value; global shift is applied normally on top. Defaults
+            to False (existing Source 1 behavior preserved).
     """
     xml_content = runner.run(["mkvextract", str(ref_mkv), "chapters", "-"], tool_paths)
     if not xml_content or not xml_content.strip():
@@ -333,27 +334,15 @@ def process_chapters(
                     if node is not None and node.text:
                         node.text = _fmt_ns(_parse_ns(node.text) + donor_offset_ns)
 
-        # IMPORTANT: Snap FIRST (in video time), THEN shift to container time
-        # This ensures chapters land on actual keyframes in the final muxed file
-        # (Video gets container delay, so keyframe at video_time X = container_time X + shift)
-        if settings.snap_chapters:
-            keyframes_ns = probe_keyframes_ns(keyframe_source, runner, tool_paths)
-            if keyframes_ns:
-                _snap_chapter_times_inplace(
-                    root, keyframes_ns, settings, runner, nsmap, prefix
-                )
-            else:
-                runner._log_message(
-                    "[Chapters] Snap skipped: could not load keyframes."
-                )
-
         # Pin first-in-order chapter back to 0 if (a) it was originally
-        # at 0 in the donor and (b) the shift has pushed it past 0.
-        # Negative shifts are already clamped to 0 by ``_fmt_ns`` so
-        # this only fires for positive donor offsets. Runs AFTER snap
-        # (so any keyframe move on the first chapter is overridden) and
-        # BEFORE global shift (so the result still ends at +global_shift
-        # in the container, matching where Source 1's video begins).
+        # at 0 in the donor and (b) the donor offset has pushed it past 0.
+        # Negative offsets are already clamped to 0 by ``_fmt_ns``, so
+        # this only fires for positive donor offsets. Runs BEFORE snap so
+        # snap operates on the final intended values (the start-of-stream
+        # keyframe at 0 is guaranteed in MKV/H.264, so snap will keep
+        # chapter 1 at 0 cleanly). Runs BEFORE global shift so the
+        # result still ends at +global_shift in the container, matching
+        # where Source 1's video begins in positive_only mode.
         if first_atom_orig_zero is not None:
             first_start = first_atom_orig_zero.find(
                 f"{prefix}ChapterTimeStart", namespaces=nsmap
@@ -368,6 +357,20 @@ def process_chapters(
                         f"chapter 1 marks file start)."
                     )
                     first_start.text = _fmt_ns(0)
+
+        # IMPORTANT: Snap FIRST (in video time), THEN shift to container time
+        # This ensures chapters land on actual keyframes in the final muxed file
+        # (Video gets container delay, so keyframe at video_time X = container_time X + shift)
+        if settings.snap_chapters:
+            keyframes_ns = probe_keyframes_ns(keyframe_source, runner, tool_paths)
+            if keyframes_ns:
+                _snap_chapter_times_inplace(
+                    root, keyframes_ns, settings, runner, nsmap, prefix
+                )
+            else:
+                runner._log_message(
+                    "[Chapters] Snap skipped: could not load keyframes."
+                )
 
         # Now shift all timestamps to container time
         # Must match video container delay exactly (integer ms) for correct keyframe alignment
