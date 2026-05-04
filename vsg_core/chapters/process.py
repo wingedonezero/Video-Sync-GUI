@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lxml import etree as ET
 
@@ -246,6 +246,7 @@ def process_chapters(
     keyframe_ref_mkv: str | None = None,
     donor_offset_ns: int = 0,
     pin_first_to_zero: bool = False,
+    pin_telemetry: dict[str, Any] | None = None,
 ) -> str | None:
     """
     Extract, shift, snap, normalize, and rewrite chapters.
@@ -281,6 +282,11 @@ def process_chapters(
             Snap runs after the pin so it sees the final intended
             value; global shift is applied normally on top. Defaults
             to False (existing Source 1 behavior preserved).
+        pin_telemetry: Optional mutable dict; if provided AND the pin
+            actually fired, populated with ``{"fired": True,
+            "from_ns": <value before pin>}``. Lets the caller surface
+            the event as a structured audit warning (since pin firing
+            is rare and worth flagging for the user to verify).
     """
     xml_content = runner.run(["mkvextract", str(ref_mkv), "chapters", "-"], tool_paths)
     if not xml_content or not xml_content.strip():
@@ -357,6 +363,9 @@ def process_chapters(
                         f"chapter 1 marks file start)."
                     )
                     first_start.text = _fmt_ns(0)
+                    if pin_telemetry is not None:
+                        pin_telemetry["fired"] = True
+                        pin_telemetry["from_ns"] = current_ns
 
         # IMPORTANT: Snap FIRST (in video time), THEN shift to container time
         # This ensures chapters land on actual keyframes in the final muxed file

@@ -8,6 +8,7 @@ from vsg_core.chapters.process import process_chapters
 
 if TYPE_CHECKING:
     from vsg_core.io.runner import CommandRunner
+    from vsg_core.models.context_types import ChapterSourceOutcome
     from vsg_core.orchestrator.steps.context import Context
 
 
@@ -254,6 +255,7 @@ class ChaptersStep:
         # where chapter 1 lands in the output — convention says it marks
         # the file start. Default Source 1 path is unchanged: no pinning.
         pin_first_to_zero = chapter_source != "Source 1"
+        pin_telemetry: dict = {}
 
         try:
             xml_path = process_chapters(
@@ -266,6 +268,7 @@ class ChaptersStep:
                 keyframe_ref_mkv=source1_file,
                 donor_offset_ns=donor_offset_ns,
                 pin_first_to_zero=pin_first_to_zero,
+                pin_telemetry=pin_telemetry,
             )
 
             if xml_path:
@@ -338,11 +341,15 @@ class ChaptersStep:
         # the default. Default ("Source 1" requested + "Source 1" used) is
         # the unmodified path — no need to surface anything.
         if requested_source != "Source 1":
-            ctx.chapter_source_outcome = {
+            outcome: ChapterSourceOutcome = {
                 "requested": requested_source,
                 "actual": chapter_source,
                 "reason": fallback_reason,
                 "fallback": requested_source != chapter_source,
             }
+            if pin_telemetry.get("fired"):
+                outcome["pin_fired"] = True
+                outcome["pin_from_ns"] = int(pin_telemetry.get("from_ns", 0))
+            ctx.chapter_source_outcome = outcome
 
         return ctx
