@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from lxml import etree as ET
 
 from ..io.runner import CommandRunner
-from .keyframes import probe_keyframes_ns
+from .keyframes import probe_duration_ns, probe_keyframes_ns
 
 if TYPE_CHECKING:
     from vsg_core.models import AppSettings
@@ -91,7 +91,12 @@ def _get_xpath_and_nsmap(root: ET.Element) -> (dict, str):
 
 
 def _normalize_and_dedupe_chapters(
-    root: ET.Element, runner: CommandRunner, nsmap: dict, prefix: str
+    root: ET.Element,
+    runner: CommandRunner,
+    nsmap: dict,
+    prefix: str,
+    *,
+    file_duration_ns: int | None = None,
 ):
     parent_map = {c: p for p in root.iter() for c in p}
 
@@ -143,8 +148,21 @@ def _normalize_and_dedupe_chapters(
             desired_en_ns = next_start_ns
             reason = " (to create seamless chapters)"
         else:
+            # LAST chapter — pick the most accurate end we can.
+            # Priority:
+            #   1. File duration (the right answer when we can probe it)
+            #   2. Donor's authored ChapterTimeEnd if larger than start
+            #   3. start + 1s heuristic (legacy fallback)
+            # Whatever we pick, clamp to file duration when known so we
+            # never overshoot the actual end of the video.
             original_en_ns = _parse_ns(original_en_text) if original_en_text else st_ns
-            desired_en_ns = max(st_ns + 1_000_000_000, original_en_ns)
+            heuristic_ns = max(st_ns + 1_000_000_000, original_en_ns)
+            if file_duration_ns is not None and file_duration_ns >= st_ns:
+                desired_en_ns = file_duration_ns
+                reason = " (clamped to file duration)"
+            else:
+                desired_en_ns = heuristic_ns
+                reason = " (start + 1s heuristic; file duration unavailable)"
 
         if en_el is None:
             en_el = ET.SubElement(
@@ -391,8 +409,22 @@ def process_chapters(
                     if node is not None and node.text:
                         node.text = _fmt_ns(_parse_ns(node.text) + shift_ns)
 
+        # Probe the final video's duration so the normalizer can clamp
+        # the LAST chapter's ChapterTimeEnd to the actual end of file
+        # instead of overshooting via the legacy start+1s heuristic.
+        # ``keyframe_source`` is Source 1 in donor mode, ref_mkv in
+        # default mode — both correct: that's the file the chapters
+        # will live alongside in the final mux.
+        file_duration_ns = probe_duration_ns(keyframe_source, runner, tool_paths)
+        if file_duration_ns is not None:
+            runner._log_message(
+                f"[Chapters] Probed file duration: {_fmt_ns_for_log(file_duration_ns)}"
+            )
+
         runner._log_message("[Chapters] Normalizing chapter data...")
-        _normalize_and_dedupe_chapters(root, runner, nsmap, prefix)
+        _normalize_and_dedupe_chapters(
+            root, runner, nsmap, prefix, file_duration_ns=file_duration_ns
+        )
 
         if settings.rename_chapters:
             runner._log_message('[Chapters] Renaming chapters to "Chapter NN"...')
