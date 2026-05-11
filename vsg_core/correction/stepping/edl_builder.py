@@ -111,12 +111,13 @@ def _recover_noise_clusters(
 ) -> None:
     """Check DBSCAN noise points for recoverable small clusters near chapters.
 
-    Groups noise points by delay, and if a group of 2+ points has a
+    Groups noise points by delay (within ±5 ms tolerance on the float
+    delay — *not* rounded to int ms), and if a group of 2+ points has a
     consistent delay near a chapter marker, creates an additional
-    ``TransitionZone`` and appends it to *zones*.
+    ``TransitionZone`` and appends it to *zones* using the float mean of
+    the group's delays.  Preserves sub-ms precision the same way the
+    regular DBSCAN clusters do.
     """
-    from collections import Counter
-
     import numpy as np
 
     if not noise_points:
@@ -127,24 +128,35 @@ def _recover_noise_clusters(
     last_delay = last_cluster.mean_delay_ms  # type: ignore[attr-defined]
     last_end = last_cluster.time_range[1]  # type: ignore[attr-defined]
 
-    # Group noise by rounded delay (within DBSCAN epsilon ~20ms)
-    delay_counts: Counter[int] = Counter()
-    delay_times: dict[int, list[float]] = {}
-    for t, d in noise_points:
-        rd = round(d)
-        delay_counts[rd] += 1
-        if rd not in delay_times:
-            delay_times[rd] = []
-        delay_times[rd].append(t)
+    # Agglomerate noise points within ±5 ms of the running mean — same
+    # idea as DBSCAN's epsilon but inline since we usually have only a
+    # handful of noise points.  Sort by delay so adjacent points are
+    # candidates to merge.
+    sorted_noise = sorted(noise_points, key=lambda np_: np_[1])
+    groups: list[list[tuple[float, float]]] = []
+    GROUPING_TOL_MS = 5.0
+    for t, d in sorted_noise:
+        if groups:
+            cur_mean = sum(p[1] for p in groups[-1]) / len(groups[-1])
+            if abs(d - cur_mean) <= GROUPING_TOL_MS:
+                groups[-1].append((t, d))
+                continue
+        groups.append([(t, d)])
 
-    for rd, count in delay_counts.most_common():
-        if count < 2:
+    # Try largest groups first
+    groups.sort(key=len, reverse=True)
+
+    anchor_delay = cluster_map[valid_ids[0]].mean_delay_ms  # type: ignore[attr-defined]
+
+    for group in groups:
+        if len(group) < 2:
             continue
 
-        # Check if this noise group is near a chapter
-        avg_time = float(np.mean(delay_times[rd]))
+        times = [p[0] for p in group]
+        delays = [p[1] for p in group]
+        avg_delay = float(np.mean(delays))  # sub-ms float, not rounded
+        avg_time = float(np.mean(times))
         # Convert to src2 timeline approximately (using anchor delay)
-        anchor_delay = cluster_map[valid_ids[0]].mean_delay_ms  # type: ignore[attr-defined]
         avg_time_src2 = avg_time - anchor_delay / 1000.0
 
         near_chapter = None
@@ -156,25 +168,25 @@ def _recover_noise_clusters(
         if near_chapter is None:
             continue
 
-        jump_ms = rd - last_delay
+        jump_ms = avg_delay - last_delay
         if abs(jump_ms) < 5:
             continue
 
-        # Create recovery transition
-        min_t = min(delay_times[rd])
+        # Create recovery transition with sub-ms precision
+        min_t = min(times)
         zone = TransitionZone(
             ref_start_s=last_end,
             ref_end_s=min_t,
             delay_before_ms=last_delay,
-            delay_after_ms=float(rd),
+            delay_after_ms=avg_delay,
             correction_ms=jump_ms,
         )
         zones.append(zone)
         log(
-            f"[EDL Builder] RECOVERED Transition (from {count} noise points): "
-            f"ref [{last_end:.1f}s - {min_t:.1f}s]  "
-            f"delay {last_delay:+.0f}ms → {rd:+.0f}ms  "
-            f"correction {jump_ms:+.0f}ms  "
+            f"[EDL Builder] RECOVERED Transition (from {len(group)} noise "
+            f"points): ref [{last_end:.1f}s - {min_t:.1f}s]  "
+            f"delay {last_delay:+.3f}ms → {avg_delay:+.3f}ms  "
+            f"correction {jump_ms:+.3f}ms  "
             f"(near chapter {near_chapter:.1f}s)"
         )
         # Only recover one noise cluster (typically the end-of-episode segment)

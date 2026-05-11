@@ -146,12 +146,36 @@ def refine_boundaries(
             threshold_db,
             min_dur_ms,
         )
+        # DVD/AC-3 fallback: strict silence (-70 dB default) is rarely
+        # achievable on lossy disc audio — "silent" eyecatch backgrounds
+        # tend to sit at -45 to -55 dB.  For SMALL corrections (< 200 ms),
+        # a trim through -50 dB background is inaudible.  Retry with a
+        # relaxed threshold when the strict pass finds nothing.  Big
+        # corrections still need real silence so this gate stays narrow.
+        used_relaxed = False
+        if not rms_zones and abs(zone.correction_ms) < 200.0:
+            relaxed_threshold = -50.0
+            log(
+                f"    [Audio] No silence at {threshold_db:+.0f}dB; "
+                f"retrying at {relaxed_threshold:+.0f}dB "
+                f"(small correction {zone.correction_ms:+.1f}ms)"
+            )
+            rms_zones = find_silence_zones_rms(
+                src2_pcm,
+                src2_sr,
+                scan_start,
+                scan_end,
+                relaxed_threshold,
+                min_dur_ms,
+            )
+            used_relaxed = True
         if rms_zones:
             for z in rms_zones:
                 fits = " ✓ FITS" if z.duration_ms >= abs(zone.correction_ms) else ""
+                tag = " (relaxed)" if used_relaxed else ""
                 log(
                     f"    [Audio] Silence: {z.start_s:.3f}s - {z.end_s:.3f}s "
-                    f"({z.duration_ms:.0f}ms, {z.avg_db:.0f}dB){fits}"
+                    f"({z.duration_ms:.0f}ms, {z.avg_db:.0f}dB){fits}{tag}"
                 )
         else:
             log("    [Audio] No silence zones found")
@@ -335,6 +359,71 @@ def refine_boundaries(
                             f"    [Snap] Video keyframe rejected: "
                             f"{snapped_src2:.3f}s outside silence zone"
                         )
+
+        # ── Multi-track residual check (warning-only — no shift) ──
+        # Sample-precise RMS at the chosen splice on every audio track.
+        # Different from the 2-second VAD window: this catches the case
+        # where the splice lands in JPN silence but a sibling track has
+        # active signal at that exact sample (DVD mixes often differ).
+        # Splice is NOT shifted; we only log + record audit metadata so
+        # the user can see what happened.
+        if src2_track_streams and src2_file_path and best_zone is not None:
+            try:
+                per_track_db = _measure_multitrack_rms_at(
+                    src2_file_path,
+                    src2_track_streams,
+                    splice_src2,
+                    src2_sr,
+                )
+                if per_track_db:
+                    loudest_label, loudest_db = max(
+                        per_track_db.items(), key=lambda kv: kv[1]
+                    )
+                    if loudest_db > -45.0:
+                        # Find the best multi-track position in the zone
+                        # (informational — not used to shift)
+                        try:
+                            (
+                                alt_t,
+                                alt_worst_db,
+                                alt_per_track,
+                            ) = _find_best_multitrack_position(
+                                src2_file_path,
+                                src2_track_streams,
+                                best_zone.start_s,
+                                best_zone.end_s,
+                                src2_sr,
+                            )
+                        except Exception:
+                            alt_t = splice_src2
+                            alt_worst_db = loudest_db
+                            alt_per_track = per_track_db
+
+                        shift_ms = (alt_t - splice_src2) * 1000.0
+                        improvement_db = loudest_db - alt_worst_db
+                        log(
+                            f"    [Multi-track ⚠ RESIDUAL] "
+                            f"{loudest_label} at {loudest_db:+.1f}dB at "
+                            f"chosen sample {splice_src2:.3f}s. "
+                            f"Quietest alt in zone @{alt_t:.3f}s "
+                            f"(shift {shift_ms:+.0f}ms, worst track "
+                            f"{alt_worst_db:+.1f}dB, "
+                            f"improvement {improvement_db:+.1f}dB). "
+                            f"Splice NOT shifted."
+                        )
+                        snap_meta["multitrack_residual"] = {
+                            "loudest_track": loudest_label,
+                            "loudest_db": loudest_db,
+                            "per_track_db_at_splice": per_track_db,
+                            "best_alternative_t_s": alt_t,
+                            "best_alternative_worst_db": alt_worst_db,
+                            "best_alternative_per_track_db": alt_per_track,
+                            "shift_ms_would_be": shift_ms,
+                            "improvement_db_would_be": improvement_db,
+                        }
+            except Exception as exc:
+                # Never let the new check break a working pipeline
+                log(f"    [Multi-track] check failed: {exc} (continuing without it)")
 
         # ── Build SplicePoint ──
         splice_ref_final = timeline.src2_to_ref(splice_src2, zone.delay_before_ms)
@@ -696,6 +785,146 @@ def _snap_to_video_frame(
     if abs(nearest - boundary_ref_s) <= max_offset:
         return nearest
     return None
+
+
+# ---------------------------------------------------------------------------
+# Multi-track residual check helpers
+# ---------------------------------------------------------------------------
+
+
+def _decode_mono_window_ffmpeg(
+    src_path: str,
+    stream_idx: int,
+    start_s: float,
+    duration_s: float,
+    sample_rate: int,
+) -> np.ndarray:
+    """Decode a small mono float32 window from one audio stream via ffmpeg."""
+    import subprocess
+
+    cmd = [
+        "ffmpeg",
+        "-v",
+        "error",
+        "-nostdin",
+        "-ss",
+        str(max(0.0, start_s)),
+        "-t",
+        str(max(0.001, duration_s)),
+        "-i",
+        src_path,
+        "-map",
+        f"0:a:{stream_idx}",
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-f",
+        "f32le",
+        "pipe:1",
+    ]
+    out = subprocess.run(cmd, capture_output=True, check=True).stdout
+    return np.frombuffer(out, dtype=np.float32).copy()
+
+
+def _rms_db_float(pcm: np.ndarray) -> float:
+    """RMS dB for a float32 chunk in normalised amplitude range [-1, 1]."""
+    if len(pcm) == 0:
+        return -120.0
+    x = pcm.astype(np.float64)
+    rms = float(np.sqrt(np.mean(x * x)))
+    return 20.0 * np.log10(rms) if rms > 1e-12 else -120.0
+
+
+def _measure_multitrack_rms_at(
+    src_path: str,
+    track_streams: dict[str, int],
+    splice_t: float,
+    sample_rate: int,
+    window_ms: float = 20.0,
+) -> dict[str, float]:
+    """Return per-track RMS dB at the splice sample (sample-precise).
+
+    Decodes ``window_ms`` of audio centered on *splice_t* from each track
+    and computes RMS.  Independent of (and complementary to) the existing
+    2-second VAD window check.
+    """
+    half = window_ms / 1000.0 / 2.0
+    start = splice_t - half
+    out: dict[str, float] = {}
+    for label, stream_idx in track_streams.items():
+        try:
+            chunk = _decode_mono_window_ffmpeg(
+                src_path, stream_idx, start, window_ms / 1000.0, sample_rate
+            )
+            out[label] = _rms_db_float(chunk)
+        except Exception:
+            # Skip a track that fails to decode rather than abort the check
+            continue
+    return out
+
+
+def _find_best_multitrack_position(
+    src_path: str,
+    track_streams: dict[str, int],
+    zone_start_s: float,
+    zone_end_s: float,
+    sample_rate: int,
+    step_ms: float = 10.0,
+    window_ms: float = 20.0,
+) -> tuple[float, float, dict[str, float]]:
+    """Scan the silence zone for the sample where the WORST track is quietest.
+
+    Decodes the whole zone once per track (one ffmpeg call per track), then
+    walks the windows in memory — much faster than re-invoking ffmpeg at
+    every candidate sample.
+
+    Returns ``(best_t_s, worst_track_db_at_best, per_track_db_at_best)``.
+    """
+    if zone_end_s <= zone_start_s:
+        return zone_start_s, -120.0, {}
+
+    # Decode the full zone (small pad) for every track
+    pad = max(window_ms, 50.0) / 1000.0
+    decode_start = max(0.0, zone_start_s - pad)
+    decode_duration = (zone_end_s + pad) - decode_start
+
+    track_pcm: dict[str, np.ndarray] = {}
+    for label, stream_idx in track_streams.items():
+        try:
+            track_pcm[label] = _decode_mono_window_ffmpeg(
+                src_path, stream_idx, decode_start, decode_duration, sample_rate
+            )
+        except Exception:
+            continue
+    if not track_pcm:
+        return zone_start_s, -120.0, {}
+
+    win = max(1, int(window_ms / 1000.0 * sample_rate))
+    step = max(1, int(step_ms / 1000.0 * sample_rate))
+
+    best_t = zone_start_s
+    best_worst_db = 0.0
+    best_per_track: dict[str, float] = {}
+
+    t = zone_start_s
+    while t + window_ms / 1000.0 <= zone_end_s:
+        per_track: dict[str, float] = {}
+        worst_db = -120.0
+        for label, pcm in track_pcm.items():
+            local_idx = int((t - decode_start) * sample_rate)
+            chunk = pcm[local_idx : local_idx + win]
+            db = _rms_db_float(chunk)
+            per_track[label] = db
+            if db > worst_db:
+                worst_db = db
+        if worst_db < best_worst_db or not best_per_track:
+            best_worst_db = worst_db
+            best_per_track = per_track
+            best_t = t
+        t += step / sample_rate
+
+    return best_t, best_worst_db, best_per_track
 
 
 # ---------------------------------------------------------------------------

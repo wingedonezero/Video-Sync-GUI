@@ -171,36 +171,47 @@ def assemble_corrected_audio(
     assembly_dir.mkdir(exist_ok=True)
 
     segment_files: list[str] = []
-    # Bake the first-cluster delay (edl[0].delay_ms) directly into the FLAC's
+    # Bake the first-cluster delay (edl[0].delay_raw) directly into the FLAC's
     # PCM content so the output is pre-aligned to Source 1's audio-content
-    # timeline.  Starting current_delay at 0 makes the first loop iteration
-    # compute gap_ms = edl[0].delay_ms - 0, which then takes the existing
-    # silence-prepend branch (positive delay) or the skip-leading-samples
-    # branch (negative delay).  After the mux step sees an is_pre_aligned
-    # track, it applies only Source 1's audio container delay — no negative
-    # --sync, no FLAC-block-alignment residual.
-    current_delay = 0
+    # timeline.  Starting current_delay_ms at 0.0 makes the first loop
+    # iteration compute gap_ms = edl[0].delay_raw - 0, which then takes the
+    # existing silence-prepend branch (positive delay) or the skip-leading-
+    # samples branch (negative delay).  After the mux step sees an
+    # is_pre_aligned track, it applies only Source 1's audio container delay
+    # — no negative --sync, no FLAC-block-alignment residual.
+    #
+    # Uses delay_raw (sub-ms float) instead of delay_ms (int).  At 48kHz with
+    # high-frequency content, integer-ms quantisation drops correlation
+    # against the reference from ~0.99 to as low as -0.30 at certain splices
+    # because adjacent cluster means can differ by, e.g., 41.708ms but get
+    # rounded to 42ms — a ~0.3ms per-splice misalignment that accumulates.
+    # Sample-accurate silence inserts (1/48ms at 48k) eliminate that.
+    current_delay_ms: float = 0.0
 
     try:
         pcm_duration_s = len(target_pcm) / float(sample_rate * channels)
-        first_delay_ms = edl[0].delay_ms
+        first_delay_ms = edl[0].delay_raw
         pcm_duration_ms = pcm_duration_s * 1000.0
         if first_delay_ms < 0 and abs(first_delay_ms) >= pcm_duration_ms:
             raise RuntimeError(
-                f"First-cluster delay ({first_delay_ms}ms) is >= audio "
+                f"First-cluster delay ({first_delay_ms:.3f}ms) is >= audio "
                 f"duration ({pcm_duration_ms:.0f}ms) — cannot pre-align "
                 f"(would skip past end of file)."
             )
 
         for i, segment in enumerate(edl):
-            gap_ms = segment.delay_ms - current_delay
+            gap_ms = segment.delay_raw - current_delay_ms
 
             if abs(gap_ms) > 10:
                 if gap_ms > 0:
-                    # Insert silence
-                    log(f"    At {segment.start_s:.3f}s: insert {gap_ms}ms silence")
+                    # Insert silence — round-to-nearest sample for sub-ms precision
+                    silence_samples_mono = int(round((gap_ms / 1000.0) * sample_rate))
+                    silence_samples = silence_samples_mono * channels
+                    log(
+                        f"    At {segment.start_s:.3f}s: insert {gap_ms:.3f}ms "
+                        f"({silence_samples_mono} samples) silence"
+                    )
                     silence_file = assembly_dir / f"silence_{i:03d}.flac"
-                    silence_samples = int((gap_ms / 1000.0) * sample_rate) * channels
                     silence_pcm = np.zeros(silence_samples, dtype=np.int32)
 
                     if not _encode_flac(
@@ -216,22 +227,30 @@ def assemble_corrected_audio(
                     segment_files.append(f"file '{silence_file.name}'")
                 else:
                     # Remove audio (negative gap)
-                    log(f"    At {segment.start_s:.3f}s: remove {-gap_ms}ms audio")
+                    log(f"    At {segment.start_s:.3f}s: remove {-gap_ms:.3f}ms audio")
 
-            current_delay = segment.delay_ms
+            current_delay_ms = segment.delay_raw
 
-            # Extract this segment's audio
+            # Extract this segment's audio.  Round-to-nearest sample
+            # everywhere so segment lengths line up sample-accurately with
+            # the silence inserts above (which also round-to-nearest).  This
+            # matters when gap_ms is sub-ms (raw delays).
             seg_start = segment.start_s
             seg_end = edl[i + 1].start_s if i + 1 < len(edl) else pcm_duration_s
 
-            if gap_ms < 0:
-                seg_start += abs(gap_ms) / 1000.0
+            start_sample_mono = int(round(seg_start * sample_rate))
+            end_sample_mono = int(round(seg_end * sample_rate))
 
-            if seg_end <= seg_start:
+            if gap_ms < 0:
+                # Trim |gap_ms| from the segment start in samples
+                trim_samples = int(round((abs(gap_ms) / 1000.0) * sample_rate))
+                start_sample_mono += trim_samples
+
+            if end_sample_mono <= start_sample_mono:
                 continue
 
-            start_sample = int(seg_start * sample_rate) * channels
-            end_sample = min(int(seg_end * sample_rate) * channels, len(target_pcm))
+            start_sample = start_sample_mono * channels
+            end_sample = min(end_sample_mono * channels, len(target_pcm))
             chunk = target_pcm[start_sample:end_sample]
 
             if chunk.size == 0:

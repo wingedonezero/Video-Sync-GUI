@@ -375,7 +375,11 @@ def diagnose_audio_issue(
         return UniformDiagnosis()
 
     times = np.array([c.start_s for c in accepted_chunks])
-    delays = np.array([c.delay_ms for c in accepted_chunks])
+    # Use float raw_delay_ms (not rounded int delay_ms) so DBSCAN noise
+    # points retain sub-ms precision.  Downstream consumers — recovered
+    # cluster mean, PAL drift slope, cluster mean for display — all
+    # benefit; DBSCAN itself is insensitive (eps=20 ms ≫ rounding error).
+    delays = np.array([c.raw_delay_ms for c in accepted_chunks])
 
     # --- Test 1: Check for PAL Drift (Specific Linear Drift) ---
     framerate = _get_video_framerate(video_path, runner, tool_paths)
