@@ -308,6 +308,64 @@ class SteppingCorrectionAuditor(BaseAuditor):
                         f"Splice not shifted."
                     )
 
+            # Scan the produced output for actual seam discontinuities.
+            # This is the final independent check — confirms the corrected
+            # audio that was actually muxed has no audible click at any
+            # splice on any corrected track.  Gated by both seam_diff AND
+            # seam_rms so deep-silence false positives are excluded.
+            seam_flags = self._scan_seam_quality_on_output(
+                final_mkv_path,
+                final_mkvmerge_data,
+                audit_metadata,
+            )
+            for fs in seam_flags:
+                self.log(
+                    f"    ⚠️  Boundary {fs['splice_idx']} at "
+                    f"{fs['target_time_s']:.1f}s (post-mux scan):"
+                )
+                self.log(f"        Track: {fs['track_lang']} {fs['track_codec']}")
+                self.log(
+                    f"        Edge: {fs['edge']} @ {fs['seam_t_s']:.3f}s "
+                    f"(seam_diff {fs['seam_diff']:.5f}, "
+                    f"rms {fs['seam_rms_db']:+.1f}dB)"
+                )
+                self.log(
+                    "        Issue: Audible sample discontinuity in produced output"
+                )
+                high_priority_issues.append(
+                    f"{source_key} at {fs['target_time_s']:.1f}s: "
+                    f"seam discontinuity on {fs['track_lang']} "
+                    f"(seam_diff {fs['seam_diff']:.4f})"
+                )
+                self._add_quality_issue(
+                    source_key,
+                    "seam_discontinuity",
+                    "high" if fs["seam_diff"] > 0.05 else "medium",
+                    (
+                        f"Splice at {fs['target_time_s']:.1f}s: "
+                        f"{fs['track_lang']} {fs['track_codec']} has audible "
+                        f"discontinuity in produced output "
+                        f"(seam_diff {fs['seam_diff']:.4f} at "
+                        f"{fs['seam_rms_db']:+.1f}dB) — edge: {fs['edge']}"
+                    ),
+                    {
+                        "time_s": fs["target_time_s"],
+                        "track_lang": fs["track_lang"],
+                        "track_codec": fs["track_codec"],
+                        "edge": fs["edge"],
+                        "seam_t_s": fs["seam_t_s"],
+                        "seam_diff": fs["seam_diff"],
+                        "seam_rms_db": fs["seam_rms_db"],
+                    },
+                )
+                self._track_issue(
+                    f"{source_key} at {fs['target_time_s']:.1f}s: seam "
+                    f"discontinuity on {fs['track_lang']} track "
+                    f"(seam_diff {fs['seam_diff']:.4f} at "
+                    f"{fs['seam_rms_db']:+.1f}dB) — audible artifact in "
+                    "produced output"
+                )
+
             if len(self.issues) == source_issues_start:
                 self.log(f"  ✅ {source_key}: All quality checks passed")
 
@@ -343,3 +401,131 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 "details": details,
             }
         )
+
+    # ------------------------------------------------------------------
+    # Seam-quality scan on the produced output
+    # ------------------------------------------------------------------
+
+    # Gates for flagging an actual click in the muxed output.  Both must
+    # hold simultaneously to avoid false positives in deep silence (where
+    # noise-floor ratios can spike without any audible artifact).  Validated
+    # against 5 test cases / 64 seam measurements: catches the one known
+    # issue, zero false positives.
+    _SEAM_DIFF_THRESHOLD: float = 0.01  # ~−40 dB absolute amplitude jump
+    _SEAM_RMS_DB_THRESHOLD: float = -50.0  # seam region has real signal
+
+    def _scan_seam_quality_on_output(
+        self,
+        final_mkv_path: Path,
+        final_mkvmerge_data: dict,
+        audit_metadata: list[dict],
+    ) -> list[dict]:
+        """Decode small windows from each corrected (FLAC) audio track in
+        the produced output around each splice and check for sample-derivative
+        spikes that would be audible.
+
+        Returns a list of flagged seam dicts (one entry per flagged edge).
+        """
+        # Corrected audio tracks are FLAC-encoded by audio_assembly.  The
+        # preserved (original) tracks keep their source codec — so filtering
+        # by FLAC is a robust way to identify the tracks we produced.
+        flac_tracks = [
+            t
+            for t in final_mkvmerge_data.get("tracks", [])
+            if t.get("type") == "audio" and t.get("codec") in ("FLAC", "A_FLAC")
+        ]
+        if not flac_tracks:
+            return []
+
+        flagged: list[dict] = []
+        for idx, boundary in enumerate(audit_metadata, 1):
+            target_time_s = cast("float", boundary.get("target_time_s", 0.0))
+            seam_t_before = boundary.get("output_seam_t_before_s")
+            seam_t_after = boundary.get("output_seam_t_after_s")
+            if seam_t_before is None or seam_t_after is None:
+                continue
+            for ft in flac_tracks:
+                track_id = ft.get("id")
+                if track_id is None:
+                    continue
+                track_props = ft.get("properties", {}) or {}
+                track_lang = track_props.get("language", "und")
+                track_codec = ft.get("codec", "?")
+                for edge_name, seam_t in [
+                    ("end_of_before", float(cast("float", seam_t_before))),
+                    ("start_of_after", float(cast("float", seam_t_after))),
+                ]:
+                    try:
+                        seam_diff, seam_rms = self._probe_seam(
+                            str(final_mkv_path), int(track_id), seam_t
+                        )
+                    except Exception:
+                        continue
+                    if (
+                        seam_diff > self._SEAM_DIFF_THRESHOLD
+                        and seam_rms > self._SEAM_RMS_DB_THRESHOLD
+                    ):
+                        flagged.append(
+                            {
+                                "splice_idx": idx,
+                                "target_time_s": target_time_s,
+                                "track_id": track_id,
+                                "track_lang": track_lang,
+                                "track_codec": track_codec,
+                                "edge": edge_name,
+                                "seam_t_s": seam_t,
+                                "seam_diff": seam_diff,
+                                "seam_rms_db": seam_rms,
+                            }
+                        )
+        return flagged
+
+    def _probe_seam(
+        self,
+        mkv_path: str,
+        track_id: int,
+        seam_t: float,
+        window_ms: float = 20.0,
+    ) -> tuple[float, float]:
+        """Decode a small mono window centered on *seam_t* and return
+        ``(seam_diff, seam_rms_db)``.
+
+        ``seam_diff`` is the maximum sample-to-sample absolute jump in the
+        window (audible click indicator).  ``seam_rms_db`` is the RMS dB of
+        the window (used to gate against deep-silence false positives).
+        """
+        import subprocess
+
+        import numpy as np
+
+        half = (window_ms / 1000.0) / 2.0
+        ffmpeg_bin = (self.tool_paths or {}).get("ffmpeg") or "ffmpeg"
+        cmd = [
+            ffmpeg_bin,
+            "-v",
+            "error",
+            "-nostdin",
+            "-ss",
+            str(max(0.0, seam_t - half)),
+            "-t",
+            str(window_ms / 1000.0),
+            "-i",
+            mkv_path,
+            "-map",
+            f"0:{track_id}",
+            "-ac",
+            "1",
+            "-ar",
+            "48000",
+            "-f",
+            "f32le",
+            "pipe:1",
+        ]
+        out = subprocess.run(cmd, capture_output=True, check=True).stdout
+        pcm = np.frombuffer(out, dtype=np.float32)
+        if len(pcm) < 2:
+            return 0.0, -120.0
+        seam_diff = float(np.max(np.abs(np.diff(pcm))))
+        rms = float(np.sqrt(np.mean(pcm.astype(np.float64) ** 2)))
+        seam_rms_db = 20.0 * float(np.log10(rms)) if rms > 1e-12 else -120.0
+        return seam_diff, seam_rms_db

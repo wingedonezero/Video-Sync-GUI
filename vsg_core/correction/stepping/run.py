@@ -315,6 +315,13 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                 boundary_audit: list[dict[str, object]] = []
                 for sp in splice_points:
                     br = sp.boundary_result
+                    # Compute the seam time in OUTPUT (ref) timeline so the
+                    # post-mux auditor can scan the corrected audio there
+                    # for discontinuities (pop detection).
+                    output_seam_t_before_s = (
+                        sp.src2_time_s + sp.delay_before_ms / 1000.0
+                    )
+                    output_seam_t_after_s = sp.src2_time_s + sp.delay_after_ms / 1000.0
                     entry: dict[str, object] = {
                         "target_time_s": sp.src2_time_s,
                         "delay_change_ms": sp.correction_ms,
@@ -335,6 +342,12 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                         "multitrack_residual": sp.snap_metadata.get(
                             "multitrack_residual"
                         ),
+                        # Output (ref) timeline positions of the seam edges.
+                        # The post-mux auditor decodes a small window from
+                        # the corrected track around these times to scan for
+                        # actual sample discontinuity in the produced audio.
+                        "output_seam_t_before_s": output_seam_t_before_s,
+                        "output_seam_t_after_s": output_seam_t_after_s,
                     }
                     boundary_audit.append(entry)
                 ctx.segment_flags[analysis_track_key]["audit_metadata"] = boundary_audit
