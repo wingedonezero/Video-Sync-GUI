@@ -71,7 +71,9 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 near_transient = cast("bool", boundary.get("near_transient", False))
                 avg_db = cast("float", boundary.get("avg_db", 0))
                 no_silence_found = cast("bool", boundary.get("no_silence_found", False))
-                video_snap_skipped = cast("bool", boundary.get("video_snap_skipped", False))
+                video_snap_skipped = cast(
+                    "bool", boundary.get("video_snap_skipped", False)
+                )
 
                 # Determine action type
                 # When delay increases (positive): target is falling behind → INSERT silence
@@ -234,6 +236,77 @@ class SteppingCorrectionAuditor(BaseAuditor):
                         self.log(
                             "      Note: Video snap skipped to maintain silence guarantee"
                         )
+
+                # Independent check: Multi-track residual.
+                # JPN analysis found silence at the chosen splice but a
+                # sibling audio track (e.g. ENG dub on a DVD) has active
+                # signal at that exact sample.  Splice was NOT shifted —
+                # this surfaces the residual so the user knows to listen
+                # for a possible artifact on the affected track.
+                mt = boundary.get("multitrack_residual")
+                if isinstance(mt, dict):
+                    loud_track = cast("str", mt.get("loudest_track", "?"))
+                    loud_db = cast("float", mt.get("loudest_db", 0.0))
+                    alt_t = cast("float", mt.get("best_alternative_t_s", target_time_s))
+                    alt_db = cast("float", mt.get("best_alternative_worst_db", loud_db))
+                    shift_ms = cast("float", mt.get("shift_ms_would_be", 0.0))
+                    improvement_db = cast(
+                        "float", mt.get("improvement_db_would_be", 0.0)
+                    )
+                    # Severity: high if loud_track is clearly audible
+                    # signal (> -30 dB), medium otherwise (-30 to -45 dB).
+                    severity = "high" if loud_db > -30.0 else "medium"
+                    self.log(
+                        f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s (multi-track):"
+                    )
+                    self.log(
+                        f"        {loud_track} at {loud_db:+.1f}dB at chosen "
+                        f"sample (JPN was silent, sibling track was not)"
+                    )
+                    self.log(
+                        f"        Quietest alt in zone @{alt_t:.3f}s "
+                        f"(shift {shift_ms:+.0f}ms, worst track "
+                        f"{alt_db:+.1f}dB, "
+                        f"improvement {improvement_db:+.1f}dB)"
+                    )
+                    self.log(
+                        "        → Splice NOT shifted; possible artifact "
+                        f"on {loud_track} only"
+                    )
+                    high_priority_issues.append(
+                        f"{source_key} at {target_time_s:.1f}s: "
+                        f"multi-track residual ({loud_track} at "
+                        f"{loud_db:+.1f}dB)"
+                    )
+                    self._add_quality_issue(
+                        source_key,
+                        "multitrack_residual",
+                        severity,
+                        (
+                            f"Splice at {target_time_s:.1f}s: "
+                            f"{loud_track} has {loud_db:+.1f}dB residual "
+                            f"at chosen sample. A {shift_ms:+.0f}ms shift "
+                            f"inside the silence zone would reduce worst-track "
+                            f"RMS to {alt_db:+.1f}dB."
+                        ),
+                        {
+                            "time_s": target_time_s,
+                            "loudest_track": loud_track,
+                            "loudest_db": loud_db,
+                            "best_alternative_t_s": alt_t,
+                            "best_alternative_worst_db": alt_db,
+                            "shift_ms_would_be": shift_ms,
+                            "improvement_db_would_be": improvement_db,
+                            "per_track_db_at_splice": mt.get("per_track_db_at_splice"),
+                        },
+                    )
+                    self._track_issue(
+                        f"{source_key} at {target_time_s:.1f}s: "
+                        f"multi-track residual — {loud_track} at "
+                        f"{loud_db:+.1f}dB while JPN was silent. Possible "
+                        f"audible artifact on {loud_track} only. "
+                        f"Splice not shifted."
+                    )
 
             if len(self.issues) == source_issues_start:
                 self.log(f"  ✅ {source_key}: All quality checks passed")

@@ -328,6 +328,13 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                         "video_snap_skipped": sp.snap_metadata.get(
                             "video_snap_skipped", False
                         ),
+                        # Multi-track residual: present only when the chosen
+                        # splice sample lands above -45 dB on any non-analysis
+                        # audio track.  Splice was not shifted; this is for
+                        # the auditor + final report.
+                        "multitrack_residual": sp.snap_metadata.get(
+                            "multitrack_residual"
+                        ),
                     }
                     boundary_audit.append(entry)
                 ctx.segment_flags[analysis_track_key]["audit_metadata"] = boundary_audit
