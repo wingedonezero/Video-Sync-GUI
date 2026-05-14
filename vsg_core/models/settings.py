@@ -194,6 +194,21 @@ class AppSettings(BaseModel):
     video_verified_debug_report: bool = False
 
     # =========================================================================
+    # Bitmap Subtitle Timing (PGS, future VobSub)
+    # =========================================================================
+    # When True, the PGS shifter checks each event endpoint against the
+    # target video's frame grid and rewrites drifted endpoints to the
+    # nearest integer ms inside the target frame's window. Same model as
+    # text-sub frame_audit. Disable to mirror mkvmerge's --sync output
+    # byte-for-byte (uniform shift, no per-event correction).
+    pgs_frame_align_correction: bool = True
+
+    # When True, writes a per-event detail report for each bitmap track
+    # to ``debug_paths.bitmap_timing_dir`` after the shifter runs.
+    # Parity with ``video_verified_frame_audit``.
+    bitmap_timing_debug_report: bool = False
+
+    # =========================================================================
     # Analysis/Correlation Settings
     # =========================================================================
     source_separation_mode: SourceSeparationModeStr = "none"

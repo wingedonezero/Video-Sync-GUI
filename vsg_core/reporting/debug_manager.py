@@ -104,6 +104,9 @@ class DebugOutputManager:
         if paths.visual_verify_dir:
             paths.visual_verify_dir.mkdir(parents=True, exist_ok=True)
 
+        if paths.bitmap_timing_dir:
+            paths.bitmap_timing_dir.mkdir(parents=True, exist_ok=True)
+
     def finalize_batch(self, log: Callable[[str], None]) -> None:
         """Finalize batch processing by zipping debug folders.
 

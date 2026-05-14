@@ -11,20 +11,25 @@ Tier model:
 * **Tier 1 (always)** — sanity checks that apply regardless of where
   the delay came from: dropped events, zero/negative/excessive
   durations, monotonicity, video-duration overflow.
-* **Tier 2 (when fps is known)** — distance of each event boundary
-  from the nearest frame center / boundary on the target video's
-  frame grid. Always reported; the audit message tags it as
-  "corrective" when the delay was frame-derived (VV) and
-  "informational" when it came from audio correlation.
+* **Tier 2 (when fps is known)** — frame-alignment check using the
+  same model as text-sub ``frame_audit``: for each event endpoint,
+  compute the source frame ``F_src = floor(source_pts / period)``,
+  the expected output frame ``F_target = F_src + frame_shift``, and
+  the actual output frame ``F_actual = floor(shifted_pts / period)``.
+  An event is "correct" iff ``F_actual == F_target``. Drifted events
+  may be fixed by the shifter (it rewrites those segment PTSes to the
+  nearest integer ms inside ``F_target``'s window).
 
-No corrections are applied to the file from this module. The
-shifter has already produced the new bytes; this is read-only
-analysis on the resulting event list.
+No corrections are applied to the file from this module — the
+correction is performed by the shifter and the resulting counts are
+fed in here for reporting. This file only contains the math + result
+shape so the auditor and shifter agree on terminology.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from typing import Literal
 
 # Per-event sanity bounds (ms). Bitmap subs longer than 60 s or shorter
@@ -33,10 +38,9 @@ from typing import Literal
 MAX_REASONABLE_DURATION_MS = 60_000
 MIN_REASONABLE_DURATION_MS = 100
 
-# Default frame-alignment tolerance. Half a millisecond is well below
-# Matroska's 1 ms default timestamp scale, so anything outside this
-# was either a fractional-frame source or a non-frame-aligned shift.
-DEFAULT_FRAME_TOLERANCE_MS = 0.5
+# Tiny floor-bias to ensure that PTS == N * period maps to frame N
+# rather than frame N-1 due to floating-point drift.
+FRAME_EPSILON_MS = 1e-6
 
 
 DelaySourceKind = Literal[
@@ -56,6 +60,22 @@ class BitmapEvent:
     start_ms: float
     end_ms: float | None  # ``None`` = open-ended trailing event (no terminator)
     source_tag: str = ""  # short identifier for logs (e.g. "pcs#42")
+
+
+@dataclass(frozen=True, slots=True)
+class EndpointAudit:
+    """Per-endpoint frame-alignment record (start or end of one event)."""
+
+    event_index: int
+    role: Literal["start", "end"]
+    source_ms: float  # pre-shift PTS
+    shifted_ms: float  # after uniform shift, before per-event correction
+    final_ms: float  # after correction (= shifted_ms when no fix needed)
+    source_frame: int  # F_src
+    target_frame: int  # F_src + frame_shift
+    actual_frame_pre_fix: int  # F_actual before correction
+    final_frame: int  # F_actual after correction (should equal target_frame)
+    correction_ms: int  # final_ms - shifted_ms (typically 0, ±1, or ± up to period-1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,29 +108,37 @@ class Tier1SanityResult:
 
 @dataclass(frozen=True, slots=True)
 class Tier2FrameAlignmentResult:
-    """Tier 2 — distance from each event boundary to the nearest frame edge."""
+    """Tier 2 — frame-alignment + correction outcome.
+
+    All counts refer to *final* state: ``events_*_correct`` is the count
+    of endpoints that landed on ``F_target`` after any per-event
+    correction was applied. ``corrections_*_applied`` reports how many
+    needed a nudge to get there.
+    """
 
     target_fps: float
     frame_period_ms: float
-    tolerance_ms: float
+    frame_shift: int  # round(delay_ms / period); preserved frame translation
     starts_total: int
-    starts_aligned: int
+    starts_correct: int  # F_actual == F_target after correction
     ends_total: int  # closed events only
-    ends_aligned: int
-    mean_start_distance_ms: float
-    max_start_distance_ms: float
-    p95_start_distance_ms: float
-    mean_end_distance_ms: float
-    max_end_distance_ms: float
-    p95_end_distance_ms: float
+    ends_correct: int
+    corrections_start_applied: int
+    corrections_end_applied: int
+    max_start_correction_ms: int
+    max_end_correction_ms: int
+    duration_changes_count: int  # events whose duration in ms changed due to fixes
+    max_duration_delta_ms: int  # absolute max |new_dur - old_dur|
+    unfixable_count: int  # events where correction couldn't land target_frame
+    endpoints: tuple[EndpointAudit, ...] = field(default_factory=tuple)
 
     @property
-    def all_starts_aligned(self) -> bool:
-        return self.starts_total > 0 and self.starts_aligned == self.starts_total
+    def all_starts_correct(self) -> bool:
+        return self.starts_total > 0 and self.starts_correct == self.starts_total
 
     @property
-    def all_ends_aligned(self) -> bool:
-        return self.ends_total in (0, self.ends_aligned)
+    def all_ends_correct(self) -> bool:
+        return self.ends_total in (0, self.ends_correct)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +153,7 @@ class BitmapAuditResult:
     target_fps: float | None
     tier1: Tier1SanityResult
     tier2: Tier2FrameAlignmentResult | None
+    frame_align_enabled: bool = False  # was the correction step requested?
 
 
 def tier1_sanity(
@@ -179,70 +208,55 @@ def tier1_sanity(
     )
 
 
-def _percentile(values: list[float], pct: float) -> float:
-    """Compute a percentile without importing numpy — fine for hundreds of events."""
-    if not values:
-        return 0.0
-    s = sorted(values)
-    idx = int(round((pct / 100.0) * (len(s) - 1)))
-    return s[max(0, min(len(s) - 1, idx))]
+# ----------------------------------------------------------------------
+# Frame-math primitives shared with the shifter
+# ----------------------------------------------------------------------
 
 
-def tier2_frame_alignment(
-    events: list[BitmapEvent],
-    target_fps: float,
-    *,
-    tolerance_ms: float = DEFAULT_FRAME_TOLERANCE_MS,
-) -> Tier2FrameAlignmentResult:
-    """Compute per-boundary distance from the nearest frame center.
+def frame_of(ts_ms: float, frame_period_ms: float) -> int:
+    """Return the video frame index that contains ``ts_ms``.
 
-    The reported distance is ``ms - round(ms / frame_period) * frame_period``
-    in absolute value — i.e., how far each event boundary sits from the
-    nearest integer multiple of the frame period. For fps=23.976
-    (frame_period = 41.708 ms), an event starting at exactly 1001 ms
-    reports distance 0; an event at 1002 ms reports distance 0.292 ms
-    (1002 mod 41.708 = 41.416, nearer the next frame).
+    Uses ``floor((ts_ms + ε) / period)``. The epsilon avoids snapping
+    a PTS that lands *exactly* on a frame start to the previous frame
+    due to float rounding.
     """
-    if target_fps <= 0:
-        raise ValueError("target_fps must be > 0")
-
-    frame_period = 1000.0 / target_fps
-
-    start_distances: list[float] = []
-    end_distances: list[float] = []
-
-    for ev in events:
-        s_dist = _distance_to_nearest_frame(ev.start_ms, frame_period)
-        start_distances.append(s_dist)
-        if ev.end_ms is not None:
-            end_distances.append(_distance_to_nearest_frame(ev.end_ms, frame_period))
-
-    starts_aligned = sum(1 for d in start_distances if d <= tolerance_ms)
-    ends_aligned = sum(1 for d in end_distances if d <= tolerance_ms)
-
-    return Tier2FrameAlignmentResult(
-        target_fps=target_fps,
-        frame_period_ms=frame_period,
-        tolerance_ms=tolerance_ms,
-        starts_total=len(start_distances),
-        starts_aligned=starts_aligned,
-        ends_total=len(end_distances),
-        ends_aligned=ends_aligned,
-        mean_start_distance_ms=(
-            sum(start_distances) / len(start_distances) if start_distances else 0.0
-        ),
-        max_start_distance_ms=max(start_distances, default=0.0),
-        p95_start_distance_ms=_percentile(start_distances, 95.0),
-        mean_end_distance_ms=(
-            sum(end_distances) / len(end_distances) if end_distances else 0.0
-        ),
-        max_end_distance_ms=max(end_distances, default=0.0),
-        p95_end_distance_ms=_percentile(end_distances, 95.0),
-    )
+    return int((ts_ms + FRAME_EPSILON_MS) / frame_period_ms)
 
 
-def _distance_to_nearest_frame(ts_ms: float, frame_period_ms: float) -> float:
-    """Absolute distance from ``ts_ms`` to the nearest integer multiple of frame_period_ms."""
-    frame_idx = round(ts_ms / frame_period_ms)
-    nearest = frame_idx * frame_period_ms
-    return abs(ts_ms - nearest)
+def integer_ms_window_for_frame(
+    target_frame: int, frame_period_ms: float
+) -> tuple[int, int]:
+    """Return ``(lo_ms, hi_ms)`` — the inclusive integer-ms range
+    whose values all satisfy ``frame_of(ms, period) == target_frame``.
+
+    For a typical fps (period > 1 ms) this always returns a non-empty
+    range. Callers that pick an ms in this range are guaranteed to land
+    in ``target_frame``.
+    """
+    frame_start_ms = target_frame * frame_period_ms
+    frame_end_ms = (target_frame + 1) * frame_period_ms
+    lo = int(math.ceil(frame_start_ms - FRAME_EPSILON_MS))
+    # Largest integer ms still strictly inside [frame_start, frame_end).
+    # `frame_end - ε` then floor → ceil(... - 1) catches the boundary
+    # case where frame_end is itself an integer ms (which belongs to the
+    # next frame, not this one).
+    hi = int(math.ceil(frame_end_ms - FRAME_EPSILON_MS)) - 1
+    return lo, hi
+
+
+def pick_integer_ms_in_frame(
+    desired_ms: float, target_frame: int, frame_period_ms: float
+) -> int | None:
+    """Pick the integer ms inside ``target_frame``'s window closest to ``desired_ms``.
+
+    Returns ``None`` if the frame contains no integer ms (only possible
+    for sub-1ms frame periods, i.e. fps > 1000 — not a real case).
+    """
+    lo, hi = integer_ms_window_for_frame(target_frame, frame_period_ms)
+    if lo > hi:
+        return None
+    if desired_ms <= lo:
+        return lo
+    if desired_ms >= hi:
+        return hi
+    return int(round(desired_ms))

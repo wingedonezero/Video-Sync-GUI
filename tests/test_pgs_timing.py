@@ -13,11 +13,17 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from vsg_core.subtitles.operations.bitmap_audit import (  # noqa: E402
+    frame_of,
+    integer_ms_window_for_frame,
+    pick_integer_ms_in_frame,
+)
 from vsg_core.subtitles.operations.pgs_timing import (  # noqa: E402
     PTS_CLOCK_HZ,
     SEG_END,
     SEG_PCS,
     SEG_WDS,
+    TICKS_PER_MS,
     apply_constant_shift,
     extract_events,
     walk_segments,
@@ -28,6 +34,12 @@ FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "pgs_small.sup"
 
 def _ms_to_ticks(ms: int) -> int:
     return ms * (PTS_CLOCK_HZ // 1000)
+
+
+# Exact NTSC-film fps: ffprobe/MediaInfo report this as 24000/1001, not
+# 23.976. Using the rational value avoids FP error that would put
+# events at frame boundaries one frame early.
+FPS_NTSC_FILM = 24000.0 / 1001.0  # ≈ 23.976023976
 
 
 def test_walk_segments_recovers_known_count_and_types() -> None:
@@ -156,3 +168,124 @@ def test_ms_helper_arithmetic() -> None:
     assert _ms_to_ticks(1) == 90
     assert _ms_to_ticks(1001) == 90_090
     assert _ms_to_ticks(0) == 0
+
+
+# ----------------------------------------------------------------------
+# Frame-alignment correction
+# ----------------------------------------------------------------------
+
+
+def test_frame_math_primitives_23976() -> None:
+    """At NTSC-film fps every 24 frames is an integer-ms boundary."""
+    period = 1000.0 / FPS_NTSC_FILM
+    # Frame 24 starts at exactly 1001.0 ms — boundary case
+    assert frame_of(1001.0, period) == 24
+    # Frame 23 ends just before 1001.0; 1000 ms still in frame 23
+    assert frame_of(1000.0, period) == 23
+    # Frame 24 spans integer ms 1001..1042 inclusive
+    lo, hi = integer_ms_window_for_frame(24, period)
+    assert lo == 1001
+    assert hi == 1042
+    # Picking closest int ms in frame 24 for a desired 1002 ms target
+    assert pick_integer_ms_in_frame(1002.0, 24, period) == 1002
+    # If desired is outside the frame, clamp to nearest endpoint
+    assert pick_integer_ms_in_frame(999.0, 24, period) == 1001
+    assert pick_integer_ms_in_frame(1500.0, 24, period) == 1042
+
+
+def test_apply_constant_shift_integer_frame_no_corrections() -> None:
+    """+1001 ms at 23.976 fps (24000/1001 exact) = exactly +24 frames — no events should drift."""
+    data = FIXTURE.read_bytes()
+    _, result = apply_constant_shift(
+        data, 1001.0, target_fps=FPS_NTSC_FILM, frame_align=True
+    )
+    assert result.tier2 is not None
+    t2 = result.tier2
+    assert t2.frame_shift == 24
+    # All events land on F_src + 24, by construction.
+    assert t2.starts_total > 0
+    assert t2.starts_correct == t2.starts_total
+    assert t2.ends_correct == t2.ends_total
+    assert t2.corrections_start_applied == 0
+    assert t2.corrections_end_applied == 0
+    assert t2.unfixable_count == 0
+
+
+def test_apply_constant_shift_integer_frame_byte_identical() -> None:
+    """Integer-frame shift with frame_align=True must produce the same
+    bytes as frame_align=False — no corrections means no rewrites."""
+    data = FIXTURE.read_bytes()
+    out_uniform, _ = apply_constant_shift(data, 1001.0, frame_align=False)
+    out_aligned, _ = apply_constant_shift(
+        data, 1001.0, target_fps=FPS_NTSC_FILM, frame_align=True
+    )
+    assert out_uniform == out_aligned
+
+
+def test_apply_constant_shift_non_integer_frame_applies_corrections() -> None:
+    """A non-integer-frame shift (here +1003 ms ≈ 24.05 frames at 23.976)
+    should detect drift on some events and correct them back to
+    F_src + 24."""
+    data = FIXTURE.read_bytes()
+    out, result = apply_constant_shift(
+        data, 1003.0, target_fps=FPS_NTSC_FILM, frame_align=True
+    )
+    assert result.tier2 is not None
+    t2 = result.tier2
+    # 1003 / period(23.976) = ~24.048 → frame_shift = 24
+    assert t2.frame_shift == 24
+    # After correction, every endpoint must be on its target frame.
+    assert t2.starts_correct == t2.starts_total
+    assert t2.ends_correct == t2.ends_total
+    assert t2.unfixable_count == 0
+    # Output bytes must still parse as PGS (segment count preserved).
+    src_segs, _ = walk_segments(data)
+    out_segs, _ = walk_segments(out)
+    assert len(out_segs) == len(src_segs)
+
+
+def test_apply_constant_shift_frame_align_preserves_no_fps_path() -> None:
+    """frame_align=True but target_fps=None → no Tier 2, behaves as uniform."""
+    data = FIXTURE.read_bytes()
+    out_uniform, _ = apply_constant_shift(data, 1001.0)
+    out_skipped, res_skipped = apply_constant_shift(
+        data, 1001.0, target_fps=None, frame_align=True
+    )
+    assert out_uniform == out_skipped
+    assert res_skipped.tier2 is None
+
+
+def test_correction_keeps_byte_count_and_segment_order() -> None:
+    """Per-event corrections must not change segment count or types."""
+    data = FIXTURE.read_bytes()
+    src_segs, _ = walk_segments(data)
+    out, _ = apply_constant_shift(
+        data, 1003.0, target_fps=FPS_NTSC_FILM, frame_align=True
+    )
+    out_segs, _ = walk_segments(out)
+    assert len(out_segs) == len(src_segs)
+    assert [s.seg_type for s in out_segs] == [s.seg_type for s in src_segs]
+
+
+def test_endpoint_audit_records_emitted() -> None:
+    """Tier 2 must emit one EndpointAudit per closed-event endpoint
+    (start + end)."""
+    data = FIXTURE.read_bytes()
+    _, result = apply_constant_shift(
+        data, 1001.0, target_fps=FPS_NTSC_FILM, frame_align=True
+    )
+    assert result.tier2 is not None
+    eps = result.tier2.endpoints
+    # Fixture has 1 closed display event → 1 start + 1 end = 2 endpoints.
+    assert len(eps) == 2
+    # Frame numbers move by +24 between source and target
+    for ep in eps:
+        assert ep.target_frame == ep.source_frame + 24
+        assert ep.final_frame == ep.target_frame
+        assert ep.correction_ms == 0
+
+
+def test_ticks_per_ms_constant() -> None:
+    """Sanity: 90 ticks per ms at 90 kHz."""
+    assert TICKS_PER_MS == 90
+    assert PTS_CLOCK_HZ == 90_000

@@ -57,17 +57,25 @@ class DebugOutputPaths:
     debug_root: Path  # output_dir/debug/
 
     # Feature-specific paths
-    ocr_debug_dir: Path | None  # debug/ocr_debug/{job_name}/ (batch) or debug/ocr_debug/ (single)
+    ocr_debug_dir: (
+        Path | None
+    )  # debug/ocr_debug/{job_name}/ (batch) or debug/ocr_debug/ (single)
     frame_audit_dir: Path | None  # debug/frame_audit/
     visual_verify_dir: Path | None  # debug/visual_verify/
     sliding_verify_dir: Path | None  # debug/sliding_verify/
+    bitmap_timing_dir: Path | None = None  # debug/bitmap_timing/
 
     def should_create_debug_root(self) -> bool:
         """Check if any debug feature is enabled."""
-        return any([
-            self.ocr_debug_dir, self.frame_audit_dir,
-            self.visual_verify_dir, self.sliding_verify_dir,
-        ])
+        return any(
+            [
+                self.ocr_debug_dir,
+                self.frame_audit_dir,
+                self.visual_verify_dir,
+                self.sliding_verify_dir,
+                self.bitmap_timing_dir,
+            ]
+        )
 
     def get_enabled_features(self) -> list[str]:
         """Get list of enabled debug feature names."""
@@ -80,6 +88,8 @@ class DebugOutputPaths:
             features.append("visual_verify")
         if self.sliding_verify_dir:
             features.append("sliding_verify")
+        if self.bitmap_timing_dir:
+            features.append("bitmap_timing")
         return features
 
 
@@ -114,9 +124,7 @@ class DebugPathResolver:
         ocr_enabled = settings.ocr_debug_output
         frame_audit_enabled = settings.video_verified_frame_audit
         visual_verify_enabled = settings.video_verified_visual_verify
-        sliding_verify_enabled = getattr(
-            settings, "video_verified_debug_report", False
-        )
+        sliding_verify_enabled = getattr(settings, "video_verified_debug_report", False)
 
         # Resolve OCR debug path
         ocr_debug_dir = None
@@ -145,6 +153,12 @@ class DebugPathResolver:
         if sliding_verify_enabled:
             sliding_verify_dir = debug_root / "sliding_verify"
 
+        # Resolve bitmap timing detail path
+        bitmap_timing_enabled = getattr(settings, "bitmap_timing_debug_report", False)
+        bitmap_timing_dir = None
+        if bitmap_timing_enabled:
+            bitmap_timing_dir = debug_root / "bitmap_timing"
+
         return DebugOutputPaths(
             output_dir=output_dir,
             job_name=job_name,
@@ -154,6 +168,7 @@ class DebugPathResolver:
             frame_audit_dir=frame_audit_dir,
             visual_verify_dir=visual_verify_dir,
             sliding_verify_dir=sliding_verify_dir,
+            bitmap_timing_dir=bitmap_timing_dir,
         )
 
     @staticmethod

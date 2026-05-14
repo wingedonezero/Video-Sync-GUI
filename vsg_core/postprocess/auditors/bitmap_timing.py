@@ -8,11 +8,11 @@ Reads ``ctx.bitmap_audit_results`` (populated by the shifter in
 * Tier 1 (sanity) — events dropped, clamped, overflowing, duration
   anomalies, monotonicity. Always reported. Non-zero counts surface
   as warnings in the batch report.
-* Tier 2 (frame alignment) — distance of each event boundary from
-  the nearest frame center, computed against Source 1's fps. Tagged
-  as "corrective signal" when the delay came from VV frame matching,
-  "informational" when it came from audio correlation (gated MPEG-2
-  sources, time-based mode).
+* Tier 2 (frame alignment) — same model as text-sub frame_audit:
+  ``F_actual == F_target`` per endpoint, where
+  ``F_target = F_src + round(delay_ms / period)``. Includes counts of
+  applied per-event corrections and any duration deltas that the
+  corrections introduced.
 
 Today's pipeline reports ``No frame audit results available -
 skipping`` for bitmap subs because the text-only ``FrameAuditAuditor``
@@ -53,7 +53,6 @@ class BitmapTimingAuditor(BaseAuditor):
         t1 = result.tier1
         t2 = result.tier2
 
-        # Header line
         kind_label = {
             "vv-frame": "video-verified (frame-derived)",
             "vv-correlation-fallback": "video-verified fallback (correlation)",
@@ -104,33 +103,48 @@ class BitmapTimingAuditor(BaseAuditor):
                 "chronological ordering (likely encoder bug, pre-existing)"
             )
 
-        # Tier 2: frame alignment
+        # Tier 2: frame alignment (text-sub-style)
         if t2 is None:
-            self.log("     Tier 2 (frame alignment): skipped (no target fps)")
+            if result.frame_align_enabled:
+                self.log(
+                    "     Tier 2 (frame alignment): skipped (shifter returned no result)"
+                )
+            else:
+                self.log(
+                    "     Tier 2 (frame alignment): skipped (target fps unavailable)"
+                )
             return
 
         is_corrective = result.delay_source_kind == "vv-frame"
         tag = "corrective" if is_corrective else "informational"
-        start_pct = (
-            (100.0 * t2.starts_aligned / t2.starts_total) if t2.starts_total else 0.0
-        )
-        end_pct = (100.0 * t2.ends_aligned / t2.ends_total) if t2.ends_total else 0.0
         self.log(
             f"     Tier 2 (frame alignment, {tag}): "
-            f"target {t2.target_fps:.3f} fps, frame period {t2.frame_period_ms:.3f} ms, "
-            f"tol {t2.tolerance_ms:.2f} ms"
+            f"target {t2.target_fps:.3f} fps, "
+            f"frame period {t2.frame_period_ms:.3f} ms, "
+            f"frame_shift {t2.frame_shift:+d} frame(s)"
+        )
+        starts_pct = (
+            100.0 * t2.starts_correct / t2.starts_total if t2.starts_total else 0.0
+        )
+        ends_pct = 100.0 * t2.ends_correct / t2.ends_total if t2.ends_total else 0.0
+        self.log(
+            f"       Starts on target frame: {t2.starts_correct}/{t2.starts_total} "
+            f"({starts_pct:.1f}%) — {t2.corrections_start_applied} correction(s) "
+            f"applied, max ±{t2.max_start_correction_ms} ms"
         )
         self.log(
-            f"       Starts aligned: {t2.starts_aligned}/{t2.starts_total} "
-            f"({start_pct:.1f}%) "
-            f"— mean {t2.mean_start_distance_ms:.3f} ms, "
-            f"P95 {t2.p95_start_distance_ms:.3f} ms, "
-            f"max {t2.max_start_distance_ms:.3f} ms"
+            f"       Ends   on target frame: {t2.ends_correct}/{t2.ends_total} "
+            f"({ends_pct:.1f}%) — {t2.corrections_end_applied} correction(s) "
+            f"applied, max ±{t2.max_end_correction_ms} ms"
         )
-        self.log(
-            f"       Ends aligned:   {t2.ends_aligned}/{t2.ends_total} "
-            f"({end_pct:.1f}%) "
-            f"— mean {t2.mean_end_distance_ms:.3f} ms, "
-            f"P95 {t2.p95_end_distance_ms:.3f} ms, "
-            f"max {t2.max_end_distance_ms:.3f} ms"
-        )
+        if t2.duration_changes_count > 0:
+            self.log(
+                f"       Duration changes from corrections: "
+                f"{t2.duration_changes_count} event(s), "
+                f"max ±{t2.max_duration_delta_ms} ms"
+            )
+        if t2.unfixable_count > 0:
+            self._report(
+                f"{audit_key}: {t2.unfixable_count} endpoint(s) couldn't be "
+                "frame-aligned (impossible at this fps — should not happen)"
+            )
