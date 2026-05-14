@@ -1837,27 +1837,28 @@ class SubtitleSyncTab(QWidget):
         bm_group = QGroupBox("Bitmap Subtitle Timing (PGS, VobSub)")
         bm_layout = QFormLayout(bm_group)
 
-        self.widgets["pgs_frame_align_correction"] = QCheckBox()
-        self.widgets["pgs_frame_align_correction"].setChecked(True)
-        self.widgets["pgs_frame_align_correction"].setToolTip(
-            "Snap drifted bitmap subtitle events to their target video frame:\n\n"
-            "After applying the constant shift (audio correlation or\n"
-            "video-verified offset), each event endpoint is checked against\n"
-            "the source's frame grid. If an endpoint would now render on\n"
-            "the wrong frame (only happens when the shift isn't an exact\n"
-            "integer-frame multiple of the target's frame period), the\n"
-            "PTS is rewritten to the closest integer ms inside the\n"
-            "intended frame.\n\n"
-            "Mirrors text-sub frame_audit's surgical-rounding behavior.\n"
-            "For integer-frame shifts (e.g. +1001 ms at 23.976 fps =\n"
-            "+24 frames exact) nothing drifts and no corrections are\n"
-            "applied — output is byte-identical to mkvmerge --sync.\n\n"
-            "Disable to mirror mkvmerge byte-for-byte even when the shift\n"
-            "isn't frame-quantized."
+        self.widgets["pgs_frame_alignment_audit"] = QCheckBox()
+        self.widgets["pgs_frame_alignment_audit"].setChecked(True)
+        self.widgets["pgs_frame_alignment_audit"].setToolTip(
+            "Run a read-only frame-alignment audit on PGS subtitles:\n\n"
+            "After applying the uniform shift (matching mkvmerge --sync\n"
+            "byte-for-byte), each event endpoint is checked against the\n"
+            "target video's frame grid. The audit reports whether the\n"
+            "event lands on its expected frame (F_src + frame_shift) and,\n"
+            "if not, by how many ms it drifted.\n\n"
+            "No bytes are ever rewritten based on this audit — the .sup\n"
+            "output is identical to what mkvmerge --sync would produce.\n"
+            "The audit only adds visibility.\n\n"
+            "For 23.976 fps content with 24-frame-multiple shifts (the\n"
+            "common Blu-ray case) drift is mathematically impossible.\n"
+            "For 29.97 fps DVDs or non-integer-frame correlation\n"
+            "shifts, a handful of events near frame boundaries may show\n"
+            "as drifted — that's the same drift mkvmerge has always\n"
+            "produced silently."
         )
         bm_layout.addRow(
-            "Frame-Align Correction:",
-            self.widgets["pgs_frame_align_correction"],
+            "Frame-Alignment Audit:",
+            self.widgets["pgs_frame_alignment_audit"],
         )
 
         self.widgets["bitmap_timing_debug_report"] = QCheckBox()

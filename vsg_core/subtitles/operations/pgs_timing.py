@@ -253,15 +253,13 @@ def _endpoint_audit(
     period_ms: float,
     frame_shift: int,
 ) -> EndpointAudit:
-    """Compute the audit record + correction for one event endpoint.
+    """Compute the read-only audit record for one event endpoint.
 
-    Matches text-sub ``frame_audit`` semantics:
-    * ``F_src`` = floor(source_pts / period)
-    * ``F_target`` = F_src + frame_shift
-    * ``F_actual`` = floor(shifted_pts / period)
-    * If actual != target, find the integer ms inside ``F_target``'s
-      window closest to ``shifted_pts`` and report that as the
-      correction.
+    Matches text-sub ``frame_audit`` semantics for the frame-of math,
+    but does not return a value to apply — the shifter writes the
+    uniform-shifted PTS unchanged. ``would_be_correction_ms`` reports
+    the minimum integer-ms nudge that would re-align this endpoint to
+    ``F_target`` for diagnostic visibility.
     """
     source_ms = source_pts_ticks / TICKS_PER_MS
     shifted_ms_float = source_ms + applied_ms
@@ -271,26 +269,21 @@ def _endpoint_audit(
     f_src = frame_of(source_ms, period_ms)
     f_target = f_src + frame_shift
     f_actual = frame_of(shifted_ms_float, period_ms)
-    correction_ms = 0
-    final_ms = shifted_ms_float
-    final_frame = f_actual
+    would_be_correction_ms = 0
     if f_actual != f_target:
         new_int_ms = pick_integer_ms_in_frame(shifted_ms_float, f_target, period_ms)
         if new_int_ms is not None:
-            correction_ms = new_int_ms - int(round(shifted_ms_float))
-            final_ms = float(new_int_ms)
-            final_frame = frame_of(final_ms, period_ms)
+            would_be_correction_ms = new_int_ms - int(round(shifted_ms_float))
     return EndpointAudit(
         event_index=event_index,
         role=role,  # type: ignore[arg-type]  # Literal narrowed by caller
         source_ms=source_ms,
         shifted_ms=shifted_ms_float,
-        final_ms=final_ms,
         source_frame=f_src,
         target_frame=f_target,
-        actual_frame_pre_fix=f_actual,
-        final_frame=final_frame,
-        correction_ms=correction_ms,
+        actual_frame=f_actual,
+        on_target=(f_actual == f_target),
+        would_be_correction_ms=would_be_correction_ms,
     )
 
 
@@ -299,11 +292,17 @@ def apply_constant_shift(
     delay_ms: float,
     *,
     target_fps: float | None = None,
-    frame_align: bool = False,
+    frame_alignment_audit: bool = False,
     drop_negative: bool = True,
     log: Callable[[str], None] | None = None,
 ) -> tuple[bytes, PgsShiftResult]:
     """Rewrite every segment's PTS by ``round(delay_ms)`` ms.
+
+    The shift is always uniform — every segment's PTS receives exactly
+    ``round(delay_ms)`` ms. This matches mkvmerge ``--sync 0:<ms>``
+    byte-for-byte (modulo the negative-shift drop policy). Intra-event
+    timing (palette updates, partial composition refreshes) is
+    preserved in lockstep with display start / end by construction.
 
     Parameters
     ----------
@@ -315,12 +314,12 @@ def apply_constant_shift(
         1 ms timestamp scale).
     target_fps
         Target video frame rate. When set together with
-        ``frame_align=True``, the shifter additionally checks that each
-        event endpoint lands on its source frame plus ``frame_shift``,
-        and rewrites drifted endpoints to integer ms inside the target
-        frame's window. ``None`` skips the alignment audit entirely.
-    frame_align
-        Enable per-event frame-alignment corrections. Requires
+        ``frame_alignment_audit=True``, the shifter additionally
+        reports whether each event endpoint lands on its expected video
+        frame (``F_src + frame_shift``). Read-only diagnostic — no
+        bytes are rewritten based on this audit.
+    frame_alignment_audit
+        Enable Tier 2 frame-alignment reporting. Requires
         ``target_fps`` to be set; otherwise has no effect.
     drop_negative
         When ``True`` (default), drop any display event whose start_pts
@@ -333,9 +332,9 @@ def apply_constant_shift(
     Returns
     -------
     ``(new_data, result)`` where ``new_data`` is a fresh bytes object
-    with PTS / DTS fields rewritten in place (and dropped segments
-    omitted) and ``result`` carries the shift statistics + Tier 2
-    alignment audit.
+    with PTS / DTS fields rewritten by the uniform delta (and dropped
+    segments omitted) and ``result`` carries the shift statistics +
+    optional Tier 2 audit.
     """
 
     def _log(msg: str) -> None:
@@ -364,9 +363,9 @@ def apply_constant_shift(
     earliest_pts = min(s.pts_ticks for s in segments)
     latest_pts = max(s.pts_ticks for s in segments)
 
-    # Events drive both the drop-negative policy and frame alignment.
-    do_frame_align = bool(frame_align and target_fps and target_fps > 0)
-    need_events = (delta_ticks < 0 and drop_negative) or do_frame_align
+    # Events drive both the drop-negative policy and the read-only Tier 2.
+    do_frame_audit = bool(frame_alignment_audit and target_fps and target_fps > 0)
+    need_events = (delta_ticks < 0 and drop_negative) or do_frame_audit
     events = extract_events(segments, data) if need_events else []
 
     # Identify segment indices to drop (events whose start_pts goes negative).
@@ -385,29 +384,20 @@ def apply_constant_shift(
                     f"{(ev.start_pts_ticks + delta_ticks) / TICKS_PER_MS:.3f} ms)"
                 )
 
-    # Frame-alignment audit + per-event correction map.
-    # Key: source_pts_ticks (== shifted_pts_ticks - delta_ticks). We map by
-    # source PTS so segments sharing a PTS group all get the same correction.
-    correction_by_source_pts: dict[int, int] = {}  # source_pts_ticks → correction_ticks
-    endpoint_audits: list[EndpointAudit] = []
-    starts_total = 0
-    starts_correct = 0
-    ends_total = 0
-    ends_correct = 0
-    corrections_start_applied = 0
-    corrections_end_applied = 0
-    max_start_correction_ms = 0
-    max_end_correction_ms = 0
-    duration_changes_count = 0
-    max_duration_delta_ms = 0
-    unfixable_count = 0
+    # Frame-alignment audit (read-only; no bytes rewritten beyond the
+    # uniform shift below).
     tier2: Tier2FrameAlignmentResult | None = None
-
-    if do_frame_align:
-        period_ms = 1000.0 / float(target_fps)  # type: ignore[arg-type]  # checked
+    if do_frame_audit:
+        period_ms = 1000.0 / float(target_fps)  # type: ignore[arg-type]  # checked above
         frame_shift = round(applied_ms / period_ms)
+        endpoint_audits: list[EndpointAudit] = []
+        starts_total = 0
+        starts_on_target = 0
+        ends_total = 0
+        ends_on_target = 0
+        max_start_drift_ms = 0
+        max_end_drift_ms = 0
         for ev_idx, ev in enumerate(events):
-            # Skip events that we dropped entirely (negative shift).
             if ev.start_segment_index in dropped_segments:
                 continue
             start_audit = _endpoint_audit(
@@ -420,17 +410,11 @@ def apply_constant_shift(
             )
             endpoint_audits.append(start_audit)
             starts_total += 1
-            if start_audit.final_frame == start_audit.target_frame:
-                starts_correct += 1
+            if start_audit.on_target:
+                starts_on_target += 1
             else:
-                unfixable_count += 1
-            if start_audit.correction_ms != 0:
-                corrections_start_applied += 1
-                correction_by_source_pts[ev.start_pts_ticks] = (
-                    start_audit.correction_ms * TICKS_PER_MS
-                )
-                max_start_correction_ms = max(
-                    max_start_correction_ms, abs(start_audit.correction_ms)
+                max_start_drift_ms = max(
+                    max_start_drift_ms, abs(start_audit.would_be_correction_ms)
                 )
 
             if ev.end_pts_ticks is not None:
@@ -444,58 +428,44 @@ def apply_constant_shift(
                 )
                 endpoint_audits.append(end_audit)
                 ends_total += 1
-                if end_audit.final_frame == end_audit.target_frame:
-                    ends_correct += 1
+                if end_audit.on_target:
+                    ends_on_target += 1
                 else:
-                    unfixable_count += 1
-                if end_audit.correction_ms != 0:
-                    corrections_end_applied += 1
-                    correction_by_source_pts[ev.end_pts_ticks] = (
-                        end_audit.correction_ms * TICKS_PER_MS
+                    max_end_drift_ms = max(
+                        max_end_drift_ms, abs(end_audit.would_be_correction_ms)
                     )
-                    max_end_correction_ms = max(
-                        max_end_correction_ms, abs(end_audit.correction_ms)
-                    )
-                # Duration change check: if start and end were corrected
-                # differently, the visible-in-ms duration shifted.
-                dur_delta = end_audit.correction_ms - start_audit.correction_ms
-                if dur_delta != 0:
-                    duration_changes_count += 1
-                    max_duration_delta_ms = max(max_duration_delta_ms, abs(dur_delta))
 
         tier2 = Tier2FrameAlignmentResult(
             target_fps=float(target_fps),  # type: ignore[arg-type]
             frame_period_ms=period_ms,
             frame_shift=frame_shift,
             starts_total=starts_total,
-            starts_correct=starts_correct,
+            starts_on_target=starts_on_target,
             ends_total=ends_total,
-            ends_correct=ends_correct,
-            corrections_start_applied=corrections_start_applied,
-            corrections_end_applied=corrections_end_applied,
-            max_start_correction_ms=max_start_correction_ms,
-            max_end_correction_ms=max_end_correction_ms,
-            duration_changes_count=duration_changes_count,
-            max_duration_delta_ms=max_duration_delta_ms,
-            unfixable_count=unfixable_count,
+            ends_on_target=ends_on_target,
+            starts_drifted=starts_total - starts_on_target,
+            ends_drifted=ends_total - ends_on_target,
+            max_start_drift_ms=max_start_drift_ms,
+            max_end_drift_ms=max_end_drift_ms,
             endpoints=tuple(endpoint_audits),
         )
 
-    # Build output bytes. Apply uniform shift + any per-event correction.
+    # Build output bytes — uniform shift only. No per-event corrections
+    # are applied, so palette updates and other intra-event segments stay
+    # in lockstep with their display group by construction.
     out = bytearray()
     shifted = 0
     for seg in segments:
         if seg.index in dropped_segments:
             continue
         seg_bytes = bytearray(data[seg.header_offset : seg.end_offset])
-        correction_ticks = correction_by_source_pts.get(seg.pts_ticks, 0)
         # Clamp to zero for orphan segments outside display events (e.g.,
         # a leading clear PCS at t=0). Display-event segments going
         # negative were already filtered into ``dropped_segments`` above.
-        new_pts = max(seg.pts_ticks + delta_ticks + correction_ticks, 0)
+        new_pts = max(seg.pts_ticks + delta_ticks, 0)
         seg_bytes[2:6] = new_pts.to_bytes(4, "big")
         if seg.dts_ticks > 0:
-            new_dts = max(seg.dts_ticks + delta_ticks + correction_ticks, 0)
+            new_dts = max(seg.dts_ticks + delta_ticks, 0)
             seg_bytes[6:10] = new_dts.to_bytes(4, "big")
         out.extend(seg_bytes)
         shifted += 1
@@ -521,17 +491,19 @@ def apply_constant_shift(
         f"invalid {invalid}"
     )
     if tier2 is not None:
-        total_corrections = (
-            tier2.corrections_start_applied + tier2.corrections_end_applied
-        )
+        drift_total = tier2.starts_drifted + tier2.ends_drifted
         _log(
-            f"[PGSTiming] frame alignment ({tier2.target_fps:.3f} fps, "
+            f"[PGSTiming] frame audit ({tier2.target_fps:.3f} fps, "
             f"frame_shift {tier2.frame_shift:+d}): "
-            f"{tier2.starts_correct}/{tier2.starts_total} starts ok, "
-            f"{tier2.ends_correct}/{tier2.ends_total} ends ok, "
-            f"{total_corrections} correction(s) applied "
-            f"(max start ±{tier2.max_start_correction_ms} ms, "
-            f"max end ±{tier2.max_end_correction_ms} ms)"
+            f"{tier2.starts_on_target}/{tier2.starts_total} starts on target, "
+            f"{tier2.ends_on_target}/{tier2.ends_total} ends on target"
+            + (
+                f" — {drift_total} endpoint(s) drifted "
+                f"(max start ±{tier2.max_start_drift_ms} ms, "
+                f"max end ±{tier2.max_end_drift_ms} ms)"
+                if drift_total > 0
+                else ""
+            )
         )
 
     return bytes(out), result

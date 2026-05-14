@@ -259,13 +259,13 @@ def _shift_pgs_track(item, ctx, runner) -> None:
     fps = _lookup_target_fps(ctx)
     video_duration_ms = _lookup_video_duration_ms(ctx)
 
-    frame_align_enabled = bool(
-        getattr(ctx.settings, "pgs_frame_align_correction", True) and fps and fps > 0
+    frame_audit_enabled = bool(
+        getattr(ctx.settings, "pgs_frame_alignment_audit", True) and fps and fps > 0
     )
 
     runner._log_message(
         f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind}), "
-        f"frame_align = {frame_align_enabled} "
+        f"frame_audit = {frame_audit_enabled} "
         f"(fps = {fps if fps else 'unknown'})"
     )
 
@@ -276,8 +276,8 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         new_bytes, shift_res = apply_constant_shift(
             raw,
             delay_ms,
-            target_fps=fps if frame_align_enabled else None,
-            frame_align=frame_align_enabled,
+            target_fps=fps if frame_audit_enabled else None,
+            frame_alignment_audit=frame_audit_enabled,
             drop_negative=True,
             log=runner._log_message,
         )
@@ -289,7 +289,7 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         )
         return
 
-    # Build event list (post-shift, post-correction) for Tier 1 sanity.
+    # Build event list (post-uniform-shift) for Tier 1 sanity.
     segments_after, _ = walk_segments(new_bytes)
     events_after = extract_events(segments_after, new_bytes)
     bitmap_events = [
@@ -319,7 +319,7 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         target_fps=fps,
         tier1=tier1,
         tier2=shift_res.tier2,
-        frame_align_enabled=frame_align_enabled,
+        frame_alignment_audit_enabled=frame_audit_enabled,
     )
     audit_key = f"{tr.source}_t{tr.id}"
     ctx.bitmap_audit_results[audit_key] = result
@@ -369,7 +369,7 @@ def _write_bitmap_timing_detail(audit_key: str, result, ctx, runner) -> None:
         if result.target_fps
         else "# target fps    : (unknown)"
     )
-    lines.append(f"# frame_align   : {result.frame_align_enabled}")
+    lines.append(f"# frame_audit   : {result.frame_alignment_audit_enabled}")
     lines.append("#")
     lines.append("# Tier 1 sanity:")
     lines.append(f"#   events_total        : {t1.events_total}")
@@ -383,39 +383,37 @@ def _write_bitmap_timing_detail(audit_key: str, result, ctx, runner) -> None:
     lines.append(f"#   monotonicity_viol.  : {t1.monotonicity_violations}")
     lines.append("#")
     if t2 is not None:
-        lines.append("# Tier 2 frame alignment:")
+        lines.append("# Tier 2 frame audit (read-only):")
         lines.append(f"#   target_fps          : {t2.target_fps:.6f}")
         lines.append(f"#   frame_period_ms     : {t2.frame_period_ms:.6f}")
         lines.append(f"#   frame_shift (frames): {t2.frame_shift:+d}")
-        lines.append(f"#   starts_correct      : {t2.starts_correct}/{t2.starts_total}")
-        lines.append(f"#   ends_correct        : {t2.ends_correct}/{t2.ends_total}")
         lines.append(
-            f"#   corrections (start) : {t2.corrections_start_applied} "
-            f"(max ±{t2.max_start_correction_ms} ms)"
+            f"#   starts_on_target    : {t2.starts_on_target}/{t2.starts_total}"
+        )
+        lines.append(f"#   ends_on_target      : {t2.ends_on_target}/{t2.ends_total}")
+        lines.append(
+            f"#   starts_drifted      : {t2.starts_drifted} "
+            f"(max would-be nudge ±{t2.max_start_drift_ms} ms)"
         )
         lines.append(
-            f"#   corrections (end)   : {t2.corrections_end_applied} "
-            f"(max ±{t2.max_end_correction_ms} ms)"
+            f"#   ends_drifted        : {t2.ends_drifted} "
+            f"(max would-be nudge ±{t2.max_end_drift_ms} ms)"
         )
-        lines.append(
-            f"#   duration changes    : {t2.duration_changes_count} "
-            f"(max ±{t2.max_duration_delta_ms} ms)"
-        )
-        lines.append(f"#   unfixable           : {t2.unfixable_count}")
         lines.append("#")
-        # Per-endpoint table
+        # Per-endpoint table — same shape as before, no "final" column
+        # since no corrections are applied.
         lines.append(
-            "# ev   role   source_ms      shifted_ms     final_ms     "
-            "F_src  F_tgt  F_pre  F_fin  correction_ms"
+            "# ev   role   source_ms      shifted_ms     "
+            "F_src  F_tgt  F_act   would_nudge_ms  on_target"
         )
         for ep in t2.endpoints:
             lines.append(
                 f"{ep.event_index:>5} {ep.role:>5}  "
                 f"{ep.source_ms:>12.3f}   {ep.shifted_ms:>12.3f}   "
-                f"{ep.final_ms:>10.3f}   "
                 f"{ep.source_frame:>5}  {ep.target_frame:>5}  "
-                f"{ep.actual_frame_pre_fix:>5}  {ep.final_frame:>5}   "
-                f"{ep.correction_ms:>+5d}"
+                f"{ep.actual_frame:>5}   "
+                f"{ep.would_be_correction_ms:>+13d}        "
+                f"{'yes' if ep.on_target else 'no'}"
             )
     else:
         lines.append("# Tier 2 skipped (no target fps available)")
