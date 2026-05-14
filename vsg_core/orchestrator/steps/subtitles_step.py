@@ -131,15 +131,11 @@ class SubtitlesStep:
                 # mkvmerge gets --sync 0 because timing is baked into the file.
                 elif ext == ".sup":
                     _shift_pgs_track(item, ctx, runner)
-                # Other bitmap subtitles (VobSub) - can't process with unified flow
-                # but CAN use video-verified mode for frame-corrected delays.
-                # Phase 2 will replace this with an in-app VobSub shifter.
-                elif subtitle_sync_mode == "video-verified":
-                    from vsg_core.subtitles.sync_mode_plugins.video_verified.preprocessing import (
-                        apply_for_bitmap_subtitle,
-                    )
-
-                    apply_for_bitmap_subtitle(item, ctx, runner, source1_file)
+                # VobSub bitmap subtitles - shift the .idx timestamps in-app
+                # and audit. mkvmerge re-derives the .sub PES PTSes from the
+                # shifted .idx; we never touch the .sub binary.
+                elif ext == ".sub":
+                    _shift_vobsub_track(item, ctx, runner)
                 else:
                     runner._log_message(
                         f"[Subtitles] Track {item.track.id}: Bitmap format {ext} - using mkvmerge --sync for delay"
@@ -260,7 +256,7 @@ def _shift_pgs_track(item, ctx, runner) -> None:
     video_duration_ms = _lookup_video_duration_ms(ctx)
 
     frame_audit_enabled = bool(
-        getattr(ctx.settings, "pgs_frame_alignment_audit", True) and fps and fps > 0
+        getattr(ctx.settings, "bitmap_frame_alignment_audit", True) and fps and fps > 0
     )
 
     runner._log_message(
@@ -336,6 +332,146 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         f"[BitmapShifter] {track_label}: ✓ "
         f"shifted {shift_res.segments_shifted} segment(s), "
         f"dropped {shift_res.events_dropped} event(s)"
+    )
+
+
+def _shift_vobsub_track(item, ctx, runner) -> None:
+    """Apply a constant delay to a VobSub track in-app and audit.
+
+    Touches only the ``.idx`` text file; the ``.sub`` is left
+    untouched. mkvmerge will rewrite the ``.sub`` PES PTSes from the
+    shifted ``.idx`` at mux time.
+    """
+    from vsg_core.subtitles.operations.bitmap_audit import (
+        BitmapAuditResult,
+        BitmapEvent,
+        tier1_sanity,
+    )
+    from vsg_core.subtitles.operations.vobsub_timing import (
+        apply_constant_shift,
+        infer_end_times,
+        parse_idx,
+    )
+
+    tr = item.track
+    track_label = f"{tr.source} / track {tr.id} / VobSub / {tr.props.lang or 'und'}"
+
+    if item.extracted_path is None:
+        runner._log_message(
+            f"[BitmapShifter] {track_label}: no extracted path — skipping"
+        )
+        return
+    sub_path = item.extracted_path
+    idx_path = sub_path.with_suffix(".idx")
+    if not idx_path.exists():
+        runner._log_message(
+            f"[BitmapShifter] {track_label}: companion .idx not found at "
+            f"{idx_path} — falling back to mkvmerge --sync"
+        )
+        return
+
+    delay_ms, kind = _resolve_bitmap_delay(item, ctx)
+
+    _lookup_source1_properties(ctx, runner)
+    fps = _lookup_target_fps(ctx)
+    video_duration_ms = _lookup_video_duration_ms(ctx)
+
+    frame_audit_enabled = bool(
+        getattr(ctx.settings, "bitmap_frame_alignment_audit", True) and fps and fps > 0
+    )
+
+    runner._log_message(
+        f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind}), "
+        f"frame_audit = {frame_audit_enabled} "
+        f"(fps = {fps if fps else 'unknown'})"
+    )
+
+    try:
+        idx_text = idx_path.read_text(encoding="latin-1")
+        sub_data = sub_path.read_bytes() if frame_audit_enabled else None
+        new_idx_text, shift_res = apply_constant_shift(
+            idx_text,
+            sub_data,
+            delay_ms,
+            target_fps=fps if frame_audit_enabled else None,
+            frame_alignment_audit=frame_audit_enabled,
+            drop_negative=True,
+            log=runner._log_message,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        runner._log_message(
+            f"[BitmapShifter] {track_label}: shift failed ({exc}) — "
+            "falling back to mkvmerge --sync"
+        )
+        return
+
+    # Write new .idx next to a renamed .sub copy so mkvmerge can still
+    # find both halves by basename.
+    out_idx_path = sub_path.parent / f"bitmap_shifted_{sub_path.stem}.idx"
+    out_sub_path = sub_path.parent / f"bitmap_shifted_{sub_path.stem}.sub"
+    try:
+        out_idx_path.write_text(new_idx_text, encoding="latin-1")
+        # Copy (or hardlink) the .sub unchanged. Use a copy so we don't
+        # mutate the original via shared inode.
+        out_sub_path.write_bytes(sub_path.read_bytes())
+    except Exception as exc:  # pragma: no cover - defensive
+        runner._log_message(
+            f"[BitmapShifter] {track_label}: write failed ({exc}) — "
+            "falling back to mkvmerge --sync"
+        )
+        return
+
+    # Build event list (post-shift) for Tier 1 sanity. Use inferred end
+    # times so duration anomalies / video-overflow checks have something
+    # to chew on.
+    shifted_entries = parse_idx(new_idx_text)
+    sub_for_audit = sub_data
+    if sub_for_audit is None:
+        # Tier 1 still needs end times for duration sanity; load .sub
+        # lazily if audit didn't already.
+        try:
+            sub_for_audit = sub_path.read_bytes()
+        except Exception:
+            sub_for_audit = None
+    end_times, _src = infer_end_times(shifted_entries, sub_for_audit)
+    bitmap_events = [
+        BitmapEvent(
+            start_ms=float(ent.timestamp_ms),
+            end_ms=float(end_times[ent.index]) if ent.index in end_times else None,
+            source_tag=f"idx#{ent.index}",
+        )
+        for ent in shifted_entries
+    ]
+    tier1 = tier1_sanity(
+        bitmap_events,
+        video_duration_ms=video_duration_ms,
+        events_dropped_pre_shift=shift_res.entries_dropped,
+    )
+
+    result = BitmapAuditResult(
+        track_label=track_label,
+        format_tag="VobSub",
+        delay_source_kind=kind,  # type: ignore[arg-type]
+        requested_delay_ms=delay_ms,
+        applied_delay_ms=shift_res.applied_delay_ms,
+        target_fps=fps,
+        tier1=tier1,
+        tier2=shift_res.tier2,
+        frame_alignment_audit_enabled=frame_audit_enabled,
+    )
+    audit_key = f"{tr.source}_t{tr.id}"
+    ctx.bitmap_audit_results[audit_key] = result
+
+    if getattr(ctx.settings, "bitmap_timing_debug_report", False):
+        _write_bitmap_timing_detail(audit_key, result, ctx, runner)
+
+    item.extracted_path = out_sub_path
+    item.frame_adjusted = True  # signals options_builder to emit --sync 0
+
+    runner._log_message(
+        f"[BitmapShifter] {track_label}: ✓ "
+        f"shifted {shift_res.entries_shifted} entry(s), "
+        f"dropped {shift_res.entries_dropped} entry(s)"
     )
 
 
