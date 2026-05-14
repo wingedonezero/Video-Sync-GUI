@@ -127,8 +127,13 @@ class SubtitlesStep:
                             f"[Subtitles] ERROR processing track {item.track.id}: {e}"
                         )
                         raise
-                # Bitmap subtitles (VobSub, PGS) - can't process with unified flow
-                # but CAN use video-verified mode for frame-corrected delays
+                # PGS bitmap subtitles - shift PTSes in-app and audit.
+                # mkvmerge gets --sync 0 because timing is baked into the file.
+                elif ext == ".sup":
+                    _shift_pgs_track(item, ctx, runner)
+                # Other bitmap subtitles (VobSub) - can't process with unified flow
+                # but CAN use video-verified mode for frame-corrected delays.
+                # Phase 2 will replace this with an in-app VobSub shifter.
                 elif subtitle_sync_mode == "video-verified":
                     from vsg_core.subtitles.sync_mode_plugins.video_verified.preprocessing import (
                         apply_for_bitmap_subtitle,
@@ -189,3 +194,180 @@ class SubtitlesStep:
             and bypass_subtitle_data
             and subtitle_sync_mode == "time-based"
         )
+
+
+# ============================================================================
+# Bitmap shifter helpers (Phase 1: PGS only)
+# ============================================================================
+
+
+def _resolve_bitmap_delay(item, ctx) -> tuple[float, str]:
+    """Pick the delay and tier classification for a bitmap subtitle track.
+
+    Returns ``(delay_ms, kind)``. ``kind`` is used by the auditor to
+    decide whether to run Tier 2 frame-alignment as corrective signal
+    or informational diagnostic.
+    """
+    tr = item.track
+    source_key = item.sync_to if tr.source == "External" else tr.source
+    if source_key in (None, "Source 1"):
+        return 0.0, "zero"
+
+    vv = ctx.video_verified_sources.get(source_key)
+    if vv is not None:
+        corrected = float(vv.get("corrected_delay_ms", 0.0))
+        if vv.get("fallback"):
+            return corrected, "vv-correlation-fallback"
+        return corrected, "vv-frame"
+
+    # Time-based or no VV preprocessing — fall back to raw correlation.
+    if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+        return float(ctx.delays.raw_source_delays_ms[source_key]), "correlation"
+    if ctx.delays and source_key in ctx.delays.source_delays_ms:
+        return float(ctx.delays.source_delays_ms[source_key]), "correlation"
+    return 0.0, "zero"
+
+
+def _shift_pgs_track(item, ctx, runner) -> None:
+    """Apply a constant delay to a PGS track in-app and audit the result."""
+    from vsg_core.subtitles.operations.bitmap_audit import (
+        BitmapAuditResult,
+        BitmapEvent,
+        tier1_sanity,
+        tier2_frame_alignment,
+    )
+    from vsg_core.subtitles.operations.pgs_timing import (
+        PTS_CLOCK_HZ,
+        apply_constant_shift,
+        extract_events,
+        walk_segments,
+    )
+
+    tr = item.track
+    track_label = f"{tr.source} / track {tr.id} / PGS / {tr.props.lang or 'und'}"
+
+    delay_ms, kind = _resolve_bitmap_delay(item, ctx)
+
+    runner._log_message(
+        f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind})"
+    )
+
+    if item.extracted_path is None:
+        runner._log_message(
+            f"[BitmapShifter] {track_label}: no extracted path — skipping"
+        )
+        return
+
+    src_path = item.extracted_path
+    out_path = src_path.parent / f"bitmap_shifted_{src_path.name}"
+    try:
+        raw = src_path.read_bytes()
+        new_bytes, shift_res = apply_constant_shift(
+            raw, delay_ms, drop_negative=True, log=runner._log_message
+        )
+        out_path.write_bytes(new_bytes)
+    except Exception as exc:  # pragma: no cover - defensive
+        runner._log_message(
+            f"[BitmapShifter] {track_label}: shift failed ({exc}) — "
+            "falling back to mkvmerge --sync"
+        )
+        return
+
+    # Build event list for audit from the shifted bytes.
+    segments_after, _ = walk_segments(new_bytes)
+    events_after = extract_events(segments_after, new_bytes)
+    bitmap_events = [
+        BitmapEvent(
+            start_ms=ev.start_pts_ticks / (PTS_CLOCK_HZ / 1000),
+            end_ms=(
+                ev.end_pts_ticks / (PTS_CLOCK_HZ / 1000)
+                if ev.end_pts_ticks is not None
+                else None
+            ),
+            source_tag=f"pcs#{ev.start_segment_index}",
+        )
+        for ev in events_after
+    ]
+
+    # Tier 1 sanity (always). Detect Source 1 properties on demand so
+    # time-based mode gets the same audit coverage as video-verified.
+    _lookup_source1_properties(ctx, runner)
+    video_duration_ms = _lookup_video_duration_ms(ctx)
+    tier1 = tier1_sanity(
+        bitmap_events,
+        video_duration_ms=video_duration_ms,
+        events_dropped_pre_shift=shift_res.events_dropped,
+    )
+
+    # Tier 2 frame alignment (whenever a target fps is available).
+    fps = _lookup_target_fps(ctx)
+    tier2 = None
+    if fps is not None and fps > 0:
+        tier2 = tier2_frame_alignment(bitmap_events, fps)
+
+    result = BitmapAuditResult(
+        track_label=track_label,
+        format_tag="PGS",
+        delay_source_kind=kind,  # type: ignore[arg-type]  # Literal narrowed by helper
+        requested_delay_ms=delay_ms,
+        applied_delay_ms=shift_res.applied_delay_ms,
+        target_fps=fps,
+        tier1=tier1,
+        tier2=tier2,
+    )
+    audit_key = f"{tr.source}_t{tr.id}"
+    ctx.bitmap_audit_results[audit_key] = result
+
+    item.extracted_path = out_path
+    item.frame_adjusted = True  # signals options_builder to emit --sync 0
+
+    runner._log_message(
+        f"[BitmapShifter] {track_label}: shifted {shift_res.segments_shifted} "
+        f"segment(s), dropped {shift_res.events_dropped} event(s); "
+        f"audit stored as {audit_key}"
+    )
+
+
+def _lookup_source1_properties(ctx, runner) -> dict | None:
+    """Return Source 1's detected video properties, fetching on demand.
+
+    Caches into ``ctx.video_properties`` so the time-based path gets
+    the same FPS/duration coverage as the video-verified path without
+    duplicating ffprobe calls.
+    """
+    if ctx.video_properties.get("Source 1"):
+        return ctx.video_properties["Source 1"]
+    src1 = ctx.sources.get("Source 1") if ctx.sources else None
+    if not src1:
+        return None
+    try:
+        from vsg_core.subtitles.frame_utils import detect_video_properties
+
+        props = detect_video_properties(str(src1), runner)
+    except Exception:
+        return None
+    if props:
+        ctx.video_properties["Source 1"] = props
+    return props or None
+
+
+def _lookup_video_duration_ms(ctx) -> float | None:
+    """Pull Source 1's video duration in ms from ``ctx.video_properties`` if cached."""
+    props = ctx.video_properties.get("Source 1") if ctx.video_properties else None
+    if not props:
+        return None
+    dur = props.get("duration_ms")
+    if isinstance(dur, (int, float)) and dur > 0:
+        return float(dur)
+    return None
+
+
+def _lookup_target_fps(ctx) -> float | None:
+    """Pull Source 1's fps from ``ctx.video_properties`` if cached."""
+    props = ctx.video_properties.get("Source 1") if ctx.video_properties else None
+    if not props:
+        return None
+    fps = props.get("fps")
+    if isinstance(fps, (int, float)) and fps > 0:
+        return float(fps)
+    return None
