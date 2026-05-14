@@ -1830,6 +1830,56 @@ class SubtitleSyncTab(QWidget):
         )
 
         main_layout.addWidget(vv_group)
+
+        # ---------------------------------------------------------------
+        # Bitmap Subtitle Timing (PGS/VobSub) — applies in both sync modes
+        # ---------------------------------------------------------------
+        bm_group = QGroupBox("Bitmap Subtitle Timing (PGS, VobSub)")
+        bm_layout = QFormLayout(bm_group)
+
+        self.widgets["pgs_frame_align_correction"] = QCheckBox()
+        self.widgets["pgs_frame_align_correction"].setChecked(True)
+        self.widgets["pgs_frame_align_correction"].setToolTip(
+            "Snap drifted bitmap subtitle events to their target video frame:\n\n"
+            "After applying the constant shift (audio correlation or\n"
+            "video-verified offset), each event endpoint is checked against\n"
+            "the source's frame grid. If an endpoint would now render on\n"
+            "the wrong frame (only happens when the shift isn't an exact\n"
+            "integer-frame multiple of the target's frame period), the\n"
+            "PTS is rewritten to the closest integer ms inside the\n"
+            "intended frame.\n\n"
+            "Mirrors text-sub frame_audit's surgical-rounding behavior.\n"
+            "For integer-frame shifts (e.g. +1001 ms at 23.976 fps =\n"
+            "+24 frames exact) nothing drifts and no corrections are\n"
+            "applied — output is byte-identical to mkvmerge --sync.\n\n"
+            "Disable to mirror mkvmerge byte-for-byte even when the shift\n"
+            "isn't frame-quantized."
+        )
+        bm_layout.addRow(
+            "Frame-Align Correction:",
+            self.widgets["pgs_frame_align_correction"],
+        )
+
+        self.widgets["bitmap_timing_debug_report"] = QCheckBox()
+        self.widgets["bitmap_timing_debug_report"].setChecked(False)
+        self.widgets["bitmap_timing_debug_report"].setToolTip(
+            "Write per-event bitmap-timing detail file (diagnostic):\n\n"
+            "When enabled, the PGS shifter writes a detailed per-event\n"
+            "report to debug/bitmap_timing/ after each track is shifted.\n"
+            "The report lists each event's source PTS, shifted PTS, source\n"
+            "frame, target frame, actual frame (before correction), final\n"
+            "frame (after correction), and the ms correction applied.\n\n"
+            "Useful for diagnosing drift sources and verifying that the\n"
+            "audit numbers are what you expect. Parity with the\n"
+            "video_verified_frame_audit detail report.\n\n"
+            "Diagnostic only — does not change timing behaviour."
+        )
+        bm_layout.addRow(
+            "Per-Event Debug Report:",
+            self.widgets["bitmap_timing_debug_report"],
+        )
+
+        main_layout.addWidget(bm_group)
         main_layout.addStretch(1)
 
         # Connect signals
