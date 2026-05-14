@@ -16,14 +16,16 @@ Tier model:
   compute the source frame ``F_src = floor(source_pts / period)``,
   the expected output frame ``F_target = F_src + frame_shift``, and
   the actual output frame ``F_actual = floor(shifted_pts / period)``.
-  An event is "correct" iff ``F_actual == F_target``. Drifted events
-  may be fixed by the shifter (it rewrites those segment PTSes to the
-  nearest integer ms inside ``F_target``'s window).
+  An event is "correct" iff ``F_actual == F_target``.
 
-No corrections are applied to the file from this module — the
-correction is performed by the shifter and the resulting counts are
-fed in here for reporting. This file only contains the math + result
-shape so the auditor and shifter agree on terminology.
+**Audit-only model** — the shifter applies only the uniform shift
+(matches mkvmerge ``--sync`` byte-for-byte). When ``F_actual`` does
+not match ``F_target`` for some events, that's reported as drift,
+not silently corrected. This keeps palette-update segments and other
+intra-event timing in lockstep with their event endpoints by
+construction (everything moves by exactly the same delta), at the
+cost of leaving rare-edge events on the same drifted frame mkvmerge
+would have produced.
 """
 
 from __future__ import annotations
@@ -64,18 +66,24 @@ class BitmapEvent:
 
 @dataclass(frozen=True, slots=True)
 class EndpointAudit:
-    """Per-endpoint frame-alignment record (start or end of one event)."""
+    """Per-endpoint frame-alignment record (start or end of one event).
+
+    Audit-only — the shifter does not apply per-event corrections. The
+    ``would_be_correction_ms`` field reports the ms shift that *would*
+    be needed to land the event on its target frame, for diagnostic
+    purposes. When zero, the uniform shift already landed the event
+    correctly.
+    """
 
     event_index: int
     role: Literal["start", "end"]
     source_ms: float  # pre-shift PTS
-    shifted_ms: float  # after uniform shift, before per-event correction
-    final_ms: float  # after correction (= shifted_ms when no fix needed)
+    shifted_ms: float  # after uniform shift (== the value written to file)
     source_frame: int  # F_src
     target_frame: int  # F_src + frame_shift
-    actual_frame_pre_fix: int  # F_actual before correction
-    final_frame: int  # F_actual after correction (should equal target_frame)
-    correction_ms: int  # final_ms - shifted_ms (typically 0, ±1, or ± up to period-1)
+    actual_frame: int  # F_actual = floor(shifted_ms / period)
+    on_target: bool  # actual_frame == target_frame
+    would_be_correction_ms: int  # minimum integer-ms shift that would re-align
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,37 +116,38 @@ class Tier1SanityResult:
 
 @dataclass(frozen=True, slots=True)
 class Tier2FrameAlignmentResult:
-    """Tier 2 — frame-alignment + correction outcome.
+    """Tier 2 — frame-alignment audit outcome (read-only).
 
-    All counts refer to *final* state: ``events_*_correct`` is the count
-    of endpoints that landed on ``F_target`` after any per-event
-    correction was applied. ``corrections_*_applied`` reports how many
-    needed a nudge to get there.
+    Counts how many event endpoints landed on their expected video
+    frame after the uniform shift. Nothing is rewritten in the .sup
+    based on this audit — the output bytes already match what
+    mkvmerge ``--sync`` would produce. The drift counts and magnitudes
+    are reported so the user can see when an event will render on a
+    frame other than the source-relative target (typically only
+    happens for non-integer-frame shifts at fps where the frame period
+    is not a clean integer-ms ratio).
     """
 
     target_fps: float
     frame_period_ms: float
-    frame_shift: int  # round(delay_ms / period); preserved frame translation
+    frame_shift: int  # round(delay_ms / period); the intended frame translation
     starts_total: int
-    starts_correct: int  # F_actual == F_target after correction
+    starts_on_target: int  # F_actual == F_target
     ends_total: int  # closed events only
-    ends_correct: int
-    corrections_start_applied: int
-    corrections_end_applied: int
-    max_start_correction_ms: int
-    max_end_correction_ms: int
-    duration_changes_count: int  # events whose duration in ms changed due to fixes
-    max_duration_delta_ms: int  # absolute max |new_dur - old_dur|
-    unfixable_count: int  # events where correction couldn't land target_frame
+    ends_on_target: int
+    starts_drifted: int  # starts_total - starts_on_target
+    ends_drifted: int  # ends_total - ends_on_target
+    max_start_drift_ms: int  # largest minimum nudge that would re-align a start
+    max_end_drift_ms: int
     endpoints: tuple[EndpointAudit, ...] = field(default_factory=tuple)
 
     @property
-    def all_starts_correct(self) -> bool:
-        return self.starts_total > 0 and self.starts_correct == self.starts_total
+    def all_starts_on_target(self) -> bool:
+        return self.starts_total > 0 and self.starts_on_target == self.starts_total
 
     @property
-    def all_ends_correct(self) -> bool:
-        return self.ends_total in (0, self.ends_correct)
+    def all_ends_on_target(self) -> bool:
+        return self.ends_total in (0, self.ends_on_target)
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +162,7 @@ class BitmapAuditResult:
     target_fps: float | None
     tier1: Tier1SanityResult
     tier2: Tier2FrameAlignmentResult | None
-    frame_align_enabled: bool = False  # was the correction step requested?
+    frame_alignment_audit_enabled: bool = False  # was Tier 2 requested?
 
 
 def tier1_sanity(

@@ -8,11 +8,13 @@ Reads ``ctx.bitmap_audit_results`` (populated by the shifter in
 * Tier 1 (sanity) — events dropped, clamped, overflowing, duration
   anomalies, monotonicity. Always reported. Non-zero counts surface
   as warnings in the batch report.
-* Tier 2 (frame alignment) — same model as text-sub frame_audit:
-  ``F_actual == F_target`` per endpoint, where
-  ``F_target = F_src + round(delay_ms / period)``. Includes counts of
-  applied per-event corrections and any duration deltas that the
-  corrections introduced.
+* Tier 2 (frame audit, read-only) — same frame-of math as text-sub
+  ``frame_audit``: ``F_actual == F_target`` per endpoint, where
+  ``F_target = F_src + round(delay_ms / period)``. Reports drift
+  counts and would-be-correction magnitudes. **No bytes are
+  rewritten** — the shifter applies only the uniform delta, matching
+  mkvmerge ``--sync`` byte-for-byte. This auditor only adds
+  visibility.
 
 Today's pipeline reports ``No frame audit results available -
 skipping`` for bitmap subs because the text-only ``FrameAuditAuditor``
@@ -103,48 +105,49 @@ class BitmapTimingAuditor(BaseAuditor):
                 "chronological ordering (likely encoder bug, pre-existing)"
             )
 
-        # Tier 2: frame alignment (text-sub-style)
+        # Tier 2: frame-alignment audit (read-only)
         if t2 is None:
-            if result.frame_align_enabled:
+            if result.frame_alignment_audit_enabled:
                 self.log(
-                    "     Tier 2 (frame alignment): skipped (shifter returned no result)"
+                    "     Tier 2 (frame audit): skipped (shifter returned no result)"
                 )
             else:
-                self.log(
-                    "     Tier 2 (frame alignment): skipped (target fps unavailable)"
-                )
+                self.log("     Tier 2 (frame audit): skipped (target fps unavailable)")
             return
 
-        is_corrective = result.delay_source_kind == "vv-frame"
-        tag = "corrective" if is_corrective else "informational"
         self.log(
-            f"     Tier 2 (frame alignment, {tag}): "
+            f"     Tier 2 (frame audit, read-only): "
             f"target {t2.target_fps:.3f} fps, "
             f"frame period {t2.frame_period_ms:.3f} ms, "
             f"frame_shift {t2.frame_shift:+d} frame(s)"
         )
         starts_pct = (
-            100.0 * t2.starts_correct / t2.starts_total if t2.starts_total else 0.0
+            100.0 * t2.starts_on_target / t2.starts_total if t2.starts_total else 0.0
         )
-        ends_pct = 100.0 * t2.ends_correct / t2.ends_total if t2.ends_total else 0.0
+        ends_pct = 100.0 * t2.ends_on_target / t2.ends_total if t2.ends_total else 0.0
         self.log(
-            f"       Starts on target frame: {t2.starts_correct}/{t2.starts_total} "
-            f"({starts_pct:.1f}%) — {t2.corrections_start_applied} correction(s) "
-            f"applied, max ±{t2.max_start_correction_ms} ms"
-        )
-        self.log(
-            f"       Ends   on target frame: {t2.ends_correct}/{t2.ends_total} "
-            f"({ends_pct:.1f}%) — {t2.corrections_end_applied} correction(s) "
-            f"applied, max ±{t2.max_end_correction_ms} ms"
-        )
-        if t2.duration_changes_count > 0:
-            self.log(
-                f"       Duration changes from corrections: "
-                f"{t2.duration_changes_count} event(s), "
-                f"max ±{t2.max_duration_delta_ms} ms"
+            f"       Starts on target frame: {t2.starts_on_target}/{t2.starts_total} "
+            f"({starts_pct:.1f}%)"
+            + (
+                f" — {t2.starts_drifted} drifted, max ±{t2.max_start_drift_ms} ms "
+                "would re-align"
+                if t2.starts_drifted > 0
+                else ""
             )
-        if t2.unfixable_count > 0:
-            self._report(
-                f"{audit_key}: {t2.unfixable_count} endpoint(s) couldn't be "
-                "frame-aligned (impossible at this fps — should not happen)"
+        )
+        self.log(
+            f"       Ends   on target frame: {t2.ends_on_target}/{t2.ends_total} "
+            f"({ends_pct:.1f}%)"
+            + (
+                f" — {t2.ends_drifted} drifted, max ±{t2.max_end_drift_ms} ms "
+                "would re-align"
+                if t2.ends_drifted > 0
+                else ""
+            )
+        )
+        if t2.starts_drifted > 0 or t2.ends_drifted > 0:
+            self.log(
+                "       NOTE: drift means events render on a different frame than "
+                "their source-relative target (matches mkvmerge --sync behaviour). "
+                "No bytes have been rewritten to correct this."
             )
