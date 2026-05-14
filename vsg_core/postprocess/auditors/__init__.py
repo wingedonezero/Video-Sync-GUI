@@ -7,6 +7,7 @@ from .audio_object_based import AudioObjectBasedAuditor
 from .audio_quality import AudioQualityAuditor
 from .audio_sync import AudioSyncAuditor
 from .base import BaseAuditor
+from .bitmap_timing import BitmapTimingAuditor
 from .chapters import ChaptersAuditor
 from .codec_integrity import CodecIntegrityAuditor
 from .dolby_vision import DolbyVisionAuditor
@@ -35,6 +36,7 @@ __all__ = [
     "AudioSyncAuditor",
     "AuditIssue",
     "BaseAuditor",
+    "BitmapTimingAuditor",
     "ChaptersAuditor",
     "CodecIntegrityAuditor",
     "DolbyVisionAuditor",

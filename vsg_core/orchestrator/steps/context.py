@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
     from vsg_core.reporting import DebugOutputPaths
     from vsg_core.subtitles.frame_utils.frame_audit import FrameAuditResult
+    from vsg_core.subtitles.operations.bitmap_audit import BitmapAuditResult
 
 
 @dataclass(slots=True)
@@ -126,6 +127,11 @@ class Context:
     # Frame audit results from video-verified sync (for final auditor)
     # Format: {"Source2_t3": FrameAuditResult, ...}
     frame_audit_results: dict[str, FrameAuditResult] = field(default_factory=dict)
+
+    # Bitmap subtitle (PGS/VobSub) timing audit results from the in-app
+    # shifter. Populated by the PGS/VobSub branches of SubtitlesStep.
+    # Format: {"Source2_t5": BitmapAuditResult, ...}
+    bitmap_audit_results: dict[str, BitmapAuditResult] = field(default_factory=dict)
 
     # Cached video properties per source (detected on first access)
     # Used to gate video-verified frame matching: MPEG-2 and interlaced
