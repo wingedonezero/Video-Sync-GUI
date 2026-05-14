@@ -234,10 +234,9 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         BitmapAuditResult,
         BitmapEvent,
         tier1_sanity,
-        tier2_frame_alignment,
     )
     from vsg_core.subtitles.operations.pgs_timing import (
-        PTS_CLOCK_HZ,
+        TICKS_PER_MS,
         apply_constant_shift,
         extract_events,
         walk_segments,
@@ -248,22 +247,39 @@ def _shift_pgs_track(item, ctx, runner) -> None:
 
     delay_ms, kind = _resolve_bitmap_delay(item, ctx)
 
-    runner._log_message(
-        f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind})"
-    )
-
     if item.extracted_path is None:
         runner._log_message(
             f"[BitmapShifter] {track_label}: no extracted path — skipping"
         )
         return
 
+    # Detect Source 1 properties on demand so time-based mode gets the
+    # same audit coverage as video-verified (fps + duration).
+    _lookup_source1_properties(ctx, runner)
+    fps = _lookup_target_fps(ctx)
+    video_duration_ms = _lookup_video_duration_ms(ctx)
+
+    frame_align_enabled = bool(
+        getattr(ctx.settings, "pgs_frame_align_correction", True) and fps and fps > 0
+    )
+
+    runner._log_message(
+        f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind}), "
+        f"frame_align = {frame_align_enabled} "
+        f"(fps = {fps if fps else 'unknown'})"
+    )
+
     src_path = item.extracted_path
     out_path = src_path.parent / f"bitmap_shifted_{src_path.name}"
     try:
         raw = src_path.read_bytes()
         new_bytes, shift_res = apply_constant_shift(
-            raw, delay_ms, drop_negative=True, log=runner._log_message
+            raw,
+            delay_ms,
+            target_fps=fps if frame_align_enabled else None,
+            frame_align=frame_align_enabled,
+            drop_negative=True,
+            log=runner._log_message,
         )
         out_path.write_bytes(new_bytes)
     except Exception as exc:  # pragma: no cover - defensive
@@ -273,14 +289,14 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         )
         return
 
-    # Build event list for audit from the shifted bytes.
+    # Build event list (post-shift, post-correction) for Tier 1 sanity.
     segments_after, _ = walk_segments(new_bytes)
     events_after = extract_events(segments_after, new_bytes)
     bitmap_events = [
         BitmapEvent(
-            start_ms=ev.start_pts_ticks / (PTS_CLOCK_HZ / 1000),
+            start_ms=ev.start_pts_ticks / TICKS_PER_MS,
             end_ms=(
-                ev.end_pts_ticks / (PTS_CLOCK_HZ / 1000)
+                ev.end_pts_ticks / TICKS_PER_MS
                 if ev.end_pts_ticks is not None
                 else None
             ),
@@ -288,22 +304,11 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         )
         for ev in events_after
     ]
-
-    # Tier 1 sanity (always). Detect Source 1 properties on demand so
-    # time-based mode gets the same audit coverage as video-verified.
-    _lookup_source1_properties(ctx, runner)
-    video_duration_ms = _lookup_video_duration_ms(ctx)
     tier1 = tier1_sanity(
         bitmap_events,
         video_duration_ms=video_duration_ms,
         events_dropped_pre_shift=shift_res.events_dropped,
     )
-
-    # Tier 2 frame alignment (whenever a target fps is available).
-    fps = _lookup_target_fps(ctx)
-    tier2 = None
-    if fps is not None and fps > 0:
-        tier2 = tier2_frame_alignment(bitmap_events, fps)
 
     result = BitmapAuditResult(
         track_label=track_label,
@@ -313,19 +318,113 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         applied_delay_ms=shift_res.applied_delay_ms,
         target_fps=fps,
         tier1=tier1,
-        tier2=tier2,
+        tier2=shift_res.tier2,
+        frame_align_enabled=frame_align_enabled,
     )
     audit_key = f"{tr.source}_t{tr.id}"
     ctx.bitmap_audit_results[audit_key] = result
+
+    # Optional per-event detail report (parity with frame_audit's
+    # video_verified_frame_audit toggle).
+    if getattr(ctx.settings, "bitmap_timing_debug_report", False):
+        _write_bitmap_timing_detail(audit_key, result, ctx, runner)
 
     item.extracted_path = out_path
     item.frame_adjusted = True  # signals options_builder to emit --sync 0
 
     runner._log_message(
-        f"[BitmapShifter] {track_label}: shifted {shift_res.segments_shifted} "
-        f"segment(s), dropped {shift_res.events_dropped} event(s); "
-        f"audit stored as {audit_key}"
+        f"[BitmapShifter] {track_label}: ✓ "
+        f"shifted {shift_res.segments_shifted} segment(s), "
+        f"dropped {shift_res.events_dropped} event(s)"
     )
+
+
+def _write_bitmap_timing_detail(audit_key: str, result, ctx, runner) -> None:
+    """Write the per-event detail report to debug_paths/bitmap_timing/<key>.txt."""
+    from pathlib import Path
+
+    debug_paths = ctx.debug_paths
+    dir_attr = getattr(debug_paths, "bitmap_timing_dir", None) if debug_paths else None
+    out_dir = Path(dir_attr) if dir_attr else Path.cwd() / ".config" / "sync_checks"
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return  # Best-effort — never block a job on the debug file.
+
+    safe_key = audit_key.replace(" ", "_").replace("/", "_")
+    out_path = out_dir / f"{safe_key}_bitmap_timing.txt"
+    t1 = result.tier1
+    t2 = result.tier2
+
+    lines = []
+    lines.append(f"# Bitmap timing detail — {result.track_label}")
+    lines.append(f"# format        : {result.format_tag}")
+    lines.append(f"# delay source  : {result.delay_source_kind}")
+    lines.append(
+        f"# requested     : {result.requested_delay_ms:+.3f} ms "
+        f"(applied {result.applied_delay_ms:+d} ms)"
+    )
+    lines.append(
+        f"# target fps    : {result.target_fps:.6f}"
+        if result.target_fps
+        else "# target fps    : (unknown)"
+    )
+    lines.append(f"# frame_align   : {result.frame_align_enabled}")
+    lines.append("#")
+    lines.append("# Tier 1 sanity:")
+    lines.append(f"#   events_total        : {t1.events_total}")
+    lines.append(f"#   dropped_pre_shift   : {t1.events_dropped_pre_shift}")
+    lines.append(f"#   clamped_start       : {t1.events_clamped_start}")
+    lines.append(f"#   overflow_video      : {t1.events_overflow_video}")
+    lines.append(f"#   zero_duration       : {t1.events_zero_duration}")
+    lines.append(f"#   negative_duration   : {t1.events_negative_duration}")
+    lines.append(f"#   excessive_duration  : {t1.events_excessive_duration}")
+    lines.append(f"#   below_min_duration  : {t1.events_below_min_duration}")
+    lines.append(f"#   monotonicity_viol.  : {t1.monotonicity_violations}")
+    lines.append("#")
+    if t2 is not None:
+        lines.append("# Tier 2 frame alignment:")
+        lines.append(f"#   target_fps          : {t2.target_fps:.6f}")
+        lines.append(f"#   frame_period_ms     : {t2.frame_period_ms:.6f}")
+        lines.append(f"#   frame_shift (frames): {t2.frame_shift:+d}")
+        lines.append(f"#   starts_correct      : {t2.starts_correct}/{t2.starts_total}")
+        lines.append(f"#   ends_correct        : {t2.ends_correct}/{t2.ends_total}")
+        lines.append(
+            f"#   corrections (start) : {t2.corrections_start_applied} "
+            f"(max ±{t2.max_start_correction_ms} ms)"
+        )
+        lines.append(
+            f"#   corrections (end)   : {t2.corrections_end_applied} "
+            f"(max ±{t2.max_end_correction_ms} ms)"
+        )
+        lines.append(
+            f"#   duration changes    : {t2.duration_changes_count} "
+            f"(max ±{t2.max_duration_delta_ms} ms)"
+        )
+        lines.append(f"#   unfixable           : {t2.unfixable_count}")
+        lines.append("#")
+        # Per-endpoint table
+        lines.append(
+            "# ev   role   source_ms      shifted_ms     final_ms     "
+            "F_src  F_tgt  F_pre  F_fin  correction_ms"
+        )
+        for ep in t2.endpoints:
+            lines.append(
+                f"{ep.event_index:>5} {ep.role:>5}  "
+                f"{ep.source_ms:>12.3f}   {ep.shifted_ms:>12.3f}   "
+                f"{ep.final_ms:>10.3f}   "
+                f"{ep.source_frame:>5}  {ep.target_frame:>5}  "
+                f"{ep.actual_frame_pre_fix:>5}  {ep.final_frame:>5}   "
+                f"{ep.correction_ms:>+5d}"
+            )
+    else:
+        lines.append("# Tier 2 skipped (no target fps available)")
+
+    try:
+        out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        runner._log_message(f"[BitmapShifter] Detail report: {out_path}")
+    except Exception as exc:  # pragma: no cover
+        runner._log_message(f"[BitmapShifter] Detail report write failed: {exc}")
 
 
 def _lookup_source1_properties(ctx, runner) -> dict | None:
