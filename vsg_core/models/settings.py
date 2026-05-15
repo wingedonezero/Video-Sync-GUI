@@ -280,6 +280,15 @@ class AppSettings(BaseModel):
     stepping_silero_vad_threshold: float = 0.5
     stepping_noise_recovery_enabled: bool = True
 
+    # Frame-Precision EDL Refinement
+    # When True, runs a video-frame-match pass after silence/scene boundary
+    # refinement to find the EXACT first-AFTER frame of each transition and
+    # use that as the splice point (audio silence becomes a safety check).
+    # Gated to progressive/progressive source pairs with matching fps;
+    # MPEG-2, interlaced, or fps-mismatched pairs skip refinement and keep
+    # the silence-derived splice points.
+    stepping_frame_refinement_enabled: bool = True
+
     # Boundary Refinement — Transient Detection
     stepping_transient_detection_enabled: bool = True
     stepping_transient_threshold: float = 8.0

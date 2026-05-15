@@ -237,6 +237,17 @@ class SteppingCorrectionAuditor(BaseAuditor):
                             "      Note: Video snap skipped to maintain silence guarantee"
                         )
 
+                # Independent display: Frame-precision refinement outcome.
+                # Reported per-boundary so the user can see whether the
+                # splice point was rewritten to the exact video frame edge
+                # (and by how much it differed from the audio-derived
+                # position), or why refinement was skipped.  Informational
+                # only — when refinement falls back, the audio splice is
+                # used as before and no quality issue is logged.
+                fr = boundary.get("frame_refinement")
+                if isinstance(fr, dict):
+                    self._report_frame_refinement(idx, target_time_s, fr)
+
                 # Independent check: Multi-track residual.
                 # JPN analysis found silence at the chosen splice but a
                 # sibling audio track (e.g. ENG dub on a DVD) has active
@@ -400,6 +411,130 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 "message": message,
                 "details": details,
             }
+        )
+
+    # ------------------------------------------------------------------
+    # Frame-precision refinement reporting
+    # ------------------------------------------------------------------
+
+    def _report_frame_refinement(
+        self, idx: int, target_time_s: float, fr: dict
+    ) -> None:
+        """Display a per-boundary frame-refinement report.
+
+        ``fr`` is the dict stamped onto ``audit_metadata`` by
+        ``vsg_core/correction/stepping/run.py`` after refinement runs.
+        Informational only — refinement falls back to the audio splice on
+        any failure, so no quality issue is logged here.
+        """
+        mode = cast("str", fr.get("mode", ""))
+        reason = cast("str", fr.get("reason", ""))
+
+        # Skipped because user disabled — no need to clutter the audit.
+        if mode == "skipped_disabled":
+            return
+
+        if mode == "refined":
+            audio_t = cast("float", fr.get("audio_src2_time_s", 0.0))
+            video_t = cast("float", fr.get("video_src2_time_s", 0.0) or 0.0)
+            drift_ms = cast("float", fr.get("frame_drift_ms", 0.0))
+            b_score = cast("float", fr.get("before_score", 0.0))
+            a_score = cast("float", fr.get("after_score", 0.0))
+            expected = fr.get("audio_expected_jump_frames")
+            measured = fr.get("measured_jump_frames")
+            first_after = fr.get("first_after_frame")
+            fps = fr.get("target_fps")
+            self.log(
+                f"    🎬 Boundary {idx} at {target_time_s:.1f}s: frame refinement applied"
+            )
+            self.log(
+                f"        Audio splice: {audio_t:.3f}s → "
+                f"Video splice: {video_t:.3f}s (drift {drift_ms:+.1f} ms)"
+            )
+            self.log(
+                f"        Anchor pHash scores: before {b_score:.2f}, after {a_score:.2f}"
+            )
+            if expected is not None and measured is not None:
+                self.log(
+                    f"        Jump confirmed: measured {measured:+d} frames "
+                    f"(audio expected {expected:+d})"
+                )
+            if first_after is not None and fps is not None:
+                self.log(
+                    f"        First-AFTER frame: {first_after} "
+                    f"(@ {float(cast('float', fps)):.3f} fps)"
+                )
+            return
+
+        # Fallbacks — refinement could not be applied; audio splice kept.
+        if mode == "fallback_outside_silence":
+            video_t = fr.get("video_src2_time_s")
+            video_t_str = (
+                f"{float(cast('float', video_t)):.3f}s" if video_t is not None else "?"
+            )
+            self.log(
+                f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s: "
+                f"frame refinement fell back (kept audio splice)"
+            )
+            self.log(
+                f"        Video-derived splice ({video_t_str}) fell outside the "
+                "silence zone"
+            )
+            self.log(f"        Reason: {reason}")
+            return
+
+        if mode == "fallback_no_first_after":
+            self.log(
+                f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s: "
+                f"frame refinement fell back (kept audio splice)"
+            )
+            self.log("        Could not identify first-AFTER frame in dead zone")
+            if reason:
+                self.log(f"        Reason: {reason}")
+            return
+
+        if mode == "skipped_low_confidence":
+            b_score = cast("float", fr.get("before_score", 0.0))
+            a_score = cast("float", fr.get("after_score", 0.0))
+            self.log(
+                f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s: "
+                f"frame refinement skipped (low anchor confidence)"
+            )
+            self.log(
+                f"        Anchor pHash scores: before {b_score:.2f}, after {a_score:.2f}"
+            )
+            self.log(f"        Reason: {reason}")
+            return
+
+        if mode == "skipped_jump_mismatch":
+            expected = fr.get("audio_expected_jump_frames")
+            measured = fr.get("measured_jump_frames")
+            self.log(
+                f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s: "
+                f"frame refinement skipped (jump mismatch)"
+            )
+            if expected is not None and measured is not None:
+                self.log(
+                    f"        Audio expected {expected:+d} frames, "
+                    f"video measured {measured:+d} frames"
+                )
+            if reason:
+                self.log(f"        Reason: {reason}")
+            return
+
+        if mode in ("skipped_gate", "skipped_no_video"):
+            # Common gating: interlaced / MPEG-2 / fps mismatch / no video
+            # path / open_clip unavailable.  One-line note.
+            self.log(
+                f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s: "
+                f"frame refinement skipped ({reason or mode})"
+            )
+            return
+
+        # Unknown mode — surface the raw values for forensic clarity.
+        self.log(
+            f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s: "
+            f"frame refinement mode={mode!r} reason={reason!r}"
         )
 
     # ------------------------------------------------------------------
