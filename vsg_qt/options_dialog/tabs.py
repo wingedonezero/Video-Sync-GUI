@@ -1313,6 +1313,32 @@ class SteppingTab(QWidget):
             "  Max Snap Distance:", self.widgets["stepping_video_snap_max_offset_s"]
         )
 
+        # Frame-precision EDL refinement
+        segment_layout.addRow(QLabel(""))
+        segment_layout.addRow(QLabel("<i>Frame-Precision Refinement (optional):</i>"))
+
+        self.widgets["stepping_frame_refinement_enabled"] = QCheckBox(
+            "Rewrite splice points to exact video frame edges"
+        )
+        self.widgets["stepping_frame_refinement_enabled"].setToolTip(
+            "After silence-based boundary refinement, runs a pHash\n"
+            "frame-match pass against Source 1 to find the EXACT\n"
+            "first-AFTER frame of each transition and uses that as\n"
+            "the splice point. The audio silence zone is then used\n"
+            "as a safety check (the video-derived splice must fall\n"
+            "inside it). Reflects the underlying truth that stepping\n"
+            "is fundamentally a video phenomenon — the duplicated /\n"
+            "dropped frames in the source tell us exactly where the\n"
+            "seam is.\n\n"
+            "Gated to progressive/progressive source pairs with\n"
+            "matching fps (within 0.1%) and non-MPEG-2 codecs.\n"
+            "MPEG-2, interlaced, or fps-mismatched pairs skip the\n"
+            "refinement and keep the silence-derived splice points.\n"
+            "Default: Enabled"
+        )
+
+        segment_layout.addRow(self.widgets["stepping_frame_refinement_enabled"])
+
         # ===== SECTION 4: QUALITY ASSURANCE =====
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Quality Assurance</b>"))

@@ -93,6 +93,47 @@ class BoundaryResult:
 
 
 @dataclass(frozen=True, slots=True)
+class FrameRefinementResult:
+    """Outcome of the frame-precision pass for one splice point.
+
+    ``mode`` is the only required-to-read field; the others carry
+    diagnostics for the audit trail. When ``mode == "refined"``, the
+    enclosing ``SplicePoint.src2_time_s`` has been rewritten to
+    ``video_src2_time_s`` (the exact first-AFTER frame) and the original
+    audio-derived position is preserved in ``audio_src2_time_s`` for
+    transparency.
+    """
+
+    mode: str  # "refined" | "skipped_disabled" | "skipped_gate"
+    # | "skipped_no_video" | "skipped_low_confidence" | "skipped_jump_mismatch"
+    # | "fallback_outside_silence" | "fallback_no_first_after"
+    reason: str = ""  # short human-readable explanation
+
+    # Anchor measurements (raw, before / after windows)
+    before_anchor_offset_frames: int | None = None
+    after_anchor_offset_frames: int | None = None
+    before_anchor_score: float = 0.0
+    after_anchor_score: float = 0.0
+
+    # Jump confirmation against audio's expected per-segment delay change
+    audio_expected_jump_frames: int | None = None
+    measured_jump_frames: int | None = None
+    jump_confirmed: bool = False
+
+    # Seam location (in src2 frame indices, absolute)
+    last_before_frame: int | None = None
+    first_after_frame: int | None = None
+
+    # The two splice-point candidates and which one we used
+    audio_src2_time_s: float = 0.0  # original splice picked by boundary_refiner
+    video_src2_time_s: float | None = None  # video-derived; None when skipped
+    frame_drift_ms: float = 0.0  # video - audio (signed)
+
+    # Configured gates for the run (echoed for audit clarity)
+    target_fps: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SplicePoint:
     """Precise splice location for a single transition."""
 
@@ -104,6 +145,10 @@ class SplicePoint:
     silence_zone: SilenceZone | None  # Best silence zone for splice
     boundary_result: BoundaryResult | None = None  # Rich audit data
     snap_metadata: dict[str, object] = field(default_factory=dict)
+    # Optional frame-precision refinement result. ``None`` when the
+    # refinement pass didn't run (older code paths, or stepping
+    # correction outside the refinement gate).
+    frame_refinement: FrameRefinementResult | None = None
 
 
 # ---------------------------------------------------------------------------

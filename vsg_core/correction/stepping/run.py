@@ -181,6 +181,35 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                 )
                 continue
 
+            # --- Frame-precision EDL refinement ---
+            # When both sources are progressive (matching fps, non-MPEG-2),
+            # rewrite each splice point's src2 time to the EXACT first-AFTER
+            # video frame, with the audio silence zone as a safety check.
+            # The frame_refinement module is purely additive: when gated out
+            # or when refinement falls back, splice points pass through
+            # unchanged (only the FrameRefinementResult metadata is attached
+            # for the audit trail).
+            from .frame_refinement import refine_splice_points
+
+            src1_path_for_refine = ctx.sources.get("Source 1")
+            src2_path_for_refine = ctx.sources.get(source_key)
+            # video_properties is populated by SubtitlesStep's VV
+            # preprocessing, which runs AFTER audio correction. So when
+            # stepping runs first, those entries may be missing — detect
+            # on demand for the gate.
+            src1_props = _get_or_detect_video_props(ctx, "Source 1", runner)
+            src2_props = _get_or_detect_video_props(ctx, source_key, runner)
+            splice_points = refine_splice_points(
+                splice_points,
+                src1_video_path=src1_path_for_refine,
+                src2_video_path=src2_path_for_refine,
+                src1_props=src1_props,
+                src2_props=src2_props,
+                settings=settings,
+                temp_dir=ctx.temp_dir,
+                log=log,
+            )
+
             # --- Per-transition verification against Source 1 content ---
             # Emits [Verify] log lines and records any mismatches as quality
             # issues.  Replicates Stage 3 of the research test script
@@ -349,6 +378,26 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                         "output_seam_t_before_s": output_seam_t_before_s,
                         "output_seam_t_after_s": output_seam_t_after_s,
                     }
+                    # Frame-precision refinement outcome (when run).
+                    fr = sp.frame_refinement
+                    if fr is not None:
+                        entry["frame_refinement"] = {
+                            "mode": fr.mode,
+                            "reason": fr.reason,
+                            "before_offset_frames": fr.before_anchor_offset_frames,
+                            "after_offset_frames": fr.after_anchor_offset_frames,
+                            "before_score": fr.before_anchor_score,
+                            "after_score": fr.after_anchor_score,
+                            "audio_expected_jump_frames": fr.audio_expected_jump_frames,
+                            "measured_jump_frames": fr.measured_jump_frames,
+                            "jump_confirmed": fr.jump_confirmed,
+                            "last_before_frame": fr.last_before_frame,
+                            "first_after_frame": fr.first_after_frame,
+                            "audio_src2_time_s": fr.audio_src2_time_s,
+                            "video_src2_time_s": fr.video_src2_time_s,
+                            "frame_drift_ms": fr.frame_drift_ms,
+                            "target_fps": fr.target_fps,
+                        }
                     boundary_audit.append(entry)
                 ctx.segment_flags[analysis_track_key]["audit_metadata"] = boundary_audit
 
@@ -734,3 +783,34 @@ def _swap_corrected_track(
         ctx.extracted_items.append(preserved)  # type: ignore[arg-type]
 
     log(f"[SUCCESS] Stepping correction applied for {original_props.name or 'track'}")
+
+
+def _get_or_detect_video_props(
+    ctx: Context, source_key: str, runner: CommandRunner
+) -> dict | None:
+    """Return cached video properties for ``source_key``, detecting on
+    demand if they're not in ``ctx.video_properties``.
+
+    Stepping correction runs before subtitle processing, so the
+    ``video_verified`` preprocessing that normally populates this cache
+    hasn't run yet. We detect lazily here so frame refinement can gate
+    on progressive/MPEG-2/fps without forcing a dependency change.
+    """
+    cached = ctx.video_properties.get(source_key) if ctx.video_properties else None
+    if cached:
+        return cached
+    path = ctx.sources.get(source_key) if ctx.sources else None
+    if not path:
+        return None
+    try:
+        from ...subtitles.frame_utils import detect_video_properties
+
+        props = detect_video_properties(str(path), runner)
+    except Exception as exc:
+        runner._log_message(
+            f"[FrameRefine] video properties detection failed for {source_key}: {exc}"
+        )
+        return None
+    if props:
+        ctx.video_properties[source_key] = props
+    return props or None
