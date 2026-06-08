@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 # Must be set BEFORE torch is imported (happens when backends load below).
 # Inherited by subprocesses via os.environ.
 
+# Pin OCR to the discrete GPU (device 0). On dual-GPU ROCm systems — e.g. a
+# discrete Radeon plus a Ryzen iGPU — llama.cpp/torch otherwise initialize the
+# iGPU and crash with a SIGSEGV on the first GPU kernel launch. setdefault() so
+# an explicit HIP_VISIBLE_DEVICES override (different device ordering) still wins.
+os.environ.setdefault("HIP_VISIBLE_DEVICES", "0")
+
 # Prevent VRAM fragmentation — limits internal block splitting so PyTorch
 # reuses large allocations instead of fragmenting into many small ones.
 os.environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "max_split_size_mb:512")
