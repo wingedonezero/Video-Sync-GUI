@@ -12,6 +12,7 @@ Values used below were measured straight from the test MKV
 (``ATOM THE BEGINNING BD/1.mkv``, 24000/1001) around OCR line 0293.
 """
 
+from vsg_core.subtitles.frame_utils.frame_audit import _find_minimal_fix
 from vsg_core.subtitles.frame_utils.frame_clock import FrameClock, FrameShift
 from vsg_core.subtitles.frame_utils.surgical_rounding import (
     surgical_round_event,
@@ -160,3 +161,18 @@ def test_frame_shift_preserves_frame_span_across_shift():
     out_span = CLOCK.frame_of(new_end) - CLOCK.frame_of(new_start)
     assert exact_span == 3
     assert out_span == exact_span
+
+
+# --- frame-audit minimal-fix report matches the real surgical adjustment -----
+
+
+def test_find_minimal_fix_reports_real_ceil_adjustment():
+    # Regression: 44128.29 floors to 44120 (frame 1058) but belongs on 1059;
+    # surgical ceils to 44130 = +10ms. The old report fell through to a bogus
+    # "frame_start - floor" = +49ms; it must report the real +10.
+    assert _find_minimal_fix(44128.29, CLOCK) == 10
+
+
+def test_find_minimal_fix_zero_when_floor_already_on_frame():
+    # A frame-exact PGS value floors cleanly -> no fix needed.
+    assert _find_minimal_fix(76243.0, CLOCK) == 0
