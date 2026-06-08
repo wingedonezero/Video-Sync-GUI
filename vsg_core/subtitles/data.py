@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
 
+    from .frame_utils.frame_clock import FrameClock
     from .frame_utils.surgical_rounding import SurgicalBatchStats
 
 # =============================================================================
@@ -930,7 +931,7 @@ class SubtitleData:
         self,
         path: Path | str,
         rounding: str = "floor",
-        fps: float | None = None,
+        clock: FrameClock | None = None,
     ) -> SurgicalBatchStats | None:
         """
         Save as ASS file.
@@ -938,43 +939,44 @@ class SubtitleData:
         THIS IS THE SINGLE ROUNDING POINT.
         Float ms → centiseconds happens here.
 
-        When fps is provided, surgical frame-aware rounding is applied:
-        floor by default, ceil only when floor would land on the wrong frame.
+        When an exact frame ``clock`` is provided, surgical frame-aware rounding
+        is applied: floor by default, ceil only when floor would land on the
+        wrong frame.
 
         Args:
             path: Output path
             rounding: Rounding mode ("floor", "round", "ceil")
-            fps: Target video FPS for surgical rounding (None = standard only)
+            clock: Exact CFR frame grid (None = standard rounding only)
 
         Returns:
             SurgicalBatchStats if surgical rounding was applied, None otherwise
         """
         from .writers.ass_writer import write_ass_file
 
-        return write_ass_file(self, Path(path), rounding=rounding, fps=fps)
+        return write_ass_file(self, Path(path), rounding=rounding, clock=clock)
 
     def save_srt(
         self,
         path: Path | str,
         rounding: str = "round",
-        fps: float | None = None,
+        clock: FrameClock | None = None,
     ) -> SurgicalBatchStats | None:
         """
         Save as SRT file.
 
         Float ms → integer ms happens here.
-        When fps is provided, surgical frame-aware rounding is applied
-        at 1ms precision via the ``rounded_ms`` path.
+        When an exact frame ``clock`` is provided, surgical frame-aware rounding
+        is applied at 1ms precision via the ``rounded_ms`` path.
         """
         from .writers.srt_writer import write_srt_file
 
-        return write_srt_file(self, Path(path), rounding=rounding, fps=fps)
+        return write_srt_file(self, Path(path), rounding=rounding, clock=clock)
 
     def save(
         self,
         path: Path | str,
         rounding: str | None = None,
-        fps: float | None = None,
+        clock: FrameClock | None = None,
     ) -> SurgicalBatchStats | None:
         """
         Save to file, format determined by extension.
@@ -982,7 +984,7 @@ class SubtitleData:
         Args:
             path: Output path
             rounding: Rounding mode ("floor", "round", "ceil")
-            fps: Target video FPS for surgical rounding (None = standard only)
+            clock: Exact CFR frame grid (None = standard rounding only)
 
         Returns:
             SurgicalBatchStats if surgical rounding was applied, None otherwise
@@ -992,9 +994,9 @@ class SubtitleData:
         rounding_mode = rounding or "floor"
 
         if ext in (".ass", ".ssa"):
-            return self.save_ass(path, rounding=rounding_mode, fps=fps)
+            return self.save_ass(path, rounding=rounding_mode, clock=clock)
         elif ext == ".srt":
-            return self.save_srt(path, rounding=rounding_mode, fps=fps)
+            return self.save_srt(path, rounding=rounding_mode, clock=clock)
         else:
             raise ValueError(f"Unsupported output format: {ext}")
 

@@ -18,12 +18,16 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .frame_clock import FrameClock
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "compare_video_properties",
+    "detect_frame_clock",
     "detect_video_fps",
     "detect_video_properties",
+    "frame_clock_from_props",
     "get_video_duration_ms",
     "get_video_properties",
 ]
@@ -807,3 +811,37 @@ def compare_video_properties(
     runner._log_message("[VideoProps] ─────────────────────────────────────────")
 
     return result
+
+
+def frame_clock_from_props(props: dict[str, Any]) -> FrameClock | None:
+    """Build an exact :class:`FrameClock` from detected video properties.
+
+    Returns ``None`` when the source has no trustworthy CFR-from-0 grid —
+    MPEG-1/2, interlaced/telecine, or variable frame rate. This mirrors the
+    frame-matching eligibility gate: only progressive, constant-rate streams
+    (Blu-ray / UHD / clean encodes) get an exact grid; everything else falls
+    back to plain rounding, exactly as the correlation/MPEG-2 path does today.
+    """
+    codec = props.get("codec_name", "")
+    if codec in ("mpeg2video", "mpeg1video"):
+        return None
+    if props.get("content_type") != "progressive":
+        return None
+    if props.get("is_vfr"):
+        return None
+    frac = props.get("fps_fraction")
+    if not frac or len(frac) != 2:
+        return None
+    num, den = int(frac[0]), int(frac[1])
+    if num <= 0 or den <= 0:
+        return None
+    return FrameClock(num=num, den=den)
+
+
+def detect_frame_clock(video_path: str, runner) -> FrameClock | None:
+    """Detect an exact CFR :class:`FrameClock` for ``video_path``, or ``None``.
+
+    Convenience wrapper over :func:`detect_video_properties` +
+    :func:`frame_clock_from_props` for callers that do not already hold props.
+    """
+    return frame_clock_from_props(detect_video_properties(video_path, runner))

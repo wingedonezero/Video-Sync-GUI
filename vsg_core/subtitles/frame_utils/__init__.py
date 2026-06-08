@@ -29,6 +29,11 @@ from .frame_audit import (
 )
 
 # ============================================================================
+# Exact frame grid
+# ============================================================================
+from .frame_clock import FrameClock, FrameShift
+
+# ============================================================================
 # Frame hashing and comparison
 # ============================================================================
 from .frame_hashing import (
@@ -73,8 +78,10 @@ from .timing import (
 # ============================================================================
 from .video_properties import (
     compare_video_properties,
+    detect_frame_clock,
     detect_video_fps,
     detect_video_properties,
+    frame_clock_from_props,
     get_video_duration_ms,
     get_video_properties,
 )
@@ -106,6 +113,8 @@ __all__ = [
     "CreditsInfo",
     "FrameAuditIssue",
     "FrameAuditResult",
+    "FrameClock",
+    "FrameShift",
     "MultiMetricResult",
     "RegionStats",
     "SampleResult",
@@ -123,8 +132,10 @@ __all__ = [
     "compute_mse",
     "compute_perceptual_hash",
     "compute_ssim",
+    "detect_frame_clock",
     "detect_video_fps",
     "detect_video_properties",
+    "frame_clock_from_props",
     "frame_to_time_aegisub",
     "frame_to_time_floor",
     "frame_to_time_middle",

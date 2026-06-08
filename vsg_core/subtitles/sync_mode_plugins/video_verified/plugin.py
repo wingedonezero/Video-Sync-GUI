@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from ....models.settings import AppSettings
     from ....orchestrator.steps.context import Context
     from ...data import OperationResult, SubtitleData
+    from ...frame_utils.frame_clock import FrameClock
 
 
 @register_sync_plugin
@@ -62,6 +63,7 @@ class VideoVerifiedSync(SyncPlugin):
         runner=None,
         settings: AppSettings | None = None,
         temp_dir: Path | None = None,
+        frame_clock: FrameClock | None = None,
         **kwargs,
     ) -> OperationResult:
         """
@@ -161,6 +163,7 @@ class VideoVerifiedSync(SyncPlugin):
             target_video=target_video,
             temp_dir=temp_dir,
             ctx=kwargs.get("ctx"),
+            frame_clock=frame_clock,
         )
 
     def _apply_offset(
@@ -180,10 +183,11 @@ class VideoVerifiedSync(SyncPlugin):
         target_video: str | None = None,
         temp_dir: Path | None = None,
         ctx: Context | None = None,
+        frame_clock: FrameClock | None = None,
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
         from ...data import OperationRecord, OperationResult
-        from ...sync_utils import apply_delay_to_events
+        from ...sync_utils import apply_delay_to_events, build_frame_shift
 
         def log(msg: str):
             if runner:
@@ -193,16 +197,21 @@ class VideoVerifiedSync(SyncPlugin):
             f"[VideoVerified] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
         )
 
-        events_synced = apply_delay_to_events(subtitle_data, final_offset_ms)
+        # Exact whole-frame snap for frame-locked subs on a shared CFR grid;
+        # flat delay otherwise (mid-frame, sub-frame global shift, VFR target).
+        frame_shift = build_frame_shift(frame_clock, details, global_shift_ms)
+        events_synced = apply_delay_to_events(
+            subtitle_data, final_offset_ms, frame_shift=frame_shift
+        )
 
         # Extract debug_paths from ctx if available
         debug_paths = ctx.debug_paths if ctx else None
 
-        # Run frame alignment audit (always when FPS available)
-        if settings and target_fps:
+        # Run frame alignment audit (only with an exact CFR grid for the target)
+        if settings and frame_clock is not None:
             self._run_frame_audit(
                 subtitle_data=subtitle_data,
-                fps=target_fps,
+                clock=frame_clock,
                 offset_ms=final_offset_ms,
                 job_name=job_name,
                 settings=settings,
@@ -270,13 +279,14 @@ class VideoVerifiedSync(SyncPlugin):
                 "selection_reason": selection_reason,
                 "target_fps": target_fps,
                 **details,
+                "frame_clock": frame_clock,
             },
         )
 
     def _run_frame_audit(
         self,
         subtitle_data: SubtitleData,
-        fps: float,
+        clock: FrameClock,
         offset_ms: float,
         job_name: str,
         settings: AppSettings,
@@ -299,7 +309,7 @@ class VideoVerifiedSync(SyncPlugin):
         # Run the audit
         result = run_frame_audit(
             subtitle_data=subtitle_data,
-            fps=fps,
+            clock=clock,
             rounding_mode=rounding_mode,
             offset_ms=offset_ms,
             job_name=job_name,

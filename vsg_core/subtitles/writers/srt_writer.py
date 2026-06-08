@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..data import SubtitleData
+    from ..frame_utils.frame_clock import FrameClock
     from ..frame_utils.surgical_rounding import (
         SurgicalBatchStats,
         SurgicalEventResult,
@@ -29,34 +30,33 @@ def write_srt_file(
     data: SubtitleData,
     path: Path,
     rounding: str = "round",
-    fps: float | None = None,
+    clock: FrameClock | None = None,
 ) -> SurgicalBatchStats | None:
     """
     Write SubtitleData to SRT file.
 
     Timing is rounded to integer milliseconds here.
-    When fps is provided, surgical frame-aware rounding is applied at
-    1ms precision via the ``rounded_ms`` path (separate from the ASS
+    When an exact frame ``clock`` is provided, surgical frame-aware rounding is
+    applied at 1ms precision via the ``rounded_ms`` path (separate from the ASS
     centisecond path).
 
     Args:
         data: SubtitleData to write
         path: Output path
         rounding: Rounding mode ("floor", "round", "ceil")
-        fps: Target video FPS for surgical rounding (None = standard only)
+        clock: Exact CFR frame grid (None = plain rounding only, e.g. VFR/MPEG-2)
 
     Returns:
         SurgicalBatchStats if surgical rounding was applied, None otherwise
     """
-    # Pre-compute surgical rounding if FPS is available
+    # Pre-compute surgical rounding if an exact frame grid is available
     surgical_results: dict[int, SurgicalEventResult] | None = None
     surgical_stats: SurgicalBatchStats | None = None
-    if fps is not None:
+    if clock is not None:
         from ..frame_utils.surgical_rounding import surgical_round_batch
 
-        frame_duration_ms = 1000.0 / fps
         surgical_results, surgical_stats = surgical_round_batch(
-            data.events, frame_duration_ms, precision_ms=1
+            data.events, clock, precision_ms=1
         )
 
     lines = []

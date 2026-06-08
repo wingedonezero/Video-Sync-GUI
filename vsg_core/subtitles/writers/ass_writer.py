@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..data import SubtitleData
+    from ..frame_utils.frame_clock import FrameClock
     from ..frame_utils.surgical_rounding import (
         SurgicalBatchStats,
         SurgicalEventResult,
@@ -28,7 +29,7 @@ def write_ass_file(
     data: SubtitleData,
     path: Path,
     rounding: str = "floor",
-    fps: float | None = None,
+    clock: FrameClock | None = None,
 ) -> SurgicalBatchStats | None:
     """
     Write SubtitleData to ASS file.
@@ -36,29 +37,26 @@ def write_ass_file(
     THIS IS WHERE TIMING ROUNDING HAPPENS.
     Float ms → centiseconds (floor by default).
 
-    When fps is provided, surgical frame-aware rounding is applied:
-    floor by default, ceil only when floor would land on the wrong frame.
-    Start and end are coordinated to preserve duration when safe.
+    When an exact frame ``clock`` is provided, surgical frame-aware rounding is
+    applied: floor by default, ceil only when floor would land on the wrong
+    frame. Start and end are coordinated to preserve duration when safe.
 
     Args:
         data: SubtitleData to write
         path: Output path
         rounding: Rounding mode ("floor", "round", "ceil")
-        fps: Target video FPS for surgical rounding (None = standard rounding only)
+        clock: Exact CFR frame grid (None = plain rounding only, e.g. VFR/MPEG-2)
 
     Returns:
         SurgicalBatchStats if surgical rounding was applied, None otherwise
     """
-    # Pre-compute surgical rounding if FPS is available
+    # Pre-compute surgical rounding if an exact frame grid is available
     surgical_results: dict[int, SurgicalEventResult] | None = None
     surgical_stats: SurgicalBatchStats | None = None
-    if fps is not None:
+    if clock is not None:
         from ..frame_utils.surgical_rounding import surgical_round_batch
 
-        frame_duration_ms = 1000.0 / fps
-        surgical_results, surgical_stats = surgical_round_batch(
-            data.events, frame_duration_ms
-        )
+        surgical_results, surgical_stats = surgical_round_batch(data.events, clock)
 
     lines = []
 
@@ -266,17 +264,13 @@ def _write_events(
             elif field_lower == "start":
                 # ROUNDING HAPPENS HERE
                 if surg is not None:
-                    values.append(
-                        _format_ass_time_from_cs(surg.start.centisecond_ms)
-                    )
+                    values.append(_format_ass_time_from_cs(surg.start.centisecond_ms))
                 else:
                     values.append(_format_ass_time(event.start_ms, rounding_mode))
             elif field_lower == "end":
                 # ROUNDING HAPPENS HERE
                 if surg is not None:
-                    values.append(
-                        _format_ass_time_from_cs(surg.end.centisecond_ms)
-                    )
+                    values.append(_format_ass_time_from_cs(surg.end.centisecond_ms))
                 else:
                     values.append(_format_ass_time(event.end_ms, rounding_mode))
             elif field_lower == "style":
