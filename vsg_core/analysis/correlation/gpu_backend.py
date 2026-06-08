@@ -19,9 +19,16 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Pin GPU correlation to the discrete GPU (device 0). torch is imported lazily
+# in get_device(), so this import-time setdefault lands before any HIP init. On
+# dual-GPU ROCm systems the iGPU otherwise SIGSEGVs on first kernel launch;
+# setdefault so main.py's global pin / an explicit override still wins.
+os.environ.setdefault("HIP_VISIBLE_DEVICES", "0")
 
 # ── Module State ────────────────────────────────────────────────────────────
 
@@ -93,7 +100,9 @@ def get_spectrogram_transform(
 
         device = get_device()
         _transform_cache[key] = torchaudio.transforms.Spectrogram(
-            n_fft=n_fft, hop_length=hop_length, power=power,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            power=power,
         ).to(device)
 
     return _transform_cache[key]

@@ -22,6 +22,13 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
+# Pin all GPU work to the discrete GPU (device 0) before torch/llama_cpp load.
+# On dual-GPU ROCm systems (e.g. a discrete Radeon + a Ryzen iGPU) the iGPU
+# otherwise gets initialized and SIGSEGVs on the first kernel launch. Every
+# subprocess inherits this; setdefault so an explicit override still wins. The
+# CPU-only source_separation path blanks it on its own subprocess env.
+os.environ.setdefault("HIP_VISIBLE_DEVICES", "0")
+
 # Note: NANOBIND_DISABLE_LEAK_CHECK was previously needed due to VideoTimestamps cache leaks
 # This has been fixed by implementing proper cleanup in frame_utils.clear_vfr_cache()
 # os.environ.setdefault("NANOBIND_DISABLE_LEAK_CHECK", "1")
