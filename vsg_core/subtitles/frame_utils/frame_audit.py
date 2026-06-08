@@ -16,12 +16,11 @@ from datetime import datetime
 from pathlib import Path  # noqa: TC003 - Used at runtime in write_audit_report
 from typing import TYPE_CHECKING
 
-from .surgical_rounding import _real_frame_ms, _time_to_frame
-
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..data import SubtitleData
+    from .frame_clock import FrameClock
     from .surgical_rounding import SurgicalBatchStats
 
 
@@ -76,6 +75,8 @@ class FrameAuditResult:
 
     job_name: str
     fps: float
+    fps_num: int
+    fps_den: int
     frame_duration_ms: float
     rounding_mode: str
     offset_applied_ms: float
@@ -154,20 +155,20 @@ def _round_to_centisecond(ms: float, mode: str) -> int:
 def _find_minimal_fix(
     exact_ms: float,
     target_frame: int,
-    frame_duration_ms: float,
+    clock: FrameClock,
     rounding_mode: str,
 ) -> int:
     """Find minimal centisecond adjustment to land in target frame.
 
     Returns the adjustment in ms needed (can be negative).
     """
-    # Frame boundaries (real, millisecond-rounded grid)
-    frame_start_ms = _real_frame_ms(target_frame, frame_duration_ms)
-    frame_end_ms = _real_frame_ms(target_frame + 1, frame_duration_ms)
+    # Frame boundaries (exact integer grid)
+    frame_start_ms = clock.frame_ms(target_frame)
+    frame_end_ms = clock.frame_ms(target_frame + 1)
 
     # Current rounded value
     rounded = _round_to_centisecond(exact_ms, rounding_mode)
-    actual_frame = _time_to_frame(rounded, frame_duration_ms)
+    actual_frame = clock.frame_of(rounded)
 
     if actual_frame == target_frame:
         return 0  # Already correct
@@ -175,12 +176,12 @@ def _find_minimal_fix(
     # Find the first centisecond that lands in the target frame
     # Try rounding up (ceil) to get into frame
     ceil_cs = int(math.ceil(frame_start_ms / 10.0)) * 10
-    if _time_to_frame(ceil_cs, frame_duration_ms) == target_frame:
+    if clock.frame_of(ceil_cs) == target_frame:
         return ceil_cs - rounded
 
     # Try rounding down from frame end
     floor_cs = int(math.floor((frame_end_ms - 0.1) / 10.0)) * 10
-    if _time_to_frame(floor_cs, frame_duration_ms) == target_frame:
+    if clock.frame_of(floor_cs) == target_frame:
         return floor_cs - rounded
 
     # Fallback: just report difference to frame start
@@ -201,7 +202,7 @@ def _format_timestamp(ms: float) -> str:
 
 def run_frame_audit(
     subtitle_data: SubtitleData,
-    fps: float,
+    clock: FrameClock,
     rounding_mode: str,
     offset_ms: float,
     job_name: str,
@@ -215,7 +216,7 @@ def run_frame_audit(
 
     Args:
         subtitle_data: SubtitleData with sync already applied
-        fps: Target video FPS
+        clock: Exact CFR frame grid for the target video
         rounding_mode: Rounding mode that will be used at save ("floor", "round", "ceil")
         offset_ms: The sync offset that was applied (for reporting)
         job_name: Job identifier for the report
@@ -224,11 +225,14 @@ def run_frame_audit(
     Returns:
         FrameAuditResult with complete analysis
     """
-    frame_duration_ms = 1000.0 / fps
+    fps = clock.num / clock.den
+    frame_duration_ms = clock.frame_duration_ms
 
     result = FrameAuditResult(
         job_name=job_name,
         fps=fps,
+        fps_num=clock.num,
+        fps_den=clock.den,
         frame_duration_ms=frame_duration_ms,
         rounding_mode=rounding_mode,
         offset_applied_ms=offset_ms,
@@ -250,8 +254,8 @@ def run_frame_audit(
         exact_end = event.end_ms
 
         # What frames should these land on?
-        target_start_frame = _time_to_frame(exact_start, frame_duration_ms)
-        target_end_frame = _time_to_frame(exact_end, frame_duration_ms)
+        target_start_frame = clock.frame_of(exact_start)
+        target_end_frame = clock.frame_of(exact_end)
         target_span = target_end_frame - target_start_frame
 
         # What will rounding produce?
@@ -259,8 +263,8 @@ def run_frame_audit(
         rounded_end = _round_to_centisecond(exact_end, rounding_mode)
 
         # What frames do rounded times land on?
-        actual_start_frame = _time_to_frame(rounded_start, frame_duration_ms)
-        actual_end_frame = _time_to_frame(rounded_end, frame_duration_ms)
+        actual_start_frame = clock.frame_of(rounded_start)
+        actual_end_frame = clock.frame_of(rounded_end)
         actual_span = actual_end_frame - actual_start_frame
 
         # Calculate drift
@@ -308,7 +312,7 @@ def run_frame_audit(
             ("ceil", "ceil_issues"),
         ]:
             alt_rounded_start = _round_to_centisecond(exact_start, mode)
-            alt_start_frame = _time_to_frame(alt_rounded_start, frame_duration_ms)
+            alt_start_frame = clock.frame_of(alt_rounded_start)
             if alt_start_frame != target_start_frame:
                 setattr(result, counter_attr, getattr(result, counter_attr) + 1)
 
@@ -330,7 +334,7 @@ def run_frame_audit(
                 actual_start_frame=actual_start_frame,
                 start_drift=start_drift,
                 start_fix_needed_ms=_find_minimal_fix(
-                    exact_start, target_start_frame, frame_duration_ms, rounding_mode
+                    exact_start, target_start_frame, clock, rounding_mode
                 ),
                 exact_end_ms=exact_end,
                 rounded_end_ms=rounded_end,
@@ -338,7 +342,7 @@ def run_frame_audit(
                 actual_end_frame=actual_end_frame,
                 end_drift=end_drift,
                 end_fix_needed_ms=_find_minimal_fix(
-                    exact_end, target_end_frame, frame_duration_ms, rounding_mode
+                    exact_end, target_end_frame, clock, rounding_mode
                 ),
                 original_duration_ms=original_duration,
                 rounded_duration_ms=rounded_duration,
@@ -351,9 +355,7 @@ def run_frame_audit(
         try:
             from .surgical_rounding import surgical_round_batch
 
-            _, surgical_stats = surgical_round_batch(
-                subtitle_data.events, frame_duration_ms
-            )
+            _, surgical_stats = surgical_round_batch(subtitle_data.events, clock)
             result.predicted_corrections = surgical_stats.points_different_from_floor
             result.predicted_correction_events = surgical_stats.events_with_adjustments
         except Exception:
@@ -514,8 +516,10 @@ def write_audit_report(
         )
 
         # Pre-compute surgical fixes for before/after display
+        from .frame_clock import FrameClock
         from .surgical_rounding import surgical_round_event
 
+        clock = FrameClock(result.fps_num, result.fps_den)
         for issue in sorted_issues:
             lines.append(
                 f"[{issue.issue_type}] Line {issue.line_index} @ {issue.timestamp_display}"
@@ -526,7 +530,7 @@ def write_audit_report(
             surg = surgical_round_event(
                 issue.exact_start_ms,
                 issue.exact_end_ms,
-                result.frame_duration_ms,
+                clock,
             )
 
             if issue.start_drift != 0:

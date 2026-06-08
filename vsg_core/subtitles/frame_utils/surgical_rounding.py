@@ -2,19 +2,30 @@
 """
 Surgical frame-aware rounding for subtitle timestamps.
 
-When floor rounding to centiseconds (10ms precision) would land a timestamp
-on the wrong frame, uses ceil instead. Only adjusts timestamps that need it;
-all others remain identical to plain floor behavior.
+When rounding a timestamp to the output precision (centiseconds for ASS, 1ms for
+SRT) would land it on a different video frame than the exact value, this uses
+ceil instead of floor. Only timestamps that need it are adjusted; everything
+else is identical to plain floor.
 
-Algorithm:
-1. Floor is default (matches Aegisub and ASS convention)
-2. Check if floor lands on the correct frame
-3. If not, use ceil (minimal adjustment: +10ms)
-4. Coordinate end with start to preserve duration when safe
+Algorithm (per timestamp):
+1. Floor is the default (matches Aegisub and ASS convention).
+2. If floor still lands on the exact value's frame -> keep floor.
+3. Otherwise try ceil; if that lands on the frame -> use ceil (+one tick).
+4. Otherwise snap to the centisecond sitting on the target frame itself.
 
-This module provides shared logic used by both:
-- ass_writer.py (applies the fix at save time)
-- frame_audit.py (predicts fixes for reporting)
+For an event, the end is coordinated with the start: when the start was bumped
+floor->ceil, the end is bumped too if that preserves the original duration and
+stays on its own frame.
+
+Frames come from an exact :class:`FrameClock` (integer grid from the fps
+fraction). There is no millisecond tolerance: a value is on a frame or it is
+not, judged against the real grid. Whole-frame sync shifts are made exact at the
+apply step (see :class:`FrameShift`), so frame-locked values reach this code
+sitting exactly on a frame with no slop to absorb.
+
+Shared by:
+- ass_writer.py / srt_writer.py (applies the fix at save time)
+- frame_audit.py (predicts/reports fixes)
 """
 
 from __future__ import annotations
@@ -27,8 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..data import SubtitleEvent
-
-EPSILON = 1e-6
+    from .frame_clock import FrameClock
 
 
 @dataclass(slots=True)
@@ -37,10 +47,10 @@ class SurgicalRoundResult:
 
     centisecond_ms: int  # Final rounded value in ms (centisecond-aligned, ASS path)
     rounded_ms: int  # Final rounded value in ms (precision-aligned, generic path)
-    was_adjusted: bool  # True if ceil was used instead of floor
+    was_adjusted: bool  # True if ceil/snap was used instead of floor
     target_frame: int  # Frame the exact time maps to
     floor_frame: int  # Frame floor rounding would produce
-    method: str  # "floor", "ceil", or "coordinated_ceil"
+    method: str  # "floor", "ceil", "coordinated_ceil", or "snap"
 
 
 @dataclass(slots=True)
@@ -69,85 +79,33 @@ class SurgicalBatchStats:
     events_with_adjustments: int = 0  # Events where at least one point changed
 
 
-def _real_frame_ms(n: int, frame_duration_ms: float) -> int:
-    """Presentation time (ms) of real video frame ``n``.
-
-    Container muxers (MakeMKV, mkvmerge) store CFR frame timestamps rounded to
-    the millisecond — ``round(n * frame_duration)`` — NOT the exact
-    ``n * frame_duration`` line. PGS subtitle timestamps land on these real
-    frames, so the rounding check must compare against them.
-    """
-    return int(n * frame_duration_ms + 0.5)
-
-
-# A frame-exact timestamp can sit a fraction of a millisecond off a real frame:
-# container frames are millisecond-rounded, and a whole-frame shift applied as
-# float milliseconds (N * frame_duration) leaves up to ~1ms of slop. Treat a
-# value within this tolerance ABOVE a real frame as sitting ON that frame, so the
-# slop never tips it onto the next frame. It is far below the 10ms centisecond
-# grid, so it never absorbs a genuinely mid-frame value; a no-shift PGS value has
-# zero slop and is unaffected either way.
-_ON_FRAME_TOLERANCE_MS = 1.5
-
-
-def _time_to_frame(time_ms: float, frame_duration_ms: float) -> int:
-    """Index of the first real video frame at or after ``time_ms``.
-
-    This is the frame a timestamp actually renders against: a player shows a
-    subtitle on a frame whose presentation time is >= the start, and the
-    exclusive end frame is always this value minus one — so a single
-    "first frame at or after" mapping is correct for both start and end checks.
-
-    Crucially it measures against the *real* (millisecond-rounded) frame grid,
-    not the synthetic ``int(t / frame_duration)`` line. The two disagree by up to
-    ~0.5ms right at each frame boundary, which is exactly where a PGS timestamp
-    sits (it IS the frame, just at an odd millisecond). The old formula therefore
-    read a floored PGS value as having drifted to a different frame when it had
-    not, triggering an unwanted ceil. Against the real grid a value already on a
-    frame stays on it under floor; genuinely off-frame (shifted) values still
-    drift and get corrected exactly as before.
-
-    ``_ON_FRAME_TOLERANCE_MS`` of sub-millisecond slop above a real frame is
-    pulled back onto that frame so a float-ms frame shift can't slip a frame.
-    """
-    # Pull back by the on-frame tolerance, then walk to the true boundary. The
-    # real frame grid is monotonic and within ~1ms of the estimate, so 1-2 steps.
-    t = time_ms - _ON_FRAME_TOLERANCE_MS
-    n = int(t / frame_duration_ms)
-    while _real_frame_ms(n, frame_duration_ms) >= t:
-        n -= 1
-    while _real_frame_ms(n, frame_duration_ms) < t:
-        n += 1
-    return n
-
-
 def surgical_round_single(
     exact_ms: float,
-    frame_duration_ms: float,
+    clock: FrameClock,
     precision_ms: int = 10,
 ) -> SurgicalRoundResult:
     """
     Surgically round a single timestamp to the given precision.
 
-    Uses floor by default. Only switches to ceil when floor
-    would land on the wrong frame.
+    Uses floor by default. Switches to ceil (or a snap) only when floor would
+    land on a different real frame than the exact value.
 
     Args:
         exact_ms: Exact time in milliseconds (float, after offset applied)
-        frame_duration_ms: Duration of one frame in milliseconds
+        clock: Exact CFR frame grid for the target video
         precision_ms: Rounding granularity — 10 for ASS (centiseconds),
-                      1 for SRT/ms-based formats.  Defaults to 10 so all
-                      existing ASS call sites are unchanged.
+                      1 for SRT/ms-based formats. Defaults to 10 so existing
+                      ASS call sites are unchanged.
 
     Returns:
         SurgicalRoundResult with the rounded value and metadata
     """
     p = precision_ms
-    target_frame = _time_to_frame(exact_ms, frame_duration_ms)
+    target_frame = clock.frame_of(exact_ms)
 
     # Try floor first (current default behavior)
     floor_val = math.floor(exact_ms / p) * p
-    floor_frame = _time_to_frame(floor_val, frame_duration_ms)
+    floor_frame = clock.frame_of(floor_val)
 
     if floor_frame == target_frame:
         return SurgicalRoundResult(
@@ -159,9 +117,9 @@ def surgical_round_single(
             method="floor",
         )
 
-    # Floor failed - try ceil
+    # Floor failed — try ceil
     ceil_val = math.ceil(exact_ms / p) * p
-    if _time_to_frame(ceil_val, frame_duration_ms) == target_frame:
+    if clock.frame_of(ceil_val) == target_frame:
         return SurgicalRoundResult(
             centisecond_ms=math.ceil(exact_ms / 10) * 10,
             rounded_ms=ceil_val,
@@ -173,7 +131,7 @@ def surgical_round_single(
 
     # Fallback: neither floor nor ceil of the exact value lands on the target
     # frame; snap to the centisecond sitting on the target real frame itself.
-    real_target = _real_frame_ms(target_frame, frame_duration_ms)
+    real_target = clock.frame_ms(target_frame)
     fallback_val = math.floor(real_target / p) * p
     return SurgicalRoundResult(
         centisecond_ms=math.floor(real_target / 10) * 10,
@@ -188,24 +146,24 @@ def surgical_round_single(
 def surgical_round_event(
     start_ms: float,
     end_ms: float,
-    frame_duration_ms: float,
+    clock: FrameClock,
     precision_ms: int = 10,
 ) -> SurgicalEventResult:
     """
     Surgically round an event's start and end with coordination.
 
-    Coordination rule: If start was adjusted (floor->ceil) and end's floor
-    is already correct, try ceil for end too. Use ceil(end) only if it:
+    Coordination rule: if start was adjusted (floor->ceil) and end's floor is
+    already correct, try ceil for end too. Use ceil(end) only if it:
     1. Still maps to the correct frame
     2. Preserves the original floor-floor duration
 
-    This prevents unnecessary duration changes caused by adjusting only
-    one side of the event.
+    This prevents unnecessary duration changes caused by adjusting only one
+    side of the event.
 
     Args:
         start_ms: Exact start time in milliseconds
         end_ms: Exact end time in milliseconds
-        frame_duration_ms: Duration of one frame in milliseconds
+        clock: Exact CFR frame grid for the target video
         precision_ms: Rounding granularity (10 for ASS, 1 for SRT)
 
     Returns:
@@ -213,26 +171,21 @@ def surgical_round_event(
     """
     p = precision_ms
 
-    # Round start
-    start_result = surgical_round_single(start_ms, frame_duration_ms, p)
-
-    # Round end independently first
-    end_result = surgical_round_single(end_ms, frame_duration_ms, p)
+    start_result = surgical_round_single(start_ms, clock, p)
+    end_result = surgical_round_single(end_ms, clock, p)
 
     # Coordination: if start was adjusted and end was NOT adjusted
     coordination_applied = False
     if start_result.was_adjusted and not end_result.was_adjusted:
-        # What would floor-floor duration have been?
         floor_start = math.floor(start_ms / p) * p
         floor_end = math.floor(end_ms / p) * p
         original_floor_duration = floor_end - floor_start
 
-        # Try ceil for end too
         ceil_end = math.ceil(end_ms / p) * p
-        end_target_frame = _time_to_frame(end_ms, frame_duration_ms)
+        end_target_frame = clock.frame_of(end_ms)
 
-        if _time_to_frame(ceil_end, frame_duration_ms) == end_target_frame:
-            # Ceil end is on correct frame — check duration
+        if clock.frame_of(ceil_end) == end_target_frame:
+            # Ceil end is on the correct frame — check duration
             coordinated_duration = ceil_end - start_result.rounded_ms
             if coordinated_duration == original_floor_duration:
                 end_result = SurgicalRoundResult(
@@ -262,7 +215,7 @@ def surgical_round_event(
 
 def surgical_round_batch(
     events: Sequence[SubtitleEvent],
-    frame_duration_ms: float,
+    clock: FrameClock,
     precision_ms: int = 10,
 ) -> tuple[dict[int, SurgicalEventResult], SurgicalBatchStats]:
     """
@@ -270,7 +223,7 @@ def surgical_round_batch(
 
     Args:
         events: Sequence of SubtitleEvent objects
-        frame_duration_ms: Duration of one frame in milliseconds
+        clock: Exact CFR frame grid for the target video
         precision_ms: Rounding granularity (10 for ASS, 1 for SRT)
 
     Returns:
@@ -291,7 +244,7 @@ def surgical_round_batch(
         result = surgical_round_event(
             event.start_ms,
             event.end_ms,
-            frame_duration_ms,
+            clock,
             precision_ms,
         )
         results[idx] = result

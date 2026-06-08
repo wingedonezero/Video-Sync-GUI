@@ -385,13 +385,14 @@ def process_subtitle_track(
                     f"[DIAG]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms"
                 )
 
-        # Get target FPS for surgical frame-aware rounding (from sync result)
-        save_fps: float | None = None
+        # Exact CFR frame clock for surgical frame-aware rounding (from sync
+        # result). None for VFR/MPEG-2 targets -> plain rounding, no surgical pass.
+        save_clock = None
         if sync_result and sync_result.details:
-            save_fps = sync_result.details.get("target_fps")
+            save_clock = sync_result.details.get("frame_clock")
 
         surgical_stats = subtitle_data.save(
-            output_path, rounding=rounding_mode, fps=save_fps
+            output_path, rounding=rounding_mode, clock=save_clock
         )
         item.extracted_path = output_path
         runner._log_message(
