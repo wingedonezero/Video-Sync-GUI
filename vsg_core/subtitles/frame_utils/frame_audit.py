@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path  # noqa: TC003 - Used at runtime in write_audit_report
 from typing import TYPE_CHECKING
 
+from .surgical_rounding import _real_frame_ms, _time_to_frame
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -138,12 +140,6 @@ class FrameAuditResult:
         self.correction_applied = True
 
 
-def _time_to_frame(time_ms: float, frame_duration_ms: float) -> int:
-    """Convert time to frame number (floor-based)."""
-    epsilon = 1e-6
-    return int((time_ms + epsilon) / frame_duration_ms)
-
-
 def _round_to_centisecond(ms: float, mode: str) -> int:
     """Round milliseconds to centiseconds (10ms precision)."""
     value = ms / 10.0
@@ -165,9 +161,9 @@ def _find_minimal_fix(
 
     Returns the adjustment in ms needed (can be negative).
     """
-    # Frame boundaries
-    frame_start_ms = target_frame * frame_duration_ms
-    frame_end_ms = (target_frame + 1) * frame_duration_ms
+    # Frame boundaries (real, millisecond-rounded grid)
+    frame_start_ms = _real_frame_ms(target_frame, frame_duration_ms)
+    frame_end_ms = _real_frame_ms(target_frame + 1, frame_duration_ms)
 
     # Current rounded value
     rounded = _round_to_centisecond(exact_ms, rounding_mode)
@@ -489,14 +485,10 @@ def write_audit_report(
         # Surgical frame-aware rounding section
         if result.correction_applied:
             lines.append("Surgical frame-aware rounding (APPLIED at save):")
-            lines.append(
-                f"  Timing points corrected: {result.corrected_timing_points}"
-            )
+            lines.append(f"  Timing points corrected: {result.corrected_timing_points}")
             lines.append(f"  Events with corrections: {result.corrected_events}")
             if result.coordinated_ends > 0:
-                lines.append(
-                    f"  Coordinated end times:   {result.coordinated_ends}"
-                )
+                lines.append(f"  Coordinated end times:   {result.coordinated_ends}")
             lines.append("  Result: All frame drift issues resolved")
             lines.append("")
         elif result.predicted_corrections > 0:
