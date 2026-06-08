@@ -1138,7 +1138,7 @@ class ManualSelectionDialog(QDialog):
         """
         import json
 
-        from PySide6.QtCore import QProcess, Qt
+        from PySide6.QtCore import QProcess, QProcessEnvironment, Qt
         from PySide6.QtWidgets import QProgressDialog
 
         track_data = widget.track_data
@@ -1214,6 +1214,14 @@ class ManualSelectionDialog(QDialog):
                 str(output_dir),
             ]
         )
+
+        # Pin the preview OCR subprocess to the discrete GPU (device 0). On
+        # dual-GPU ROCm systems the iGPU otherwise initializes and SIGSEGVs.
+        # setdefault semantics: only inject if not already set in the env.
+        proc_env = QProcessEnvironment.systemEnvironment()
+        if not proc_env.contains("HIP_VISIBLE_DEVICES"):
+            proc_env.insert("HIP_VISIBLE_DEVICES", "0")
+        process.setProcessEnvironment(proc_env)
 
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.start()

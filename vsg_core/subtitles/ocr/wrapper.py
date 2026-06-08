@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -188,6 +189,13 @@ def _run_ocr_subprocess(
 
     runner._log_message(f"[OCR] Running OCR in subprocess for track {item.track.id}...")
 
+    # Pin the OCR subprocess to the discrete GPU (device 0) so the child
+    # inherits the device from birth. On dual-GPU ROCm systems the iGPU
+    # otherwise initializes and SIGSEGVs. setdefault so an explicit override is
+    # respected; redundant with the pin in vlm_backends/__init__.py.
+    ocr_env = {**os.environ}
+    ocr_env.setdefault("HIP_VISIBLE_DEVICES", "0")
+
     # Start subprocess
     try:
         process = subprocess.Popen(
@@ -196,6 +204,7 @@ def _run_ocr_subprocess(
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            env=ocr_env,
         )
     except Exception as e:
         runner._log_message(f"[OCR] ERROR: Failed to start OCR subprocess: {e}")
