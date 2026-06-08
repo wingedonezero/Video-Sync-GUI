@@ -152,40 +152,19 @@ def _round_to_centisecond(ms: float, mode: str) -> int:
         return int(math.floor(value)) * 10
 
 
-def _find_minimal_fix(
-    exact_ms: float,
-    target_frame: int,
-    clock: FrameClock,
-    rounding_mode: str,
-) -> int:
-    """Find minimal centisecond adjustment to land in target frame.
+def _find_minimal_fix(exact_ms: float, clock: FrameClock) -> int:
+    """Minimal centisecond adjustment to keep this value on its frame.
 
-    Returns the adjustment in ms needed (can be negative).
+    The surgical rounder is the source of truth: floor by default, ceil (or a
+    snap) only when floor would land on the wrong frame. This reports the ms
+    difference between what surgical produces and the plain floor — 0 when floor
+    is already on-frame, +10 for a one-tick ceil rescue, etc. It always agrees
+    with the ``floor -> surgical`` line shown in the report.
     """
-    # Frame boundaries (exact integer grid)
-    frame_start_ms = clock.frame_ms(target_frame)
-    frame_end_ms = clock.frame_ms(target_frame + 1)
+    from .surgical_rounding import surgical_round_single
 
-    # Current rounded value
-    rounded = _round_to_centisecond(exact_ms, rounding_mode)
-    actual_frame = clock.frame_of(rounded)
-
-    if actual_frame == target_frame:
-        return 0  # Already correct
-
-    # Find the first centisecond that lands in the target frame
-    # Try rounding up (ceil) to get into frame
-    ceil_cs = int(math.ceil(frame_start_ms / 10.0)) * 10
-    if clock.frame_of(ceil_cs) == target_frame:
-        return ceil_cs - rounded
-
-    # Try rounding down from frame end
-    floor_cs = int(math.floor((frame_end_ms - 0.1) / 10.0)) * 10
-    if clock.frame_of(floor_cs) == target_frame:
-        return floor_cs - rounded
-
-    # Fallback: just report difference to frame start
-    return int(frame_start_ms - rounded)
+    floor_cs = math.floor(exact_ms / 10) * 10
+    return surgical_round_single(exact_ms, clock).centisecond_ms - floor_cs
 
 
 def _format_timestamp(ms: float) -> str:
@@ -333,17 +312,13 @@ def run_frame_audit(
                 target_start_frame=target_start_frame,
                 actual_start_frame=actual_start_frame,
                 start_drift=start_drift,
-                start_fix_needed_ms=_find_minimal_fix(
-                    exact_start, target_start_frame, clock, rounding_mode
-                ),
+                start_fix_needed_ms=_find_minimal_fix(exact_start, clock),
                 exact_end_ms=exact_end,
                 rounded_end_ms=rounded_end,
                 target_end_frame=target_end_frame,
                 actual_end_frame=actual_end_frame,
                 end_drift=end_drift,
-                end_fix_needed_ms=_find_minimal_fix(
-                    exact_end, target_end_frame, clock, rounding_mode
-                ),
+                end_fix_needed_ms=_find_minimal_fix(exact_end, clock),
                 original_duration_ms=original_duration,
                 rounded_duration_ms=rounded_duration,
                 duration_delta_ms=duration_delta,
