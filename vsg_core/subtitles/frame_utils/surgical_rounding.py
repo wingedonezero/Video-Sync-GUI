@@ -69,9 +69,56 @@ class SurgicalBatchStats:
     events_with_adjustments: int = 0  # Events where at least one point changed
 
 
+def _real_frame_ms(n: int, frame_duration_ms: float) -> int:
+    """Presentation time (ms) of real video frame ``n``.
+
+    Container muxers (MakeMKV, mkvmerge) store CFR frame timestamps rounded to
+    the millisecond — ``round(n * frame_duration)`` — NOT the exact
+    ``n * frame_duration`` line. PGS subtitle timestamps land on these real
+    frames, so the rounding check must compare against them.
+    """
+    return int(n * frame_duration_ms + 0.5)
+
+
+# A frame-exact timestamp can sit a fraction of a millisecond off a real frame:
+# container frames are millisecond-rounded, and a whole-frame shift applied as
+# float milliseconds (N * frame_duration) leaves up to ~1ms of slop. Treat a
+# value within this tolerance ABOVE a real frame as sitting ON that frame, so the
+# slop never tips it onto the next frame. It is far below the 10ms centisecond
+# grid, so it never absorbs a genuinely mid-frame value; a no-shift PGS value has
+# zero slop and is unaffected either way.
+_ON_FRAME_TOLERANCE_MS = 1.5
+
+
 def _time_to_frame(time_ms: float, frame_duration_ms: float) -> int:
-    """Convert time to frame number (floor with epsilon protection)."""
-    return int((time_ms + EPSILON) / frame_duration_ms)
+    """Index of the first real video frame at or after ``time_ms``.
+
+    This is the frame a timestamp actually renders against: a player shows a
+    subtitle on a frame whose presentation time is >= the start, and the
+    exclusive end frame is always this value minus one — so a single
+    "first frame at or after" mapping is correct for both start and end checks.
+
+    Crucially it measures against the *real* (millisecond-rounded) frame grid,
+    not the synthetic ``int(t / frame_duration)`` line. The two disagree by up to
+    ~0.5ms right at each frame boundary, which is exactly where a PGS timestamp
+    sits (it IS the frame, just at an odd millisecond). The old formula therefore
+    read a floored PGS value as having drifted to a different frame when it had
+    not, triggering an unwanted ceil. Against the real grid a value already on a
+    frame stays on it under floor; genuinely off-frame (shifted) values still
+    drift and get corrected exactly as before.
+
+    ``_ON_FRAME_TOLERANCE_MS`` of sub-millisecond slop above a real frame is
+    pulled back onto that frame so a float-ms frame shift can't slip a frame.
+    """
+    # Pull back by the on-frame tolerance, then walk to the true boundary. The
+    # real frame grid is monotonic and within ~1ms of the estimate, so 1-2 steps.
+    t = time_ms - _ON_FRAME_TOLERANCE_MS
+    n = int(t / frame_duration_ms)
+    while _real_frame_ms(n, frame_duration_ms) >= t:
+        n -= 1
+    while _real_frame_ms(n, frame_duration_ms) < t:
+        n += 1
+    return n
 
 
 def surgical_round_single(
@@ -124,16 +171,17 @@ def surgical_round_single(
             method="ceil",
         )
 
-    # Fallback: ceil of frame start boundary
-    frame_start = target_frame * frame_duration_ms
-    fallback_val = math.ceil(frame_start / p) * p
+    # Fallback: neither floor nor ceil of the exact value lands on the target
+    # frame; snap to the centisecond sitting on the target real frame itself.
+    real_target = _real_frame_ms(target_frame, frame_duration_ms)
+    fallback_val = math.floor(real_target / p) * p
     return SurgicalRoundResult(
-        centisecond_ms=math.ceil(frame_start / 10) * 10,
+        centisecond_ms=math.floor(real_target / 10) * 10,
         rounded_ms=fallback_val,
         was_adjusted=True,
         target_frame=target_frame,
         floor_frame=floor_frame,
-        method="ceil",
+        method="snap",
     )
 
 
