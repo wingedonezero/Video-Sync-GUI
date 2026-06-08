@@ -18,6 +18,8 @@ See ``base.py`` for the ``SlidingBackend`` protocol and ``BackendResult`` shape.
 
 from __future__ import annotations
 
+import os
+
 from .base import BackendResult, SlidingBackend
 from .dhash import DHashBackend
 from .isc import IscBackend
@@ -25,6 +27,13 @@ from .phash import PHashBackend
 from .sscd_large import SscdLargeBackend
 from .sscd_mixup import SscdMixupBackend
 from .ssim import SsimBackend
+
+# Pin video-verified GPU backends to the discrete GPU (device 0). The backends
+# import torch lazily at load()/runtime, so this import-time setdefault lands
+# before any HIP init. On dual-GPU ROCm systems the iGPU otherwise SIGSEGVs on
+# first kernel launch; setdefault so main.py's global pin / an explicit override
+# still wins. Matches the OCR pin in ocr/vlm_backends/__init__.py.
+os.environ.setdefault("HIP_VISIBLE_DEVICES", "0")
 
 BACKEND_REGISTRY: dict[str, type[SlidingBackend]] = {
     "isc": IscBackend,
