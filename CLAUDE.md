@@ -143,6 +143,29 @@ Python libraries, not subprocesses.
 - **On finishing:** summarize what changed and why, note any behavior changes,
   and give the format/lint/test commands for the touched files.
 
+## Verification discipline
+
+Habits that catch the class of subtle, long-lived bugs that look like someone
+else's fault (a bad rip, a flaky tool) but turn out to be ours:
+
+- **Validate against ground truth, not a model of it.** For timing / parsing /
+  IO work, check the *real* output — extract the muxed file, read the actual
+  container values — on *real* sample media, not just unit tests or an assumed
+  formula. A test that exercises only your own approximation will happily agree
+  with your bug.
+- **A tolerance or fudge factor to make things "line up" is a red flag.** If a
+  change needs a fuzzy margin to pass, the model underneath is probably wrong —
+  find the exact invariant instead of widening the band.
+- **Isolate before blaming an external tool or the source.** makemkv / mkvmerge
+  / ffmpeg / the rip are rarely the actual cause; reproduce against ground truth
+  and rule out our own math first.
+- **Test the edges and every entry point.** Bugs hide in the few-percent cases
+  (boundary/odd values, off-by-one, CFR vs VFR, empty input) and in paths that
+  don't inherit the main one's setup (subprocesses, plugins, threads) — not in
+  the typical file on the happy path.
+- **For a discrete grid (frames, samples, ticks), compute it exactly** with
+  integer arithmetic; don't approximate a quantized value with floats.
+
 ## Code style — "Rust-like Python" (Python 3.11+)
 
 Explicit, typed, structured. Prioritize correctness, clarity, and
