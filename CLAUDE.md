@@ -21,8 +21,6 @@ Entry point: `main.py` → `vsg_qt.main_window.MainWindow`.
   GUI (run with *system* Python) that builds the `.venv`, installs dependencies,
   and fetches optional GPU / OCR / audio-separator packages and model weights.
   Skip this if `CLAUDE.local.md` says this machine is already set up.
-  (Note: `run.sh` prints "run ./setup_env.sh" on a missing venv — that script no
-  longer exists; `setup_gui.py` replaced it.)
 - **Run the app:** `./run.sh` (sets ROCm env vars, activates `.venv`, launches),
   or from inside the venv: `python main.py`.
 - **Tests:** `pytest tests/` (single file: `pytest tests/test_pgs_timing.py`).
@@ -125,6 +123,10 @@ Python libraries, not subprocesses.
   (2) list impacted files/functions, (3) call out risks/tradeoffs, (4) get
   explicit approval. Small, local fixes (typos, an obvious bug in the same
   function) are fine — still say what you changed.
+- **Work in your worktree, commit to a branch — never touch `main` directly.**
+  Make edits in the workspace/worktree you were given (not the main checkout),
+  and commit to a branch (it gets merged to `main` afterward). Commit or push
+  only when asked.
 - **Preserve behavior by default.** If a behavior change is needed, document
   what changes, why, and how it's validated.
 - **Refactors keep feature parity** — improve architecture without changing
