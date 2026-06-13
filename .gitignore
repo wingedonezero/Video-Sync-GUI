@@ -13,6 +13,9 @@ docs/ARCHITECTURE.odt
 settings.json
 .config/
 
+# Personal, machine-specific Claude instructions (auto-read, never committed)
+CLAUDE.local.md
+
 # Python cache
 __pycache__/
 *.py[cod]
