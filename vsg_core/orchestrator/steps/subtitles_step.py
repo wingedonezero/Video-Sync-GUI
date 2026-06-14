@@ -59,6 +59,14 @@ class SubtitlesStep:
 
             run_per_source_preprocessing(ctx, runner, source1_file)
 
+        # Reference (Source 1) video duration for the read-only subtitle
+        # end-time audit recorded during track processing below. Only looked
+        # up when there are subtitle tracks, so sub-less jobs are unaffected.
+        video_duration_ms: float | None = None
+        if any(it.track.type == "subtitles" for it in ctx.extracted_items):
+            _lookup_source1_properties(ctx, runner)
+            video_duration_ms = _lookup_video_duration_ms(ctx)
+
         # ================================================================
         # Process Each Subtitle Track
         # ================================================================
@@ -121,6 +129,7 @@ class SubtitlesStep:
                             source1_file=source1_file,
                             ocr_subtitle_data=ocr_subtitle_data,
                             items_to_add=items_to_add,
+                            video_duration_ms=video_duration_ms,
                         )
                     except Exception as e:
                         runner._log_message(

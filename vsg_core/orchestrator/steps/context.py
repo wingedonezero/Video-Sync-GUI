@@ -26,6 +26,9 @@ if TYPE_CHECKING:
     from vsg_core.reporting import DebugOutputPaths
     from vsg_core.subtitles.frame_utils.frame_audit import FrameAuditResult
     from vsg_core.subtitles.operations.bitmap_audit import BitmapAuditResult
+    from vsg_core.subtitles.operations.duration_audit import (
+        SubtitleDurationAuditResult,
+    )
 
 
 @dataclass(slots=True)
@@ -132,6 +135,13 @@ class Context:
     # shifter. Populated by the PGS/VobSub branches of SubtitlesStep.
     # Format: {"Source2_t5": BitmapAuditResult, ...}
     bitmap_audit_results: dict[str, BitmapAuditResult] = field(default_factory=dict)
+
+    # Text subtitle (ASS/SRT) end-time-vs-video audit results from
+    # SubtitlesStep. Read-only; rendered by SubtitleDurationAuditor.
+    # Format: {"Source3_t2": SubtitleDurationAuditResult, ...}
+    subtitle_duration_audit_results: dict[str, SubtitleDurationAuditResult] = field(
+        default_factory=dict
+    )
 
     # Cached video properties per source (detected on first access)
     # Used to gate video-verified frame matching: MPEG-2 and interlaced

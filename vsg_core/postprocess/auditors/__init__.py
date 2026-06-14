@@ -21,6 +21,7 @@ from .sliding_confidence import SlidingConfidenceAuditor
 from .stepping_correction import SteppingCorrectionAuditor
 from .stepping_separated import SteppingSeparatedAuditor
 from .subtitle_clamping import SubtitleClampingAuditor
+from .subtitle_duration import SubtitleDurationAuditor
 from .subtitle_formats import SubtitleFormatsAuditor
 from .track_flags import TrackFlagsAuditor
 from .track_names import TrackNamesAuditor
@@ -50,6 +51,7 @@ __all__ = [
     "SteppingCorrectionAuditor",
     "SteppingSeparatedAuditor",
     "SubtitleClampingAuditor",
+    "SubtitleDurationAuditor",
     "SubtitleFormatsAuditor",
     "TrackFlagsAuditor",
     "TrackNamesAuditor",
