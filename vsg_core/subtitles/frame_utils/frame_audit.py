@@ -83,6 +83,10 @@ class FrameAuditResult:
     total_events: int
     audit_timestamp: datetime
 
+    # Non-comment events actually evaluated (comments are skipped, so this is
+    # the correct denominator for the on-frame percentages).
+    audited_events: int = 0
+
     # Start time stats
     start_ok: int = 0
     start_early: int = 0  # Rounded to earlier frame
@@ -227,6 +231,8 @@ def run_frame_audit(
     for idx, event in enumerate(subtitle_data.events):
         if event.is_comment:
             continue
+
+        result.audited_events += 1
 
         # Current timing (after sync offset applied)
         exact_start = event.start_ms
@@ -383,7 +389,14 @@ def write_audit_report(
         f"Target FPS: {result.fps:.3f} (frame duration: {result.frame_duration_ms:.3f}ms)"
     )
     lines.append(f"Rounding mode: {result.rounding_mode}")
-    lines.append(f"Total events: {result.total_events}")
+    comment_count = result.total_events - result.audited_events
+    if comment_count > 0:
+        lines.append(
+            f"Total events: {result.total_events} "
+            f"({result.audited_events} timed, {comment_count} comment line(s) excluded)"
+        )
+    else:
+        lines.append(f"Total events: {result.total_events}")
     lines.append("")
 
     # Summary
@@ -392,7 +405,9 @@ def write_audit_report(
     lines.append("=" * 70)
     lines.append("")
 
-    total = result.total_events
+    # Percentages are over events actually evaluated; comment lines are
+    # skipped by the audit, so they must not inflate the denominator.
+    total = result.audited_events
     if total > 0:
         lines.append("Start times:")
         lines.append(

@@ -37,6 +37,7 @@ from .auditors import (
     SteppingCorrectionAuditor,
     SteppingSeparatedAuditor,
     SubtitleClampingAuditor,
+    SubtitleDurationAuditor,
     SubtitleFormatsAuditor,
     TrackFlagsAuditor,
     TrackNamesAuditor,
@@ -211,6 +212,7 @@ class FinalAuditor:
             ("Global Shift", GlobalShiftAuditor, False),
             ("Audio Sync Delays", AudioSyncAuditor, False),
             ("Audio Duration vs Video", AudioDurationAuditor, True),
+            ("Subtitle Duration vs Video", SubtitleDurationAuditor, False),
             ("Subtitle Formats", SubtitleFormatsAuditor, False),
             (
                 "Sliding-Window Verification Confidence",

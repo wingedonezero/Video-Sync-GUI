@@ -30,6 +30,7 @@ from vsg_core.subtitles.diagnostics import (
     parse_ass_time_str,
     read_raw_ass_timestamps,
 )
+from vsg_core.subtitles.operations.duration_audit import audit_subtitle_duration
 from vsg_core.subtitles.sync_dispatcher import apply_sync_mode
 
 
@@ -41,6 +42,7 @@ def process_subtitle_track(
     ocr_subtitle_data: SubtitleData | None,
     items_to_add: list,
     scene_cache: dict[str, Any] | None = None,
+    video_duration_ms: float | None = None,
 ) -> None:
     """
     Process a subtitle track using the unified SubtitleData flow.
@@ -285,6 +287,21 @@ def process_subtitle_track(
 
             if hasattr(sync_result, "details"):
                 item.framelocked_stats = sync_result.details
+
+    # ================================================================
+    # STEP 3b: Audit final subtitle end-times vs video (read-only)
+    # ================================================================
+    # SubtitleData now carries final timing (stepping/sync applied). Record
+    # how the last lines sit relative to the reference video for the post-mux
+    # SubtitleDurationAuditor — no clamping, just a watchlist signal.
+    track_name = item.track.props.name or f"Track {item.track.id}"
+    ctx.subtitle_duration_audit_results[f"{item.track.source}_t{item.track.id}"] = (
+        audit_subtitle_duration(
+            subtitle_data.events,
+            video_duration_ms,
+            f"{track_name} ({item.track.source})",
+        )
+    )
 
     # ================================================================
     # STEP 4: Apply SRT to ASS Conversion (if needed)
