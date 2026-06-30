@@ -20,6 +20,11 @@ def main() -> int:
     parser.add_argument(
         "--output-dir", required=True, help="Output directory for preview OCR files"
     )
+    parser.add_argument(
+        "--font-name",
+        default="",
+        help="Default OCR font name to apply in the preview (optional)",
+    )
     args = parser.parse_args()
 
     subtitle_path = args.subtitle_path
@@ -35,6 +40,7 @@ def main() -> int:
             lang=lang,
             output_dir=output_dir,
             log_callback=log_callback,
+            font_name=args.font_name,
         )
     except Exception as exc:
         payload = {"success": False, "error": str(exc)}

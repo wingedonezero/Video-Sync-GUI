@@ -654,6 +654,7 @@ class ManualSelectionDialog(QDialog):
             lang=lang,
             output_dir=output_dir,
             log_callback=self.log_callback,
+            font_name=self.config.settings.ocr_font_name,
         )
 
         if result is None:
@@ -1183,11 +1184,11 @@ class ManualSelectionDialog(QDialog):
             # Extract progress percentage from OCR messages
             if "%" in msg and "[Preview OCR]" in msg:
                 try:
-                    pct_str = msg.split("(")[-1].rstrip("%)")
+                    pct_str = msg.rsplit("(", maxsplit=1)[-1].rstrip("%)")
                     pct = int(pct_str)
                     progress.setValue(pct)
                     # Extract message for label
-                    msg_part = msg.split("]")[1].split("(")[0].strip()
+                    msg_part = msg.split("]")[1].split("(", maxsplit=1)[0].strip()
                     progress.setLabelText(f"OCR Preview: {msg_part}")
                 except (ValueError, IndexError):
                     pass
@@ -1212,6 +1213,8 @@ class ManualSelectionDialog(QDialog):
                 lang,
                 "--output-dir",
                 str(output_dir),
+                "--font-name",
+                self.config.settings.ocr_font_name,
             ]
         )
 

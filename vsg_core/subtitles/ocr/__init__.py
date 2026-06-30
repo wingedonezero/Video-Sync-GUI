@@ -95,6 +95,7 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         # Output
         "ocr_output_format": get_val("ocr_output_format", "ass"),
         "ocr_font_size_ratio": get_val("ocr_font_size_ratio", 5.80),
+        "ocr_font_name": get_val("ocr_font_name", ""),
         # Reporting
         "ocr_generate_report": get_val("ocr_generate_report", True),
         # Debug output - saves images and text files for problem subtitles
@@ -240,6 +241,7 @@ def run_preview_ocr(
     lang: str,
     output_dir: Path,
     log_callback=None,
+    font_name: str = "",
 ) -> tuple[str, str] | None:
     """
     Run fast preview OCR for style editor.
@@ -316,6 +318,9 @@ def run_preview_ocr(
         "ocr_cleanup_enabled": True,
         "ocr_custom_wordlist_path": "",
         "ocr_output_format": "ass",
+        # Reflect the configured default OCR font so the editor preview matches
+        # final output (empty = OutputConfig's "Arial" default, as before).
+        "ocr_font_name": font_name,
         # Disable reports and debug for speed
         "ocr_generate_report": False,
         "ocr_debug_output": False,

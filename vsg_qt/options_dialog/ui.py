@@ -66,7 +66,7 @@ class OptionsDialog(QDialog):
         self._stepping_tab = SteppingTab()
         self._subtitle_sync_tab = SubtitleSyncTab()
         self._chapters_tab = ChaptersTab()
-        self._ocr_tab = OCRTab()
+        self._ocr_tab = OCRTab(fonts_dir=config.get_fonts_dir())
         self._merge_tab = MergeBehaviorTab()
         self._logging_tab = LoggingTab()
 
@@ -91,7 +91,10 @@ class OptionsDialog(QDialog):
         self.sections["logging"] = self._logging_tab.widgets
 
         # Save/Cancel
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         v.addWidget(btns)

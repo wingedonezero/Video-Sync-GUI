@@ -1,6 +1,8 @@
 # vsg_qt/options_dialog/tabs.py
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -21,6 +23,11 @@ from vsg_core.analysis.source_separation import (
     get_installed_models,
     get_installed_models_json_path,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vsg_core.font_manager import FontInfo
 
 
 # --- Helper functions ---
@@ -124,9 +131,13 @@ class OCRTab(QWidget):
         - Output settings (format, position handling)
     """
 
-    def __init__(self):
+    def __init__(self, fonts_dir: Path | None = None):
         super().__init__()
         self.widgets: dict[str, QWidget] = {}
+        self._fonts_dir = fonts_dir
+        # libass font name -> Qt family name (for the dropdown's live previews).
+        self._loaded_fonts: dict[str, str] = {}
+        self._available_fonts: list[FontInfo] = []
         main_layout = QVBoxLayout(self)
 
         # --- OCR Settings Group ---
@@ -250,6 +261,7 @@ class OCRTab(QWidget):
         output_layout.addRow("Output Format:", self.widgets["ocr_output_format"])
         output_layout.addRow("Font Size Ratio:", self.widgets["ocr_font_size_ratio"])
         output_layout.addRow("", self._font_preview_label)
+        output_layout.addRow("Default Font:", self._build_ocr_font_row())
         output_layout.addRow(self.widgets["ocr_generate_report"])
         output_layout.addRow(self.widgets["ocr_debug_output"])
 
@@ -324,6 +336,110 @@ class OCRTab(QWidget):
     def initialize_font_preview(self) -> None:
         """Initialize the font preview after settings are loaded."""
         self._update_font_preview()
+
+    # --- Default OCR font picker ---------------------------------------------
+    def _build_ocr_font_row(self) -> QWidget:
+        """Build the 'Default Font' dropdown (with live previews) + Scan button."""
+        from vsg_qt.subtitle_editor.tabs.fonts_tab import FontPreviewComboBox
+
+        combo = FontPreviewComboBox(self._loaded_fonts)
+        combo.setToolTip(
+            "Default font for OCR output. Applied to all OCR styles and attached\n"
+            "to the muxed file. 'None' keeps the built-in default. You can still\n"
+            "override individual styles afterwards in the Style Editor."
+        )
+        # Registered under its AppSettings key for the generic save/load, and
+        # kept as a typed reference for the populate/scan helpers below.
+        self.widgets["ocr_font_name"] = combo
+        self._ocr_font_combo: QComboBox = combo
+
+        scan_btn = QPushButton("Scan")
+        scan_btn.setToolTip("Re-scan the fonts folder and refresh this list.")
+        scan_btn.clicked.connect(self._on_scan_fonts)
+
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(combo, 1)
+        row.addWidget(scan_btn)
+
+        self._scan_fonts()
+        self._populate_font_combo()
+        return container
+
+    def _scan_fonts(self) -> None:
+        """Scan the fonts folder and register each font for preview rendering."""
+        from PySide6.QtGui import QFontDatabase
+
+        self._loaded_fonts.clear()
+        self._available_fonts = []
+        if not self._fonts_dir:
+            return
+        try:
+            from vsg_core.font_manager import FontScanner
+
+            self._available_fonts = FontScanner(self._fonts_dir).scan(
+                include_subdirs=True
+            )
+        except Exception:
+            self._available_fonts = []
+            return
+
+        for font_info in self._available_fonts:
+            libass_name = (
+                font_info.full_name
+                if font_info.full_name and font_info.full_name != font_info.family_name
+                else font_info.family_name
+            )
+            font_id = QFontDatabase.addApplicationFont(str(font_info.file_path))
+            if font_id >= 0:
+                families = QFontDatabase.applicationFontFamilies(font_id)
+                if families:
+                    # Keyed by libass name (the UserRole value) so the preview
+                    # delegate resolves it to the Qt family for rendering.
+                    self._loaded_fonts[libass_name] = families[0]
+
+    def _populate_font_combo(self) -> None:
+        """Fill the dropdown with 'None' plus the sorted scanned families."""
+        from PySide6.QtCore import Qt
+
+        combo = self._ocr_font_combo
+        previous = combo.currentData() if combo.count() else None
+        combo.blockSignals(True)
+        combo.clear()
+        # 'None' maps to "" — NOT None — so the generic save persists the empty
+        # sentinel rather than the literal text "None" (logic.py reads UserRole).
+        combo.addItem("None")
+        combo.setItemData(0, "", Qt.ItemDataRole.UserRole)
+
+        seen: set[str] = set()
+        for font_info in sorted(
+            self._available_fonts, key=lambda f: f.family_name.lower()
+        ):
+            if font_info.full_name and font_info.full_name != font_info.family_name:
+                display_name = font_info.full_name
+                libass_name = font_info.full_name
+            else:
+                display_name = font_info.family_name
+                if font_info.subfamily and font_info.subfamily.lower() != "regular":
+                    display_name += f" ({font_info.subfamily})"
+                libass_name = font_info.family_name
+            if libass_name in seen:
+                continue
+            seen.add(libass_name)
+            combo.addItem(display_name)
+            combo.setItemData(combo.count() - 1, libass_name, Qt.ItemDataRole.UserRole)
+
+        if previous:
+            index = combo.findData(previous)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+
+    def _on_scan_fonts(self) -> None:
+        """Handle the Scan button: re-scan the folder and repopulate the list."""
+        self._scan_fonts()
+        self._populate_font_combo()
 
 
 class AnalysisTab(QWidget):
