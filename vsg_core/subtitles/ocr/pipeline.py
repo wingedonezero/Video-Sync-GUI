@@ -255,8 +255,16 @@ class OCRPipeline:
                 0.93,
             )
 
-            # Create output config with calculated font size
-            output_config = OutputConfig(font_size=calculated_font_size)
+            # Create output config with calculated font size. An empty
+            # ocr_font_name keeps OutputConfig's "Arial" default (byte-identical
+            # to the prior behavior); a non-empty value names both OCR styles.
+            ocr_font_name = self.settings.get("ocr_font_name", "")
+            if ocr_font_name:
+                output_config = OutputConfig(
+                    font_size=calculated_font_size, font_name=ocr_font_name
+                )
+            else:
+                output_config = OutputConfig(font_size=calculated_font_size)
 
             subtitle_data = create_subtitle_data_from_ocr(
                 ocr_results=ocr_results,
@@ -628,7 +636,7 @@ class OCRPipeline:
 
             # Step 1: Classify each PGS object
             obj_zones: list[str] = []
-            for obj in (pgs_objects or []):
+            for obj in pgs_objects or []:
                 ox = obj["pgs_x"]
                 oy = obj["pgs_y"]
                 ow = obj["obj_w"]
@@ -666,10 +674,7 @@ class OCRPipeline:
                     oy = obj["pgs_y"]
                     ow = obj["obj_w"]
                     oh = obj["obj_h"]
-                    if (
-                        oy <= ln.center_y <= oy + oh
-                        and ox <= ln.center_x <= ox + ow
-                    ):
+                    if oy <= ln.center_y <= oy + oh and ox <= ln.center_x <= ox + ow:
                         best_zone = obj_zones[oi]
                         break
                 line_zones.append(best_zone)
@@ -681,25 +686,17 @@ class OCRPipeline:
             regions: list = []
 
             bot_lines = [
-                (i, ln)
-                for i, ln in enumerate(lines_in)
-                if line_zones[i] == "bot"
+                (i, ln) for i, ln in enumerate(lines_in) if line_zones[i] == "bot"
             ]
             top_lines = [
-                (i, ln)
-                for i, ln in enumerate(lines_in)
-                if line_zones[i] == "top"
+                (i, ln) for i, ln in enumerate(lines_in) if line_zones[i] == "top"
             ]
             pos_lines = [
-                (i, ln)
-                for i, ln in enumerate(lines_in)
-                if line_zones[i] == "pos"
+                (i, ln) for i, ln in enumerate(lines_in) if line_zones[i] == "pos"
             ]
 
             if bot_lines:
-                reasons = [
-                    f"pgs-bot: {len(bot_lines)} lines from bot object(s)"
-                ]
+                reasons = [f"pgs-bot: {len(bot_lines)} lines from bot object(s)"]
                 regions.append(
                     GroupedRegion(
                         zone="bot",
@@ -710,9 +707,7 @@ class OCRPipeline:
                 )
 
             if top_lines:
-                reasons = [
-                    f"pgs-top: {len(top_lines)} lines from top object(s)"
-                ]
+                reasons = [f"pgs-top: {len(top_lines)} lines from top object(s)"]
                 regions.append(
                     GroupedRegion(
                         zone="top",
@@ -1192,10 +1187,7 @@ class OCRPipeline:
                         # Classify (same thresholds as _group_lines_pgs)
                         is_bot = dist_bot <= 260 and oh <= 300 and cx_off <= 200
                         is_top = (
-                            oy <= 200
-                            and obj_bot <= 350
-                            and oh <= 250
-                            and cx_off <= 200
+                            oy <= 200 and obj_bot <= 350 and oh <= 250 and cx_off <= 200
                         )
                         zone = "bot" if is_bot else ("top" if is_top else "pos")
                         pgs_debug.append({**obj, "zone": zone})
@@ -1296,9 +1288,18 @@ class OCRPipeline:
                 line_colors: list[list[int]] = []
                 dominant_color: list[int] = []
                 keep_colors = (
-                    (reg.zone == "bot" and self.settings.get("ocr_pgs_keep_bot_colors", False))
-                    or (reg.zone == "top" and self.settings.get("ocr_pgs_keep_top_colors", False))
-                    or (reg.zone == "pos" and self.settings.get("ocr_pgs_keep_pos_colors", False))
+                    (
+                        reg.zone == "bot"
+                        and self.settings.get("ocr_pgs_keep_bot_colors", False)
+                    )
+                    or (
+                        reg.zone == "top"
+                        and self.settings.get("ocr_pgs_keep_top_colors", False)
+                    )
+                    or (
+                        reg.zone == "pos"
+                        and self.settings.get("ocr_pgs_keep_pos_colors", False)
+                    )
                 ) and sub_image.pgs_objects is not None
 
                 if keep_colors:

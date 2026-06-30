@@ -128,7 +128,70 @@ def process_ocr_with_preservation(
         ),
     )
 
+    # Attach the user's default OCR font, if configured. The styles are already
+    # *named* with it via OutputConfig.font_name; here we add a font_replacements
+    # entry so AttachmentsStep ships the actual file (the only path that attaches
+    # a fonts-folder font). Any style-editor replacement set earlier in
+    # ExtractStep wins per style, so editing one style there does not unset the
+    # OCR default on the others.
+    _apply_ocr_default_font(item, ctx, runner)
+
     return subtitle_data
+
+
+def _apply_ocr_default_font(item, ctx: Context, runner: CommandRunner) -> None:
+    """Inject a font_replacements entry so the OCR default font is attached.
+
+    No-op when ``ocr_font_name`` is unset. When the chosen font cannot be found
+    in the fonts folder, the output still names it (via OutputConfig.font_name)
+    but cannot attach it — we warn and fall back to that prior behavior.
+    """
+    ocr_font_name = (ctx.settings.ocr_font_name or "").strip()
+    if not ocr_font_name:
+        return
+
+    from vsg_core.config import get_fonts_dir_path
+    from vsg_core.font_manager import FontScanner
+
+    font_file: str | None = None
+    try:
+        fonts_dir = get_fonts_dir_path(ctx.settings.fonts_directory)
+        for font_info in FontScanner(fonts_dir).scan(include_subdirs=True):
+            # Mirror the picker's libass-name choice (full_name when it pins a
+            # specific variant, else the bare family name).
+            libass_name = (
+                font_info.full_name
+                if font_info.full_name and font_info.full_name != font_info.family_name
+                else font_info.family_name
+            )
+            if libass_name == ocr_font_name:
+                font_file = str(font_info.file_path)
+                break
+    except Exception as e:  # font scanning must never break a merge
+        runner._log_message(
+            f"[OCR] WARNING: Could not scan fonts for default '{ocr_font_name}': {e}"
+        )
+        return
+
+    if not font_file:
+        runner._log_message(
+            f"[OCR] WARNING: Default OCR font '{ocr_font_name}' not found in the "
+            "fonts folder; output names it but cannot attach it."
+        )
+        return
+
+    ocr_replacements = {
+        style_name: {
+            "original_font": ocr_font_name,
+            "new_font_name": ocr_font_name,
+            "font_file_path": font_file,
+        }
+        for style_name in ("Default", "Top")
+    }
+    # Style-editor replacements (already on the item from ExtractStep) take
+    # precedence per style name.
+    existing = item.font_replacements or {}
+    item.font_replacements = {**ocr_replacements, **existing}
 
 
 def _run_ocr_subprocess(

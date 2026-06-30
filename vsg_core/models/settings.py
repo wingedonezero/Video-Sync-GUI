@@ -350,6 +350,7 @@ class AppSettings(BaseModel):
     ocr_debug_output: bool = False
     ocr_run_in_subprocess: bool = True
     ocr_font_size_ratio: float = 5.80
+    ocr_font_name: str = ""  # "" = no override (keep "Arial"-named, unattached default)
     ocr_generate_report: bool = True
 
     # PGS (Blu-ray) specific
