@@ -193,6 +193,18 @@ def _apply_ocr_default_font(item, ctx: Context, runner: CommandRunner) -> None:
     existing = item.font_replacements or {}
     item.font_replacements = {**ocr_replacements, **existing}
 
+    applied = [name for name in ("Default", "Top") if name not in existing]
+    if applied:
+        runner._log_message(
+            f"[OCR] Default font '{ocr_font_name}' -> {', '.join(applied)} "
+            f"(attaching {Path(font_file).name})"
+        )
+    else:
+        runner._log_message(
+            f"[OCR] Default font '{ocr_font_name}' overridden in Style Editor "
+            "for all styles; not applied."
+        )
+
 
 def _run_ocr_subprocess(
     item,
