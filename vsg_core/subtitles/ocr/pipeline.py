@@ -193,6 +193,24 @@ class OCRPipeline:
 
             self._log_progress(f"Found {len(subtitle_images)} subtitles", 0.10)
 
+            # VobSub only: report how many positioned/cropped bitmaps the parser
+            # laid onto the full frame (no-op for full-frame discs and PGS).
+            norm = parse_result.format_info.get("normalized_to_full_frame", 0)
+            if norm:
+                total = parse_result.format_info.get("normalize_total", 0)
+                clamped = parse_result.format_info.get("normalize_clamped", 0)
+                errors = parse_result.format_info.get("normalize_errors", 0)
+                extra = (
+                    f" (clamped {clamped}, errors {errors})"
+                    if (clamped or errors)
+                    else ""
+                )
+                self._log_progress(
+                    f"Laid {norm}/{total} positioned VobSub bitmap(s) "
+                    f"onto full frame{extra}",
+                    0.10,
+                )
+
             # Step 3: Initialize report and debugger with same timestamp
             if output_path is None:
                 output_path = input_path.with_suffix(

@@ -97,6 +97,12 @@ class VobSubParser(SubtitleImageParser):
             ParseResult with extracted subtitle images
         """
         result = ParseResult()
+        # Counters for the full-frame normalization step (_lay_on_full_frame),
+        # surfaced in format_info so the pipeline can log them.
+        self._norm_total = 0
+        self._norm_count = 0
+        self._norm_clamped = 0
+        self._norm_errors = 0
 
         # Normalize to .idx path
         if file_path.suffix.lower() == ".sub":
@@ -139,6 +145,11 @@ class VobSubParser(SubtitleImageParser):
                             result.subtitles.append(subtitle)
                     except Exception as e:
                         result.warnings.append(f"Failed to parse subtitle {i}: {e}")
+
+            result.format_info["normalized_to_full_frame"] = self._norm_count
+            result.format_info["normalize_total"] = self._norm_total
+            result.format_info["normalize_clamped"] = self._norm_clamped
+            result.format_info["normalize_errors"] = self._norm_errors
 
         except Exception as e:
             result.errors.append(f"Failed to parse VobSub: {e}")
@@ -303,6 +314,13 @@ class VobSubParser(SubtitleImageParser):
                 f"Subtitle {index}: extended short duration from {calculated_duration}ms"
             )
 
+        # Lay a positioned/cropped bitmap onto the full frame so downstream
+        # detection, grouping, \pos and pixel refinement all work in frame
+        # coordinates. This mirrors the PGS parser, which composites its
+        # objects onto a full-frame canvas. Full-frame inputs pass through
+        # unchanged, so discs that author full-frame bitmaps are unaffected.
+        image, x, y = self._lay_on_full_frame(image, x, y, header.size_x, header.size_y)
+
         return SubtitleImage(
             index=index,
             start_ms=entry.timestamp_ms,
@@ -317,6 +335,57 @@ class VobSubParser(SubtitleImageParser):
             is_forced=forced,
             palette=[(r, g, b, 255) for r, g, b in header.palette],
         )
+
+    def _lay_on_full_frame(
+        self,
+        image: np.ndarray | None,
+        x: int,
+        y: int,
+        frame_w: int,
+        frame_h: int,
+    ) -> tuple[np.ndarray | None, int, int]:
+        """Composite a positioned VobSub bitmap onto a full-frame canvas.
+
+        DVDs may author subpictures as tight bitmaps placed at an (x, y) on the
+        frame rather than as full-frame bitmaps. Region grouping, \\pos and
+        pixel refinement all assume frame coordinates, so each bitmap is laid
+        onto a transparent ``frame_w x frame_h`` canvas at its real position —
+        the same thing the PGS parser does with its composition objects.
+
+        Returns ``(image, x, y)``. On success the image is frame-sized and
+        ``(x, y)`` become ``(0, 0)``. Inputs that already span the frame (or are
+        degenerate) are returned unchanged, so discs that author full-frame
+        bitmaps behave exactly as before.
+        """
+        self._norm_total += 1
+        if image is None or frame_w <= 0 or frame_h <= 0:
+            return image, x, y
+        h, w = image.shape[:2]
+        if w >= frame_w and h >= frame_h:
+            return image, x, y  # already spans the frame — nothing to do
+        try:
+            # Clamp the paste rectangle to the frame (defensive vs a bad DAREA).
+            px = max(0, min(int(x), frame_w - 1))
+            py = max(0, min(int(y), frame_h - 1))
+            pw = min(w, frame_w - px)
+            ph = min(h, frame_h - py)
+            if pw <= 0 or ph <= 0:
+                return image, x, y
+            if pw != w or ph != h:
+                self._norm_clamped += 1
+            if image.ndim == 3:
+                canvas = np.zeros((frame_h, frame_w, image.shape[2]), dtype=image.dtype)
+            else:
+                canvas = np.zeros((frame_h, frame_w), dtype=image.dtype)
+            canvas[py : py + ph, px : px + pw] = image[:ph, :pw]
+            self._norm_count += 1
+            return canvas, 0, 0
+        except Exception as e:  # never let normalization break parsing
+            self._norm_errors += 1
+            logger.warning(
+                f"VobSub full-frame normalize failed (kept original crop): {e}"
+            )
+            return image, x, y
 
     def _read_pes_packets(self, f: BinaryIO) -> bytes:
         """
