@@ -15,6 +15,13 @@ from .base import BaseAuditor
 # The details["reason"] value the sliding matcher emits on success.
 _SLIDING_REASONS = frozenset({"sliding-matched"})
 
+# Reasons starting with this prefix mean sliding verification was REQUESTED
+# but never ran (video open failed, torch missing, ...) and the sync fell
+# back to the audio-only correlation value. These must be flagged loudly —
+# filtering them out here is how a broken ffms2 once produced a clean
+# final report while no video was ever compared.
+_FALLBACK_PREFIX = "fallback"
+
 
 class SlidingConfidenceAuditor(BaseAuditor):
     """
@@ -46,8 +53,10 @@ class SlidingConfidenceAuditor(BaseAuditor):
         if not self.ctx.video_verified_sources:
             return 0
 
-        # Filter to only sources that used the sliding matcher (any backend).
+        # Filter to sources that used the sliding matcher (any backend) —
+        # including ones where it was requested but FELL BACK to audio-only.
         sliding_sources: list[tuple[str, dict]] = []
+        fallback_sources: list[tuple[str, dict]] = []
         for source_key, vv_result in self.ctx.video_verified_sources.items():
             details = vv_result.get("details")
             if not details:
@@ -55,10 +64,35 @@ class SlidingConfidenceAuditor(BaseAuditor):
             reason = details.get("reason", "")
             if reason in _SLIDING_REASONS:
                 sliding_sources.append((source_key, details))
+            elif reason.startswith(_FALLBACK_PREFIX):
+                fallback_sources.append((source_key, details))
 
         # Skip if no sliding verification was used (classic mode or audio-only)
-        if not sliding_sources:
+        if not sliding_sources and not fallback_sources:
             return 0
+
+        # Verification never ran for these — the final timing is the raw
+        # audio correlation, unverified. Always an issue.
+        for source_key, details in fallback_sources:
+            reason = details.get("reason", "")
+            error = details.get("error", "")
+            backend = details.get("backend", "unknown")
+            audio_ms = details.get("audio_correlation_ms", 0.0)
+            self.log(
+                f"  ⚠ {source_key}: video verification FAILED ({backend}, {reason})"
+            )
+            if error:
+                self.log(f"    Error: {error}")
+            self.log(
+                f"    Timing fell back to audio-only correlation "
+                f"({audio_ms:+.1f}ms) — NOT video-verified; check the "
+                "output manually"
+            )
+            self._track_issue(
+                f"{source_key}: video verification FAILED ({backend}, "
+                f"{reason}) - timing is audio-only and unverified, check "
+                "the output manually"
+            )
 
         for source_key, details in sliding_sources:
             confidence = details.get("confidence", "UNKNOWN")
@@ -135,7 +169,19 @@ class SlidingConfidenceAuditor(BaseAuditor):
                 diff_frames = cross_check.get("diff_frames")
                 tolerance = cross_check.get("tolerance_frames", 0)
                 agreed = cross_check.get("agreed", False)
-                if agreed:
+                if cross_check.get("failed", False):
+                    failed_reason = cross_check.get("failed_reason", "")
+                    self.log(
+                        f"  ⚠ {source_key}: cross-check backend "
+                        f"{cross_backend} FAILED ({failed_reason or 'no result'})"
+                        " — primary result stands unconfirmed"
+                    )
+                    self._track_issue(
+                        f"{source_key}: cross-check backend {cross_backend} "
+                        f"failed ({failed_reason or 'no result'}) - primary "
+                        "result unconfirmed"
+                    )
+                elif agreed:
                     self.log(
                         f"    \u2713 Cross-check agreed: {cross_backend} "
                         f"within {tolerance} frame(s)"

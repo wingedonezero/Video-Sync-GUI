@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from vsg_core.io.runner import CommandRunner
     from vsg_core.orchestrator.steps.context import Context
 
+
 def _calculate_offset_for_method(
     source_video: str,
     target_video: str,
@@ -58,13 +59,23 @@ def _calculate_offset_for_method(
     )
 
     # If the primary failed, skip cross-check — there's nothing to
-    # compare against and the user already has a fallback reason.
-    if primary_offset is None:
+    # compare against and the user already has a fallback reason. Failure
+    # is signalled by a fallback-* reason, NOT by a None offset: the
+    # matcher returns the audio-correlation value so the sync can proceed.
+    # Comparing two fallbacks would always "agree" at zero diff.
+    primary_reason = str(primary_details.get("reason", ""))
+    if primary_offset is None or primary_reason.startswith("fallback"):
+        if primary_reason.startswith("fallback"):
+            runner._log_message(
+                f"[VideoVerified] ⚠ Video verification FAILED "
+                f"({primary_reason}) — using audio-only correlation; "
+                f"skipping cross-check"
+            )
         return primary_offset, primary_details
 
     # Cross-check disabled, or user picked the same backend for both:
     # either case is a no-op (comparing a backend to itself is useless).
-    if cross == "none" or cross == primary:
+    if cross in ("none", primary):
         return primary_offset, primary_details
 
     runner._log_message(
@@ -88,9 +99,14 @@ def _calculate_offset_for_method(
         getattr(ctx.settings, "video_verified_cross_check_tolerance_frames", 0)
     )
 
+    # A cross run that fell back never compared frames — its offset is just
+    # the audio value again, so treating it as agreement would be circular.
+    cross_reason = str((cross_details or {}).get("reason", ""))
+    cross_failed = cross_offset is None or cross_reason.startswith("fallback")
+
     agreed = False
     diff_frames = float("nan")
-    if cross_offset is not None and src_fps > 0:
+    if not cross_failed and src_fps > 0:
         frame_dur_ms = 1000.0 / src_fps
         diff_frames = abs(primary_offset - cross_offset) / frame_dur_ms
         agreed = diff_frames <= tolerance_f
@@ -101,12 +117,20 @@ def _calculate_offset_for_method(
         "backend": cross,
         "offset_ms": cross_offset,
         "agreed": agreed,
+        "failed": cross_failed,
+        "failed_reason": cross_reason if cross_failed else "",
         "diff_frames": diff_frames,
         "tolerance_frames": tolerance_f,
         "details": cross_details,
     }
 
-    if not agreed:
+    if cross_failed:
+        runner._log_message(
+            f"[VideoVerified] ⚠ Cross-check backend {cross} FAILED "
+            f"({cross_reason or 'no result'}) — primary result stands "
+            f"unconfirmed"
+        )
+    elif not agreed:
         runner._log_message(
             f"[VideoVerified] ⚠ Cross-check disagreement: primary={primary} "
             f"{primary_offset:+.1f}ms vs cross={cross} "
@@ -302,9 +326,7 @@ def _run_sliding(
         return result["final_offset_ms"], result["details"]
 
     except Exception as e:
-        runner._log_message(
-            f"[SlidingVerified] ERROR: Subprocess launch failed: {e}"
-        )
+        runner._log_message(f"[SlidingVerified] ERROR: Subprocess launch failed: {e}")
         return None, {
             "reason": "fallback-subprocess-error",
             "error": str(e),
@@ -342,7 +364,7 @@ def run_per_source_preprocessing(
 
     # Find unique sources that have subtitle tracks
     sources_with_subs = set()
-    for item in (ctx.extracted_items or []):
+    for item in ctx.extracted_items or []:
         if item.track.type == "subtitles":
             source_key = (
                 item.sync_to if item.track.source == "External" else item.track.source
