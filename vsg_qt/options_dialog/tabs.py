@@ -149,13 +149,45 @@ class OCRTab(QWidget):
             "Automatically OCR VobSub and PGS subtitle tracks."
         )
 
-        self.widgets["ocr_engine"] = QComboBox()
-        self.widgets["ocr_engine"].addItem(
-            "PaddleOCR-VL 1.5 (Spotting + Positions)", "paddleocr-vl"
+        # Per-format engines. All are PaddleOCR-VL 1.5; they differ in runtime
+        # and preprocessing (validated against real disc bitmaps):
+        #   Native — official transformers runtime, frames as decoded
+        #   2x     — Native + the official Spotting upscale for DVD frames
+        #   Legacy — the previous llama.cpp/GGUF runtime, unchanged
+        self.widgets["ocr_engine_vobsub"] = QComboBox()
+        self.widgets["ocr_engine_vobsub"].addItem(
+            "PaddleOCR-VL 1.5 — Native (recommended)", "paddleocr-vl-native"
         )
-        self.widgets["ocr_engine"].setToolTip(
-            "OCR engine to use.\n"
-            "• PaddleOCR-VL 1.5: Fast VLM via llama.cpp with line detection + positions (239ms/sub, 1.7GB VRAM)."
+        self.widgets["ocr_engine_vobsub"].addItem(
+            "PaddleOCR-VL 1.5 — 2x Max Accuracy (slower)", "paddleocr-vl-2x"
+        )
+        self.widgets["ocr_engine_vobsub"].addItem(
+            "PaddleOCR-VL 1.5 — Legacy (llama.cpp)", "paddleocr-vl"
+        )
+        self.widgets["ocr_engine_vobsub"].setToolTip(
+            "Engine for VobSub (DVD) subtitle tracks.\n"
+            "• Native: official runtime; fixes ellipsis/punctuation misreads "
+            "of Legacy at similar speed (~360ms/sub).\n"
+            "• 2x Max Accuracy: also reads the hardest small-glyph cases "
+            "(stutters, multi-dot ellipses) at ~3x the time (~1.2s/sub).\n"
+            "• Legacy: the previous llama.cpp engine, byte-identical to "
+            "older versions."
+        )
+
+        self.widgets["ocr_engine_pgs"] = QComboBox()
+        self.widgets["ocr_engine_pgs"].addItem(
+            "PaddleOCR-VL 1.5 — Native (recommended)", "paddleocr-vl-native"
+        )
+        self.widgets["ocr_engine_pgs"].addItem(
+            "PaddleOCR-VL 1.5 — Legacy (llama.cpp)", "paddleocr-vl"
+        )
+        self.widgets["ocr_engine_pgs"].setToolTip(
+            "Engine for PGS (Blu-ray) subtitle tracks.\n"
+            "• Native: official runtime; output verified identical to Legacy "
+            "on real discs at equal speed.\n"
+            "• Legacy: the previous llama.cpp engine.\n"
+            "(No 2x option: HD frames are never upscaled, so it would "
+            "behave identically to Native.)"
         )
 
         self.widgets["ocr_language"] = QComboBox()
@@ -172,7 +204,8 @@ class OCRTab(QWidget):
         )
 
         ocr_layout.addRow(self.widgets["ocr_enabled"])
-        ocr_layout.addRow("OCR Engine:", self.widgets["ocr_engine"])
+        ocr_layout.addRow("VobSub (DVD) Engine:", self.widgets["ocr_engine_vobsub"])
+        ocr_layout.addRow("PGS (Blu-ray) Engine:", self.widgets["ocr_engine_pgs"])
         ocr_layout.addRow("Language:", self.widgets["ocr_language"])
         main_layout.addWidget(ocr_group)
 

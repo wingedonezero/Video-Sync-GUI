@@ -196,6 +196,15 @@ _MODEL_REGISTRY: dict[str, dict] = {
         "dir_name": "PaddleOCR-VL-1.5-GGUF",
         "check_file": "PaddleOCR-VL-1.5.gguf",
     },
+    # Torch variants share one transformers checkpoint (official runtime).
+    "paddleocr-vl-native": {
+        "repo_id": "PaddlePaddle/PaddleOCR-VL-1.5",
+        "dir_name": "PaddleOCR-VL-1.5-transformers",
+    },
+    "paddleocr-vl-2x": {
+        "repo_id": "PaddlePaddle/PaddleOCR-VL-1.5",
+        "dir_name": "PaddleOCR-VL-1.5-transformers",
+    },
 }
 
 
@@ -236,3 +245,8 @@ try:
     from . import paddleocr_vl
 except ImportError as e:
     logger.debug(f"PaddleOCR-VL backend not available: {e}")
+
+try:
+    from . import paddleocr_vl_torch
+except ImportError as e:
+    logger.debug(f"PaddleOCR-VL torch backend not available: {e}")

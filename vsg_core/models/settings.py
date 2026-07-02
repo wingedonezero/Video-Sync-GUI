@@ -337,7 +337,11 @@ class AppSettings(BaseModel):
     # OCR Settings
     # =========================================================================
     ocr_enabled: bool = True
+    # Legacy single-engine key — kept as the fallback for old settings files;
+    # the per-format keys below take precedence in the pipeline.
     ocr_engine: OcrEngineStr = "paddleocr-vl"
+    ocr_engine_vobsub: OcrEngineStr = "paddleocr-vl-native"
+    ocr_engine_pgs: OcrEngineStr = "paddleocr-vl-native"
     ocr_language: str = "eng"
     ocr_low_confidence_threshold: float = 60.0
     ocr_output_format: OcrOutputFormatStr = "ass"

@@ -86,8 +86,11 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
     return {
         # Language
         "ocr_language": ocr_lang,
-        # OCR engine
+        # OCR engine — per-format (VobSub vs PGS), with the legacy single key
+        # kept as the fallback for old settings files.
         "ocr_engine": get_val("ocr_engine", "paddleocr-vl"),
+        "ocr_engine_vobsub": get_val("ocr_engine_vobsub", "paddleocr-vl-native"),
+        "ocr_engine_pgs": get_val("ocr_engine_pgs", "paddleocr-vl-native"),
         "ocr_low_confidence_threshold": get_val("ocr_low_confidence_threshold", 60.0),
         # Post-processing
         "ocr_cleanup_enabled": get_val("ocr_cleanup_enabled", True),
@@ -112,9 +115,17 @@ def check_ocr_available() -> tuple[bool, str]:
     """
     from .vlm_backends import is_model_available
 
-    if is_model_available("paddleocr-vl"):
-        return True, "OCR available: paddleocr-vl"
-    return False, "No OCR backends available. PaddleOCR-VL model not found."
+    available = [
+        name
+        for name in ("paddleocr-vl-native", "paddleocr-vl")
+        if is_model_available(name)
+    ]
+    if available:
+        return True, f"OCR available: {', '.join(available)}"
+    return False, (
+        "No OCR backends available. Download the PaddleOCR-VL model "
+        "(transformers and/or GGUF) via the setup GUI."
+    )
 
 
 def run_ocr_unified(
