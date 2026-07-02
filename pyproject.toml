@@ -47,7 +47,11 @@ dependencies = [
     "imagehash",
     "opencv-python",
     "ffms2",
-    "VapourSynth",
+    # Pinned: must match the Debian system VapourSynth core (R73). Newer pip
+    # bindings ship their own core, which does not load the system plugin dir
+    # — breaks with "No attribute with the name ffms2 exists" in the sliding
+    # video-verify path. Bump only together with the system package.
+    "VapourSynth==73",
 
     # Neural frame matching (NeuralVerified subtitle sync)
     # ISC model definition is self-contained; only the timm backbone is needed.
