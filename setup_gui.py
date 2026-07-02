@@ -208,6 +208,11 @@ LEGACY_PACKAGES = [
     "modelscope-hub",
     "multidict",
     "ninja",
+    # All opencv variants share one cv2/ directory on disk — uninstalling
+    # any of them guts the files of whichever remains. Both stray variants
+    # are removed here and remove_legacy_packages() force-reinstalls the
+    # app's opencv-python afterwards to repair the shared directory.
+    "opencv-contrib-python",
     "opencv-python-headless",
     "opt-einsum",
     "paddleocr",
@@ -1389,9 +1394,28 @@ for name, info in deps.items():
             f"Removing {len(LEGACY_PACKAGES)} legacy packages "
             "(EasyOCR / CPU-Paddle backends and their orphaned deps)..."
         )
-        self._run_subprocess(
-            pip_cmd("uninstall", "-y", *LEGACY_PACKAGES),
-            label="Removing legacy packages...",
+        # Second step repairs opencv-python: removing the stray opencv
+        # variants above deletes files from the shared cv2/ directory that
+        # the app's opencv-python still needs (learned the hard way —
+        # "module 'cv2' has no attribute 'rectangle'").
+        self._run_chain(
+            [
+                (
+                    "Removing legacy packages...",
+                    pip_cmd("uninstall", "-y", *LEGACY_PACKAGES),
+                    None,
+                ),
+                (
+                    "Repairing opencv-python (shared cv2/ directory)...",
+                    pip_cmd(
+                        "install",
+                        "--force-reinstall",
+                        "--no-deps",
+                        "opencv-python",
+                    ),
+                    None,
+                ),
+            ]
         )
 
     def fix_qt_kde_theme(self) -> None:
