@@ -74,7 +74,6 @@ dev = [
     "types-Pillow",
     "lxml-stubs",
 ]
-ocr-easyocr = ["easyocr"]
 ocr-vlm = ["transformers>=5.0", "huggingface-hub", "accelerate"]
 ocr-vlm-llama = ["llama-cpp-python"]
 ai-audio = ["audio-separator[gpu]"]

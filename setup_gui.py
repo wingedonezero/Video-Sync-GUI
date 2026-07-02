@@ -120,11 +120,6 @@ OCR_VLM_MODELS = {
 
 # Optional dependency groups (name, packages, check_import)
 OPTIONAL_DEPS = {
-    "ocr-easyocr": {
-        "label": "EasyOCR",
-        "packages": ["easyocr"],
-        "check": "easyocr",
-    },
     "ocr-vlm": {
         "label": "VLM OCR (transformers)",
         "packages": ["transformers>=5.0", "huggingface-hub", "accelerate"],
@@ -171,6 +166,113 @@ GPU_OPTIONS: list[tuple[str, str]] = [
     ("AMD GPU (ROCm 6.4 - Stable)", "rocm64"),
     ("CPU only", "cpu"),
 ]
+
+# =============================================================================
+# Update routing — packages that must NOT be blindly upgraded from PyPI
+# =============================================================================
+# The GPU stack has its own channels: the default PyPI torch wheels are CUDA
+# builds that would silently replace the ROCm build, and llama-cpp-python must
+# be compiled against system ROCm. Exact (==) pins are read from pyproject at
+# runtime — each pin's comment there documents the OS constraint forcing it
+# (e.g. av capped by Debian's FFmpeg, PySide6 matched to the system Qt).
+
+# Upgraded via the PyTorch ROCm wheel index (detect_rocm_index()).
+ROCM_ROUTED_PACKAGES = {"torch", "torchvision", "torchaudio"}
+# Managed by the torch upgrade's dependency resolution — never explicitly.
+ROCM_MANAGED_PACKAGES = {"triton", "triton-rocm", "pytorch-triton-rocm"}
+# Rebuilt from source with the ROCm build env (OPTIONAL_DEPS["ocr-vlm-llama"]).
+LLAMA_ROUTED_PACKAGES = {"llama-cpp-python"}
+# Ride along with a pinned parent package.
+PIN_COMPANIONS: dict[str, set[str]] = {
+    "pyside6": {"pyside6-addons", "pyside6-essentials", "shiboken6"},
+}
+
+# Dead-backend packages (EasyOCR / CPU PaddleOCR eras) and their orphaned
+# dependencies — removable with the "Remove Legacy Packages" action. List
+# derived by dependency-closure analysis against the app's real requirements.
+LEGACY_PACKAGES = [
+    "aiohappyeyeballs",
+    "aiohttp",
+    "aiosignal",
+    "aistudio-sdk",
+    "attrs",
+    "bce-python-sdk",
+    "chardet",
+    "colorlog",
+    "crc32c",
+    "easyocr",
+    "frozenlist",
+    "future",
+    "imageio",
+    "modelscope",
+    "modelscope-hub",
+    "multidict",
+    "ninja",
+    "opencv-python-headless",
+    "opt-einsum",
+    "paddleocr",
+    "paddlepaddle",
+    "paddlex",
+    "pandas",
+    "prettytable",
+    "propcache",
+    "py-cpuinfo",
+    "pyclipper",
+    "pycryptodome",
+    "python-bidi",
+    "python-dateutil",
+    "ruamel.yaml",
+    "scikit-image",
+    "shapely",
+    "tifffile",
+    "ujson",
+    "wcwidth",
+    "yarl",
+]
+
+
+def _norm_pkg(name: str) -> str:
+    return name.lower().replace("_", "-")
+
+
+def get_pyproject_pins() -> dict[str, str]:
+    """Read exact (==) pins from pyproject [project.dependencies]."""
+    import tomllib
+
+    try:
+        with open(PYPROJECT_PATH, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    pins: dict[str, str] = {}
+    for req in data.get("project", {}).get("dependencies", []):
+        if "==" in req:
+            name, _, version = req.partition("==")
+            pins[_norm_pkg(name.strip())] = version.strip()
+    return pins
+
+
+def detect_rocm_index() -> str:
+    """Pick the ROCm wheel index matching the installed torch build."""
+    try:
+        result = subprocess.run(
+            [
+                str(VENV_PYTHON),
+                "-c",
+                "from importlib.metadata import version; print(version('torch'))",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        installed = result.stdout.strip()
+        if "+rocm" in installed:
+            tag = installed.split("+", 1)[1]  # e.g. "rocm7.2"
+            return f"https://download.pytorch.org/whl/{tag}"
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return ROCM_OPTIONS[-1][1]  # newest stable channel in the list
+
 
 # Log colors
 COLOR_INFO = "#888"
@@ -582,21 +684,106 @@ class SetupController:
 
             # Show outdated packages
             self.window.log_info(f"Found {len(outdated)} outdated packages:")
-            names = []
+            for pkg in outdated:
+                self.window.append_log(
+                    f"  {pkg['name']:30s} {pkg['version']:15s} "
+                    f"-> {pkg['latest_version']}"
+                )
+
+            # Partition: pinned holds / ROCm-routed / llama-routed / plain.
+            # A blind `pip install --upgrade` would replace ROCm torch with
+            # the CUDA build and pinned packages with OS-incompatible ones.
+            pins = get_pyproject_pins()
+            held: list[tuple[str, str]] = []  # (name, reason)
+            rocm: list[str] = []
+            llama: list[str] = []
+            plain: list[str] = []
             for pkg in outdated:
                 name = pkg["name"]
-                current = pkg["version"]
-                latest = pkg["latest_version"]
-                self.window.append_log(f"  {name:30s} {current:15s} -> {latest}")
-                names.append(name)
+                n = _norm_pkg(name)
+                companion_of = next(
+                    (
+                        p
+                        for p, comps in PIN_COMPANIONS.items()
+                        if p in pins and n in comps
+                    ),
+                    None,
+                )
+                if n in pins:
+                    held.append((name, f"pinned =={pins[n]} in pyproject"))
+                elif companion_of:
+                    held.append((name, f"component of pinned {companion_of}"))
+                elif n in ROCM_MANAGED_PACKAGES:
+                    held.append((name, "managed by the torch ROCm upgrade"))
+                elif n.startswith("nvidia-") or n.startswith("cuda-"):
+                    held.append((name, "NVIDIA package on a ROCm system"))
+                elif n in ROCM_ROUTED_PACKAGES:
+                    rocm.append(name)
+                elif n in LLAMA_ROUTED_PACKAGES:
+                    llama.append(name)
+                else:
+                    plain.append(name)
 
-            # Run the update
-            self.window.log_info("Updating all outdated packages...")
+            if held:
+                self.window.log_warning("Held back (see pyproject comments):")
+                for name, reason in held:
+                    self.window.append_log(f"  {name}: {reason}")
+
+            steps: list[tuple[str, list[str], dict[str, str] | None]] = []
+            if plain:
+                steps.append(
+                    (
+                        f"Updating {len(plain)} packages...",
+                        pip_cmd("install", "--upgrade", *plain),
+                        None,
+                    )
+                )
+            if rocm:
+                index_url = detect_rocm_index()
+                self.window.log_info(f"GPU stack routed via ROCm index: {index_url}")
+                steps.append(
+                    (
+                        f"Updating GPU stack ({', '.join(rocm)}) via ROCm...",
+                        pip_cmd(
+                            "install",
+                            "--upgrade",
+                            *rocm,
+                            "--index-url",
+                            index_url,
+                        ),
+                        None,
+                    )
+                )
+            if llama:
+                llama_info = OPTIONAL_DEPS["ocr-vlm-llama"]
+                import os as _os
+
+                build_env = {**_os.environ, **llama_info.get("env", {})}
+                self.window.log_info(
+                    "llama-cpp-python routed via ROCm source rebuild "
+                    f"({llama_info.get('env')})"
+                )
+                steps.append(
+                    (
+                        "Rebuilding llama-cpp-python with ROCm...",
+                        pip_cmd(
+                            "install",
+                            "--upgrade",
+                            *llama_info.get("pip_extra", []),
+                            "llama-cpp-python",
+                        ),
+                        build_env,
+                    )
+                )
+
+            if not steps:
+                self.window.log_success(
+                    "Nothing to update (all outdated packages are held back)."
+                )
+                return
+
             self.window.set_running(True)
-            self._run_subprocess(
-                pip_cmd("install", "--upgrade", *names),
-                label="Updating packages...",
-            )
+            self._run_chain(steps)
 
         worker.signals.log.connect(capture_log)
         worker.signals.status.connect(self.window.set_status)
@@ -1190,30 +1377,22 @@ for name, info in deps.items():
             env=env,
         )
 
-    def download_easyocr_models(self) -> None:
-        """Install EasyOCR and download its models."""
-        self.window.clear_log()
-        model_dir = PROJECT_DIR / ".config" / "ocr" / "easyocr_models"
+    def remove_legacy_packages(self) -> None:
+        """Uninstall dead-backend packages (EasyOCR / CPU PaddleOCR eras).
 
-        script = f"""
-import sys, os
-model_dir = {str(model_dir)!r}
-os.makedirs(model_dir, exist_ok=True)
-print(f"Downloading models to: {{model_dir}}")
-try:
-    import easyocr
-    print("Initializing EasyOCR Reader (this downloads models)...")
-    reader = easyocr.Reader(['en'], gpu=False, model_storage_directory=model_dir, verbose=True)
-    print("OK EasyOCR models downloaded and verified!")
-except Exception as e:
-    print(f"ERROR {{e}}", file=sys.stderr)
-    sys.exit(1)
-"""
-        steps: list[tuple[str, list[str], dict[str, str] | None]] = [
-            ("Installing EasyOCR...", pip_cmd("install", "easyocr"), None),
-            ("Downloading EasyOCR models...", [str(VENV_PYTHON), "-c", script], None),
-        ]
-        self._run_chain(steps)
+        The app's OCR moved to PaddleOCR-VL (llama.cpp / transformers); the
+        old backends and their orphaned dependency trees just take up space.
+        Already-absent packages are skipped by pip with a warning.
+        """
+        self.window.clear_log()
+        self.window.log_info(
+            f"Removing {len(LEGACY_PACKAGES)} legacy packages "
+            "(EasyOCR / CPU-Paddle backends and their orphaned deps)..."
+        )
+        self._run_subprocess(
+            pip_cmd("uninstall", "-y", *LEGACY_PACKAGES),
+            label="Removing legacy packages...",
+        )
 
     def fix_qt_kde_theme(self) -> None:
         """Patch venv activate script for KDE/Breeze Qt theming."""
@@ -1438,7 +1617,6 @@ class SetupWindow(QMainWindow):
                     "SSCD Weights (Sliding Backend)",
                     self.controller.download_sscd_models,
                 ),
-                ("EasyOCR Models", self.controller.download_easyocr_models),
                 (
                     "LFM2-VL-450M (Fast VLM OCR)",
                     lambda: self.controller.download_ocr_vlm_model("LFM2-VL-450M"),
@@ -1473,8 +1651,8 @@ class SetupWindow(QMainWindow):
                     lambda: self.controller.install_optional_dep("ocr-vlm"),
                 ),
                 (
-                    "Install: EasyOCR",
-                    lambda: self.controller.install_optional_dep("ocr-easyocr"),
+                    "Remove Legacy Packages",
+                    self.controller.remove_legacy_packages,
                 ),
                 (
                     "Install: Audio Sep",
