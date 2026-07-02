@@ -167,6 +167,20 @@ class OCRDebugger:
         if confidence < self.low_confidence_threshold:
             self.low_confidence_indices.add(index)
 
+    def set_processed_text(self, index: int, text: str):
+        """Update a subtitle's final (post-fix) text.
+
+        The pipeline registers each subtitle BEFORE post-processing runs
+        (the entry must exist for verification/fix records), passing the
+        raw text as a placeholder. The writers print ``raw_text`` as the
+        "After fixes" text, so without this update the debug reports show
+        the raw text on both sides of a fix.
+        """
+        if not self.enabled:
+            return
+        if index in self.subtitles:
+            self.subtitles[index].raw_text = text
+
     def add_unknown_word(self, index: int, word: str):
         """Record an unknown word for a subtitle."""
         if not self.enabled:

@@ -1246,6 +1246,11 @@ class OCRPipeline:
             if not regions:
                 continue
 
+            # Processed region texts, joined after the loop so the debug
+            # entry (registered with raw text in Step 5) can be updated to
+            # the real post-fix text.
+            sub_processed_texts: list[str] = []
+
             for reg in regions:
                 # Post-process each line individually, then join
                 line_processed: list[str] = []
@@ -1374,6 +1379,12 @@ class OCRPipeline:
                         else [],
                         is_positioned=True,
                     )
+                )
+                sub_processed_texts.append(region_text)
+
+            if self.config.debug_output and sub_processed_texts:
+                debugger.set_processed_text(
+                    sub_image.index, "\n".join(sub_processed_texts)
                 )
 
         # ── Summary ───────────────────────────────────────────────────
