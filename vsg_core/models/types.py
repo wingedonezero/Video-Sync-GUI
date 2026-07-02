@@ -148,7 +148,10 @@ SyncStabilityOutlierModeStr = Literal["any", "threshold"]
 # =========================================================================
 
 # OCR engine
-OcrEngineStr = Literal["paddleocr-vl"]
+#   paddleocr-vl-native — official transformers runtime, frames as decoded
+#   paddleocr-vl-2x     — transformers + 2x Spotting upscale for DVD frames
+#   paddleocr-vl        — legacy llama.cpp/GGUF runtime
+OcrEngineStr = Literal["paddleocr-vl-native", "paddleocr-vl-2x", "paddleocr-vl"]
 
 # OCR output format
 OcrOutputFormatStr = Literal["ass", "srt"]

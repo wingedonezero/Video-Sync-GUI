@@ -82,12 +82,10 @@ ISC_MODEL_DIR = PROJECT_DIR / "models" / "isc"
 # SSCD models (Meta's ISC successor — sliding-window backends 2 and 3)
 # TorchScript files with the full architecture baked in, no timm needed.
 SSCD_MIXUP_URL = (
-    "https://dl.fbaipublicfiles.com/sscd-copy-detection/"
-    "sscd_disc_mixup.torchscript.pt"
+    "https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_mixup.torchscript.pt"
 )
 SSCD_LARGE_URL = (
-    "https://dl.fbaipublicfiles.com/sscd-copy-detection/"
-    "sscd_disc_large.torchscript.pt"
+    "https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_large.torchscript.pt"
 )
 SSCD_MIXUP_FILENAME = "sscd_disc_mixup.torchscript.pt"
 SSCD_LARGE_FILENAME = "sscd_disc_large.torchscript.pt"
@@ -112,6 +110,11 @@ OCR_VLM_MODELS = {
             "PaddleOCR-VL-1.5-mmproj.gguf",
             "chat_template.jinja",
         ],
+    },
+    # Official transformers checkpoint — used by the Native/2x OCR engines.
+    "PaddleOCR-VL-1.5-transformers": {
+        "repo_id": "PaddlePaddle/PaddleOCR-VL-1.5",
+        "size_hint": "~1.9GB",
     },
 }
 
@@ -985,16 +988,12 @@ print(f"OK Saved stripped weights: {{weights_path.name}} ({{size_mb:.0f}} MB, {{
         need_download: list[tuple[str, str, Path]] = []
         if mixup_path.is_file():
             size_mb = mixup_path.stat().st_size / 1024 / 1024
-            already_present.append(
-                f"disc_mixup ({size_mb:.0f} MB) at {mixup_path}"
-            )
+            already_present.append(f"disc_mixup ({size_mb:.0f} MB) at {mixup_path}")
         else:
             need_download.append(("disc_mixup", SSCD_MIXUP_URL, mixup_path))
         if large_path.is_file():
             size_mb = large_path.stat().st_size / 1024 / 1024
-            already_present.append(
-                f"disc_large ({size_mb:.0f} MB) at {large_path}"
-            )
+            already_present.append(f"disc_large ({size_mb:.0f} MB) at {large_path}")
         else:
             need_download.append(("disc_large", SSCD_LARGE_URL, large_path))
 
@@ -1017,9 +1016,11 @@ print(f"OK Saved stripped weights: {{weights_path.name}} ({{size_mb:.0f}} MB, {{
 
         # Download via torch.hub.download_url_to_file — same helper the
         # ISC path uses under the hood, handles resume/retry and progress.
-        downloads_repr = "[" + ", ".join(
-            f"({n!r}, {u!r}, {str(p)!r})" for n, u, p in need_download
-        ) + "]"
+        downloads_repr = (
+            "["
+            + ", ".join(f"({n!r}, {u!r}, {str(p)!r})" for n, u, p in need_download)
+            + "]"
+        )
         script = f"""
 import sys
 from pathlib import Path
@@ -1062,9 +1063,11 @@ for name, url, dst_str in downloads:
             check_file = "config.json"
 
         if (model_dir / check_file).is_file():
-            size_mb = sum(
-                f.stat().st_size for f in model_dir.rglob("*") if f.is_file()
-            ) / 1024 / 1024
+            size_mb = (
+                sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file())
+                / 1024
+                / 1024
+            )
             self.window.log_success(
                 f"{model_name} already downloaded ({size_mb:.0f} MB): {model_dir}"
             )
@@ -1176,6 +1179,7 @@ for name, info in deps.items():
         if extra_env:
             self.window.log_info(f"  Build env: {extra_env}")
             import os
+
             env = {**os.environ, **extra_env}
         else:
             env = None
@@ -1445,7 +1449,15 @@ class SetupWindow(QMainWindow):
                 ),
                 (
                     "PaddleOCR-VL 1.5 (Fast GGUF OCR)",
-                    lambda: self.controller.download_ocr_vlm_model("PaddleOCR-VL-1.5-GGUF"),
+                    lambda: self.controller.download_ocr_vlm_model(
+                        "PaddleOCR-VL-1.5-GGUF"
+                    ),
+                ),
+                (
+                    "PaddleOCR-VL 1.5 (Native/2x Torch OCR)",
+                    lambda: self.controller.download_ocr_vlm_model(
+                        "PaddleOCR-VL-1.5-transformers"
+                    ),
                 ),
             ],
         )

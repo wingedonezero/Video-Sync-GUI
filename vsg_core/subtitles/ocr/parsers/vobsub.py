@@ -554,9 +554,18 @@ class VobSubParser(SubtitleImageParser):
         bottom_field_offset = 4
         forced = False
         duration_ms = 0  # Will be set when we find stop display command
+        # First SET_DAREA (0x05) wins — a later control block must not move the
+        # geometry (matches SubtitleEdit's first-wins behavior).
+        darea_set = False
 
         pos = offset
+        # Guard against a malformed/cyclic SP_DCSQ chain (A->B->A...) that would
+        # otherwise loop forever; the normal terminator is next_ctrl == offset.
+        visited_offsets: set[int] = set()
         while pos < len(data) - 3:
+            if offset in visited_offsets:
+                break
+            visited_offsets.add(offset)
             # Read SP_DCSQ_STM delay field (2 bytes, big-endian)
             # This is the delay in 90KHz/1024 ticks before executing commands
             delay_ticks = struct.unpack(">H", data[pos : pos + 2])[0]
@@ -613,12 +622,15 @@ class VobSubParser(SubtitleImageParser):
                         pos += 2
 
                 elif cmd == 0x05:
-                    # Coordinates
+                    # Coordinates (SET_DAREA). First one wins; a later block
+                    # must not overwrite the geometry (matches SubtitleEdit).
                     if pos + 6 <= len(data):
-                        x1 = (data[pos] << 4) | ((data[pos + 1] >> 4) & 0x0F)
-                        x2 = ((data[pos + 1] & 0x0F) << 8) | data[pos + 2]
-                        y1 = (data[pos + 3] << 4) | ((data[pos + 4] >> 4) & 0x0F)
-                        y2 = ((data[pos + 4] & 0x0F) << 8) | data[pos + 5]
+                        if not darea_set:
+                            x1 = (data[pos] << 4) | ((data[pos + 1] >> 4) & 0x0F)
+                            x2 = ((data[pos + 1] & 0x0F) << 8) | data[pos + 2]
+                            y1 = (data[pos + 3] << 4) | ((data[pos + 4] >> 4) & 0x0F)
+                            y2 = ((data[pos + 4] & 0x0F) << 8) | data[pos + 5]
+                            darea_set = True
                         pos += 6
 
                 elif cmd == 0x06:
@@ -629,6 +641,13 @@ class VobSubParser(SubtitleImageParser):
                             ">H", data[pos + 2 : pos + 4]
                         )[0]
                         pos += 4
+
+                elif cmd == 0x07:
+                    # CHG_COLCON: a variable-length color/contrast parameter area
+                    # we don't decode. Treating its bytes as commands would desync
+                    # the stream, and it carries no geometry, so stop reading this
+                    # block's commands (the chain still advances to the next block).
+                    break
 
                 elif cmd == 0xFF:
                     # End of control sequence

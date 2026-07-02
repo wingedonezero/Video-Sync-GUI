@@ -36,7 +36,7 @@ from .postprocess import OCRPostProcessor, create_postprocessor
 from .report import OCRReport, SubtitleOCRResult, create_report
 
 # VLM engine names that use the VLM pipeline (spotting + pixel verification)
-_VLM_ENGINES = {"qwen35-4b", "paddleocr-vl"}
+_VLM_ENGINES = {"qwen35-4b", "paddleocr-vl", "paddleocr-vl-native", "paddleocr-vl-2x"}
 
 
 @dataclass(slots=True)
@@ -163,8 +163,14 @@ class OCRPipeline:
         try:
             self._log_progress("Starting OCR pipeline", 0.0)
 
-            # Log which OCR engine is being used
-            backend_setting = self.settings.get("ocr_engine", "paddleocr-vl")
+            # Pick the engine for this input's format. Per-format settings
+            # (VobSub vs PGS) fall back to the legacy single ocr_engine key
+            # so old settings.json files keep working.
+            legacy_engine = self.settings.get("ocr_engine", "paddleocr-vl")
+            if input_path.suffix.lower() == ".sup":
+                backend_setting = self.settings.get("ocr_engine_pgs", legacy_engine)
+            else:
+                backend_setting = self.settings.get("ocr_engine_vobsub", legacy_engine)
             is_vlm = backend_setting in _VLM_ENGINES
             self._log_progress(f"Using OCR engine: {backend_setting}", 0.02)
 
