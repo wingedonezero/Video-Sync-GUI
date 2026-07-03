@@ -45,6 +45,8 @@ from .sliding_core import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from .sliding_core import TimelineProbe
+
 # ── Main entrypoint ───────────────────────────────────────────────────────────
 
 
@@ -659,6 +661,10 @@ def calculate_sliding_offset(
             pts_delta_frames=pts_delta_frames,
             dt_total=dt_total,
             log=log,
+            src_probe=src_probe,
+            tgt_probe=tgt_probe,
+            timeline_correction_frames=timeline_correction_frames,
+            index_consensus_frames=index_consensus_frames,
         )
 
     # ─── CALCULATE FINAL OFFSET ──────────────────────────────────
@@ -742,6 +748,10 @@ def _write_debug_report(
     pts_delta_frames: int,
     dt_total: float,
     log: Callable,
+    src_probe: TimelineProbe | None = None,
+    tgt_probe: TimelineProbe | None = None,
+    timeline_correction_frames: int = 0,
+    index_consensus_frames: int | None = None,
 ) -> None:
     """Write detailed debug report to the sliding_verify directory.
 
@@ -771,6 +781,48 @@ def _write_debug_report(
         if pts_delta_frames != 0:
             lines.append(f"PTS delta correction applied: {pts_delta_frames:+d} frames")
         lines.append("")
+
+        # Timeline integrity — self-contained record of the frame-index vs
+        # wall-clock check so the report is reviewable without the job log.
+        lines.append("-" * 80)
+        lines.append("TIMELINE INTEGRITY (frame-index <-> wall-clock)")
+        lines.append("-" * 80)
+        for label, probe in (("Source", src_probe), ("Target", tgt_probe)):
+            if probe is None or probe.ok is None:
+                lines.append(
+                    f"  {label}: UNVERIFIED (container timestamps unavailable)"
+                )
+            elif probe.ok:
+                lines.append(f"  {label}: OK (no pts gaps)")
+            else:
+                where = (
+                    f" — first gap at ~{probe.first_divergence_time_s:.3f}s "
+                    f"(frame index {probe.first_divergence_index})"
+                    if probe.first_divergence_time_s is not None
+                    else ""
+                )
+                lines.append(
+                    f"  {label}: {abs(probe.missing_slots)} "
+                    f"{'missing' if probe.missing_slots > 0 else 'extra'} "
+                    f"frame slot(s){where}"
+                )
+        if timeline_correction_frames != 0 and index_consensus_frames is not None:
+            lines.append(
+                f"  GAP CORRECTION APPLIED: frame-index consensus was "
+                f"{index_consensus_frames:+d}f "
+                f"({index_consensus_frames * src_frame_dur_ms:+.1f}ms); "
+                f"real timestamps give {consensus_frames:+d}f "
+                f"({consensus_ms:+.1f}ms)"
+            )
+            lines.append(
+                "  Offsets below are wall-clock (timestamp-based) values — "
+                "authoritative for subtitles."
+            )
+        else:
+            lines.append(
+                "  No correction needed: frame-index and wall-clock offsets agree."
+            )
+        lines.append("")
         lines.append(
             f"RESULT: {consensus_frames:+d}f = {consensus_ms:+.1f}ms "
             f"({consensus_count}/{len(results)} consensus)"
@@ -785,11 +837,17 @@ def _write_debug_report(
         lines.append("PER-POSITION RESULTS")
         lines.append("-" * 80)
         for r in results:
+            div = r.get("divergence_frames", 0)
+            div_note = (
+                f" [gap-corrected from index {r['index_offset_frames']:+d}f]"
+                if div != 0
+                else ("" if r.get("pts_based", True) else " [index-math]")
+            )
             lines.append(
                 f"  {r['position_pct']:5.1f}% @{r['src_start']:6d}f: "
                 f"offset={r['offset_frames']:+4d}f ({r['offset_ms']:+8.1f}ms) "
                 f"score={r['score']:.4f} match={r['matches']}/{r['total']} "
-                f"grad={r['gradient']:.4f}/f ({r['time_s']:.1f}s)"
+                f"grad={r['gradient']:.4f}/f ({r['time_s']:.1f}s){div_note}"
             )
         lines.append("")
 
@@ -802,7 +860,8 @@ def _write_debug_report(
             bp = land["best_pos"]
             src_start = land["src_start"]
             tgt_ws = land["tgt_window_start"]
-            best_off_f = (tgt_ws + bp) - src_start - pts_delta_frames
+            ldiv = land.get("divergence_frames", 0)
+            best_off_f = (tgt_ws + bp) - src_start - pts_delta_frames + ldiv
             best_off_ms = best_off_f * src_frame_dur_ms
 
             lines.append("")
@@ -815,7 +874,7 @@ def _write_debug_report(
             for delta in range(-15, 16):
                 pos = bp + delta
                 if 0 <= pos < len(sc):
-                    off_f = (tgt_ws + pos) - src_start - pts_delta_frames
+                    off_f = (tgt_ws + pos) - src_start - pts_delta_frames + ldiv
                     off_ms = off_f * src_frame_dur_ms
                     marker = " ★" if delta == 0 else ""
                     bar_val = max(0, (sc[pos] - 0.3) * 60)
