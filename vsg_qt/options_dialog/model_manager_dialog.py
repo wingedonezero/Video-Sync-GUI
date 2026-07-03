@@ -198,6 +198,27 @@ class ModelManagerDialog(QDialog):
             for model in self.all_models:
                 model["installed"] = model["filename"] in installed_filenames
 
+            # Installed models that upstream removed from its registry
+            # (e.g. htdemucs, older roformer checkpoints) would otherwise
+            # vanish from the table entirely even though they still work —
+            # separation loads them from disk by filename; the registry is
+            # only the download catalog. Keep them visible.
+            registry_filenames = {m["filename"] for m in self.all_models}
+            for inst in self.installed_models:
+                if inst["filename"] in registry_filenames:
+                    continue
+                orphan = dict(inst)
+                orphan["installed"] = True
+                note = "Installed locally; no longer listed in the registry."
+                desc = orphan.get("description") or ""
+                if note not in desc:
+                    orphan["description"] = f"{desc} {note}".strip()
+                self.all_models.append(orphan)
+                print(
+                    f"[Model Manager] Installed model not in registry "
+                    f"(kept visible): {inst['filename']}"
+                )
+
             self._populate_table()
 
         except Exception as e:
