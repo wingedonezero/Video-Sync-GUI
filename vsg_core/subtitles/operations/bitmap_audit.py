@@ -11,12 +11,14 @@ Tier model:
 * **Tier 1 (always)** — sanity checks that apply regardless of where
   the delay came from: dropped events, zero/negative/excessive
   durations, monotonicity, video-duration overflow.
-* **Tier 2 (when fps is known)** — frame-alignment check using the
-  same model as text-sub ``frame_audit``: for each event endpoint,
-  compute the source frame ``F_src = floor(source_pts / period)``,
-  the expected output frame ``F_target = F_src + frame_shift``, and
-  the actual output frame ``F_actual = floor(shifted_pts / period)``.
-  An event is "correct" iff ``F_actual == F_target``.
+* **Tier 2 (when an exact frame grid is known)** — frame-alignment check
+  using the same model as text-sub ``frame_audit``: for each event
+  endpoint, compute the source frame ``F_src = clock.frame_of(source_pts)``
+  on the exact integer container grid (:class:`FrameClock`), the expected
+  output frame ``F_target = F_src + frame_shift``, and the actual output
+  frame ``F_actual = clock.frame_of(shifted_pts)``. An event is "correct"
+  iff ``F_actual == F_target``. VFR / MPEG-2 / interlaced targets have no
+  such grid — callers pass no clock and Tier 2 is skipped.
 
 **Audit-only model** — the shifter applies only the uniform shift
 (matches mkvmerge ``--sync`` byte-for-byte). When ``F_actual`` does
@@ -30,19 +32,17 @@ would have produced.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
 
 # Per-event sanity bounds (ms). Bitmap subs longer than 60 s or shorter
 # than 100 ms are suspicious but legal; we flag them rather than
 # rejecting them.
 MAX_REASONABLE_DURATION_MS = 60_000
 MIN_REASONABLE_DURATION_MS = 100
-
-# Tiny floor-bias to ensure that PTS == N * period maps to frame N
-# rather than frame N-1 due to floating-point drift.
-FRAME_EPSILON_MS = 1e-6
 
 
 DelaySourceKind = Literal[
@@ -222,46 +222,42 @@ def tier1_sanity(
 # ----------------------------------------------------------------------
 
 
-def frame_of(ts_ms: float, frame_period_ms: float) -> int:
-    """Return the video frame index that contains ``ts_ms``.
+def frame_of(ts_ms: float, clock: FrameClock) -> int:
+    """Return the video frame ``ts_ms`` renders against.
 
-    Uses ``floor((ts_ms + ε) / period)``. The epsilon avoids snapping
-    a PTS that lands *exactly* on a frame start to the previous frame
-    due to float rounding.
+    Delegates to :meth:`FrameClock.frame_of` — the exact integer container
+    grid, "first real frame at or after the timestamp" (player display
+    semantics). The previous float-grid form (``floor(ts / (1000/fps))``)
+    was 1ms wrong at ~4% of NTSC frames, the exact defect FrameClock was
+    built to eliminate.
     """
-    return int((ts_ms + FRAME_EPSILON_MS) / frame_period_ms)
+    return clock.frame_of(ts_ms)
 
 
 def integer_ms_window_for_frame(
-    target_frame: int, frame_period_ms: float
+    target_frame: int, clock: FrameClock
 ) -> tuple[int, int]:
     """Return ``(lo_ms, hi_ms)`` — the inclusive integer-ms range
-    whose values all satisfy ``frame_of(ms, period) == target_frame``.
+    whose values all satisfy ``frame_of(ms, clock) == target_frame``.
 
-    For a typical fps (period > 1 ms) this always returns a non-empty
-    range. Callers that pick an ms in this range are guaranteed to land
-    in ``target_frame``.
+    On the exact grid a timestamp maps to frame ``n`` iff it lies in
+    ``(frame_ms(n-1), frame_ms(n)]``, so the integer window is
+    ``[frame_ms(n-1) + 1, frame_ms(n)]``.
     """
-    frame_start_ms = target_frame * frame_period_ms
-    frame_end_ms = (target_frame + 1) * frame_period_ms
-    lo = int(math.ceil(frame_start_ms - FRAME_EPSILON_MS))
-    # Largest integer ms still strictly inside [frame_start, frame_end).
-    # `frame_end - ε` then floor → ceil(... - 1) catches the boundary
-    # case where frame_end is itself an integer ms (which belongs to the
-    # next frame, not this one).
-    hi = int(math.ceil(frame_end_ms - FRAME_EPSILON_MS)) - 1
+    hi = clock.frame_ms(target_frame)
+    lo = clock.frame_ms(target_frame - 1) + 1 if target_frame > 0 else 0
     return lo, hi
 
 
 def pick_integer_ms_in_frame(
-    desired_ms: float, target_frame: int, frame_period_ms: float
+    desired_ms: float, target_frame: int, clock: FrameClock
 ) -> int | None:
     """Pick the integer ms inside ``target_frame``'s window closest to ``desired_ms``.
 
     Returns ``None`` if the frame contains no integer ms (only possible
     for sub-1ms frame periods, i.e. fps > 1000 — not a real case).
     """
-    lo, hi = integer_ms_window_for_frame(target_frame, frame_period_ms)
+    lo, hi = integer_ms_window_for_frame(target_frame, clock)
     if lo > hi:
         return None
     if desired_ms <= lo:
