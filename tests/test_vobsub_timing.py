@@ -14,6 +14,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from vsg_core.subtitles.frame_utils.frame_clock import FrameClock  # noqa: E402
 from vsg_core.subtitles.operations.vobsub_timing import (  # noqa: E402
     _DELAY_LINE_RE,
     _ms_to_idx_timestamp,
@@ -26,7 +27,7 @@ from vsg_core.subtitles.operations.vobsub_timing import (  # noqa: E402
 FIXTURE_IDX = PROJECT_ROOT / "tests" / "fixtures" / "vobsub_small.idx"
 FIXTURE_SUB = PROJECT_ROOT / "tests" / "fixtures" / "vobsub_small.sub"
 
-FPS_NTSC_VIDEO = 30000.0 / 1001.0  # 29.97, the actual DVD fps
+CLOCK_NTSC_VIDEO = FrameClock(30000, 1001)  # 29.97, the actual DVD fps
 
 
 def test_ms_to_idx_timestamp_round_trip() -> None:
@@ -122,7 +123,7 @@ def test_extract_stop_display_delay_present() -> None:
 
 
 def test_audit_runs_on_29_97_fps() -> None:
-    """With target_fps=29.97 and a -6 ms shift, the frame audit must
+    """With a 30000/1001 clock and a -6 ms shift, the frame audit must
     populate Tier 2 results."""
     text = FIXTURE_IDX.read_text(encoding="latin-1")
     sub = FIXTURE_SUB.read_bytes()
@@ -130,7 +131,7 @@ def test_audit_runs_on_29_97_fps() -> None:
         text,
         sub,
         -5.674,
-        target_fps=FPS_NTSC_VIDEO,
+        target_clock=CLOCK_NTSC_VIDEO,
         frame_alignment_audit=True,
     )
     assert res.tier2 is not None
@@ -165,7 +166,7 @@ def test_audit_off_byte_equivalent_to_audit_on() -> None:
         text,
         FIXTURE_SUB.read_bytes(),
         -6.0,
-        target_fps=FPS_NTSC_VIDEO,
+        target_clock=CLOCK_NTSC_VIDEO,
         frame_alignment_audit=True,
     )
     assert out_noaudit == out_audited

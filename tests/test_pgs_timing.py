@@ -13,6 +13,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from vsg_core.subtitles.frame_utils.frame_clock import FrameClock  # noqa: E402
 from vsg_core.subtitles.operations.bitmap_audit import (  # noqa: E402
     frame_of,
     integer_ms_window_for_frame,
@@ -36,10 +37,10 @@ def _ms_to_ticks(ms: int) -> int:
     return ms * (PTS_CLOCK_HZ // 1000)
 
 
-# Exact NTSC-film fps: ffprobe/MediaInfo report this as 24000/1001, not
-# 23.976. Using the rational value avoids FP error that would put
+# Exact NTSC-film grid: ffprobe/MediaInfo report this as 24000/1001, not
+# 23.976. Using the exact fraction avoids FP error that would put
 # events at frame boundaries one frame early.
-FPS_NTSC_FILM = 24000.0 / 1001.0  # ≈ 23.976023976
+CLOCK_NTSC_FILM = FrameClock(24000, 1001)  # ≈ 23.976023976 fps
 
 
 def test_walk_segments_recovers_known_count_and_types() -> None:
@@ -176,21 +177,24 @@ def test_ms_helper_arithmetic() -> None:
 
 
 def test_frame_math_primitives_23976() -> None:
-    """At NTSC-film fps every 24 frames is an integer-ms boundary."""
-    period = 1000.0 / FPS_NTSC_FILM
-    # Frame 24 starts at exactly 1001.0 ms — boundary case
-    assert frame_of(1001.0, period) == 24
-    # Frame 23 ends just before 1001.0; 1000 ms still in frame 23
-    assert frame_of(1000.0, period) == 23
-    # Frame 24 spans integer ms 1001..1042 inclusive
-    lo, hi = integer_ms_window_for_frame(24, period)
-    assert lo == 1001
-    assert hi == 1042
-    # Picking closest int ms in frame 24 for a desired 1002 ms target
-    assert pick_integer_ms_in_frame(1002.0, 24, period) == 1002
-    # If desired is outside the frame, clamp to nearest endpoint
-    assert pick_integer_ms_in_frame(999.0, 24, period) == 1001
-    assert pick_integer_ms_in_frame(1500.0, 24, period) == 1042
+    """Frame mapping uses the exact container grid with display semantics:
+    a timestamp renders on the first real frame at-or-after it."""
+    clock = CLOCK_NTSC_FILM
+    # Frame 24's container time is exactly 1001 ms — a 1001 ms timestamp
+    # renders on frame 24.
+    assert frame_of(1001.0, clock) == 24
+    # Frame 23 was presented at 959 ms; a 1000 ms timestamp appears on the
+    # NEXT frame to be shown, which is frame 24.
+    assert frame_of(1000.0, clock) == 24
+    # Frame 24's integer-ms window: (frame_ms(23), frame_ms(24)] = 960..1001
+    lo, hi = integer_ms_window_for_frame(24, clock)
+    assert lo == 960
+    assert hi == 1001
+    # Picking closest int ms in frame 24's window for a desired 1000 ms
+    assert pick_integer_ms_in_frame(1000.0, 24, clock) == 1000
+    # If desired is outside the window, clamp to nearest endpoint
+    assert pick_integer_ms_in_frame(900.0, 24, clock) == 960
+    assert pick_integer_ms_in_frame(1500.0, 24, clock) == 1001
 
 
 def test_apply_constant_shift_integer_frame_no_drift() -> None:
@@ -198,7 +202,7 @@ def test_apply_constant_shift_integer_frame_no_drift() -> None:
     event must land on F_src + 24."""
     data = FIXTURE.read_bytes()
     _, result = apply_constant_shift(
-        data, 1001.0, target_fps=FPS_NTSC_FILM, frame_alignment_audit=True
+        data, 1001.0, target_clock=CLOCK_NTSC_FILM, frame_alignment_audit=True
     )
     assert result.tier2 is not None
     t2 = result.tier2
@@ -218,17 +222,17 @@ def test_apply_constant_shift_audit_does_not_change_output() -> None:
     data = FIXTURE.read_bytes()
     out_uniform, _ = apply_constant_shift(data, 1001.0, frame_alignment_audit=False)
     out_audited, _ = apply_constant_shift(
-        data, 1001.0, target_fps=FPS_NTSC_FILM, frame_alignment_audit=True
+        data, 1001.0, target_clock=CLOCK_NTSC_FILM, frame_alignment_audit=True
     )
     assert out_uniform == out_audited
 
 
 def test_apply_constant_shift_audit_with_no_fps_skipped() -> None:
-    """frame_alignment_audit=True but target_fps=None → no Tier 2."""
+    """frame_alignment_audit=True but target_clock=None → no Tier 2."""
     data = FIXTURE.read_bytes()
     out_uniform, _ = apply_constant_shift(data, 1001.0)
     out_skipped, res_skipped = apply_constant_shift(
-        data, 1001.0, target_fps=None, frame_alignment_audit=True
+        data, 1001.0, target_clock=None, frame_alignment_audit=True
     )
     assert out_uniform == out_skipped
     assert res_skipped.tier2 is None
@@ -239,7 +243,7 @@ def test_audit_only_byte_count_and_segment_order_preserved() -> None:
     data = FIXTURE.read_bytes()
     src_segs, _ = walk_segments(data)
     out, _ = apply_constant_shift(
-        data, 1003.0, target_fps=FPS_NTSC_FILM, frame_alignment_audit=True
+        data, 1003.0, target_clock=CLOCK_NTSC_FILM, frame_alignment_audit=True
     )
     out_segs, _ = walk_segments(out)
     assert len(out_segs) == len(src_segs)
@@ -251,7 +255,7 @@ def test_endpoint_audit_records_emitted() -> None:
     (start + end)."""
     data = FIXTURE.read_bytes()
     _, result = apply_constant_shift(
-        data, 1001.0, target_fps=FPS_NTSC_FILM, frame_alignment_audit=True
+        data, 1001.0, target_clock=CLOCK_NTSC_FILM, frame_alignment_audit=True
     )
     assert result.tier2 is not None
     eps = result.tier2.endpoints

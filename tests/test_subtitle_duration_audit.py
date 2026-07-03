@@ -71,3 +71,87 @@ def test_empty_track() -> None:
     assert r.events_total == 0
     assert r.max_end_ms == 0.0
     assert r.events_overflow == 0
+
+
+# ----------------------------------------------------------------------
+# Opt-in clamp to video end
+# ----------------------------------------------------------------------
+
+from vsg_core.subtitles.operations.duration_audit import (  # noqa: E402
+    clamp_events_to_video_end,
+)
+
+
+def test_clamp_end_past_video_to_centisecond() -> None:
+    # Video ends at 5003.667ms -> clamp target is the last centisecond
+    # at-or-before it: 5000ms.
+    events = [_ev(1000, 2000), _ev(4000, 9000)]
+    r = clamp_events_to_video_end(events, video_duration_ms=5003.667)
+    assert r.clamp_target_ms == 5000
+    assert r.events_clamped == 1
+    assert r.events_dropped == 0
+    assert events[0].end_ms == 2000  # untouched
+    assert events[1].end_ms == 5000.0
+    assert r.actions[0].action == "clamped"
+    assert r.actions[0].new_end_ms == 5000.0
+
+
+def test_clamp_leaves_lines_within_video_alone() -> None:
+    events = [_ev(0, 1000), _ev(2000, 5000)]
+    r = clamp_events_to_video_end(events, video_duration_ms=5000)
+    assert r.touched == 0
+    assert [e.end_ms for e in events] == [1000, 5000]
+
+
+def test_drop_line_starting_past_video_end() -> None:
+    events = [_ev(1000, 2000), _ev(5100, 9000)]
+    r = clamp_events_to_video_end(events, video_duration_ms=5000)
+    assert r.events_dropped == 1
+    assert r.events_clamped == 0
+    assert len(events) == 1
+    assert events[0].start_ms == 1000
+    assert r.actions[0].action == "dropped"
+
+
+def test_comments_never_touched() -> None:
+    # Comment past video end stays; comment starting past end stays.
+    events = [
+        _ev(1000, 999_000, comment=True),
+        _ev(8000, 9000, comment=True),
+        _ev(4000, 9000),
+    ]
+    r = clamp_events_to_video_end(events, video_duration_ms=5000)
+    assert r.events_clamped == 1
+    assert r.events_dropped == 0
+    assert len(events) == 3
+    assert events[0].end_ms == 999_000  # comment untouched
+    assert events[1].start_ms == 8000  # comment untouched
+    assert events[2].end_ms == 5000.0
+
+
+def test_clamp_into_zero_duration_drops_instead() -> None:
+    # Line starts inside the final sub-centisecond sliver: clamping the end
+    # to 5000 would make end <= start -> drop, never a zero-length event.
+    events = [_ev(5002, 9000)]
+    r = clamp_events_to_video_end(events, video_duration_ms=5003.667)
+    assert r.events_dropped == 1
+    assert r.events_clamped == 0
+    assert len(events) == 0
+
+
+def test_audit_carries_clamp_result() -> None:
+    events = [_ev(4000, 9000)]
+    clamp = clamp_events_to_video_end(events, video_duration_ms=5000)
+    r = audit_subtitle_duration(
+        events, video_duration_ms=5000, track_label="t", clamp_result=clamp
+    )
+    assert r.clamp_applied
+    assert r.events_clamped == 1
+    assert r.events_dropped == 0
+    assert r.events_overflow == 0  # post-clamp: nothing past the video
+
+
+def test_audit_without_clamp_unchanged() -> None:
+    r = audit_subtitle_duration([_ev(1000, 5125)], 5000, "t")
+    assert not r.clamp_applied
+    assert r.events_overflow == 1

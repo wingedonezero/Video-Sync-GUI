@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-import numpy as np  # noqa: TC002 — used at runtime in detect_speech_regions
+import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -154,11 +154,21 @@ def detect_speech_regions(
     model = torch.jit.load(str(model_path))
     model.eval()
 
-    # Silero VAD expects 16 kHz mono
+    # Silero VAD expects 16 kHz mono. Resample properly: the previous
+    # every-Nth-sample decimation (step = sr // 16000) produced 22050 Hz
+    # data labeled as 16 kHz for 44.1 kHz inputs — every reported speech
+    # boundary was scaled by ~0.73 — and had no anti-alias filter even
+    # when the ratio was exact.
     target_sr = 16000
     if sample_rate != target_sr:
-        step = max(1, sample_rate // target_sr)
-        pcm_16k = pcm_mono[::step]
+        from math import gcd
+
+        from scipy.signal import resample_poly
+
+        g = gcd(sample_rate, target_sr)
+        pcm_16k = resample_poly(pcm_mono, target_sr // g, sample_rate // g).astype(
+            np.float32
+        )
     else:
         pcm_16k = pcm_mono
 

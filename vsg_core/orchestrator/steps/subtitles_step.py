@@ -261,17 +261,22 @@ def _shift_pgs_track(item, ctx, runner) -> None:
     # Detect Source 1 properties on demand so time-based mode gets the
     # same audit coverage as video-verified (fps + duration).
     _lookup_source1_properties(ctx, runner)
-    fps = _lookup_target_fps(ctx)
+    target_clock = _lookup_target_clock(ctx)
     video_duration_ms = _lookup_video_duration_ms(ctx)
 
     frame_audit_enabled = bool(
-        getattr(ctx.settings, "bitmap_frame_alignment_audit", True) and fps and fps > 0
+        getattr(ctx.settings, "bitmap_frame_alignment_audit", True)
+        and target_clock is not None
     )
 
     runner._log_message(
         f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind}), "
         f"frame_audit = {frame_audit_enabled} "
-        f"(fps = {fps if fps else 'unknown'})"
+        + (
+            f"(exact grid {target_clock.num}/{target_clock.den})"
+            if target_clock is not None
+            else "(no exact CFR grid — VFR/MPEG-2/unknown target)"
+        )
     )
 
     src_path = item.extracted_path
@@ -281,7 +286,7 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         new_bytes, shift_res = apply_constant_shift(
             raw,
             delay_ms,
-            target_fps=fps if frame_audit_enabled else None,
+            target_clock=target_clock if frame_audit_enabled else None,
             frame_alignment_audit=frame_audit_enabled,
             drop_negative=True,
             log=runner._log_message,
@@ -321,7 +326,7 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         delay_source_kind=kind,  # type: ignore[arg-type]  # Literal narrowed by helper
         requested_delay_ms=delay_ms,
         applied_delay_ms=shift_res.applied_delay_ms,
-        target_fps=fps,
+        target_fps=(target_clock.num / target_clock.den) if target_clock else None,
         tier1=tier1,
         tier2=shift_res.tier2,
         frame_alignment_audit_enabled=frame_audit_enabled,
@@ -382,17 +387,22 @@ def _shift_vobsub_track(item, ctx, runner) -> None:
     delay_ms, kind = _resolve_bitmap_delay(item, ctx)
 
     _lookup_source1_properties(ctx, runner)
-    fps = _lookup_target_fps(ctx)
+    target_clock = _lookup_target_clock(ctx)
     video_duration_ms = _lookup_video_duration_ms(ctx)
 
     frame_audit_enabled = bool(
-        getattr(ctx.settings, "bitmap_frame_alignment_audit", True) and fps and fps > 0
+        getattr(ctx.settings, "bitmap_frame_alignment_audit", True)
+        and target_clock is not None
     )
 
     runner._log_message(
         f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind}), "
         f"frame_audit = {frame_audit_enabled} "
-        f"(fps = {fps if fps else 'unknown'})"
+        + (
+            f"(exact grid {target_clock.num}/{target_clock.den})"
+            if target_clock is not None
+            else "(no exact CFR grid — VFR/MPEG-2/unknown target)"
+        )
     )
 
     try:
@@ -402,7 +412,7 @@ def _shift_vobsub_track(item, ctx, runner) -> None:
             idx_text,
             sub_data,
             delay_ms,
-            target_fps=fps if frame_audit_enabled else None,
+            target_clock=target_clock if frame_audit_enabled else None,
             frame_alignment_audit=frame_audit_enabled,
             drop_negative=True,
             log=runner._log_message,
@@ -463,7 +473,7 @@ def _shift_vobsub_track(item, ctx, runner) -> None:
         delay_source_kind=kind,  # type: ignore[arg-type]
         requested_delay_ms=delay_ms,
         applied_delay_ms=shift_res.applied_delay_ms,
-        target_fps=fps,
+        target_fps=(target_clock.num / target_clock.den) if target_clock else None,
         tier1=tier1,
         tier2=shift_res.tier2,
         frame_alignment_audit_enabled=frame_audit_enabled,
@@ -604,12 +614,16 @@ def _lookup_video_duration_ms(ctx) -> float | None:
     return None
 
 
-def _lookup_target_fps(ctx) -> float | None:
-    """Pull Source 1's fps from ``ctx.video_properties`` if cached."""
+def _lookup_target_clock(ctx):
+    """Exact CFR frame grid for Source 1, or ``None`` (VFR/MPEG-2/unknown).
+
+    Same gate as the text-sub surgical rounding path: only progressive,
+    constant-rate, non-MPEG2 targets have a real integer frame grid the
+    Tier 2 bitmap audit can be judged against.
+    """
     props = ctx.video_properties.get("Source 1") if ctx.video_properties else None
     if not props:
         return None
-    fps = props.get("fps")
-    if isinstance(fps, (int, float)) and fps > 0:
-        return float(fps)
-    return None
+    from vsg_core.subtitles.frame_utils import frame_clock_from_props
+
+    return frame_clock_from_props(props)

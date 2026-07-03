@@ -602,7 +602,25 @@ def get_all_available_models_from_registry() -> list[dict]:
         List of model dictionaries with all available info from registry.
         Returns empty list if query fails.
     """
-    # Method 1: Try using audio-separator CLI
+    # Method 1: the library's bundled models.json — instant and offline.
+    # The CLI's --list_models fetches remote metadata and can hang for
+    # minutes on a slow/blocked connection, so it is only a fallback.
+    print("[get_all_available_models] Trying to import audio-separator library...")
+    try:
+        model_data = _load_model_data()
+        if model_data:
+            print("[get_all_available_models] Loaded models.json from library")
+            models = []
+            _extract_models_from_registry(model_data, models)
+            print(
+                f"[get_all_available_models] Extracted {len(models)} models from library"
+            )
+            if models:
+                return models
+    except Exception as e:
+        print(f"[get_all_available_models] Library import method failed: {e}")
+
+    # Method 2: audio-separator CLI (network-bound; short timeout)
     cli_path = shutil.which("audio-separator")
     if cli_path:
         print(f"[get_all_available_models] Using audio-separator CLI: {cli_path}")
@@ -633,21 +651,6 @@ def get_all_available_models_from_registry() -> list[dict]:
 
         except Exception as e:
             print(f"[get_all_available_models] CLI method failed: {e}")
-
-    # Method 2: Try importing audio-separator directly and loading models.json
-    print("[get_all_available_models] Trying to import audio-separator library...")
-    try:
-        model_data = _load_model_data()
-        if model_data:
-            print("[get_all_available_models] Loaded models.json from library")
-            models = []
-            _extract_models_from_registry(model_data, models)
-            print(
-                f"[get_all_available_models] Extracted {len(models)} models from library"
-            )
-            return models
-    except Exception as e:
-        print(f"[get_all_available_models] Library import method failed: {e}")
 
     # Method 3: Try using the CLI via the venv Python's Scripts directory
     python_exe = _get_venv_python()
@@ -684,10 +687,103 @@ def get_all_available_models_from_registry() -> list[dict]:
     return []
 
 
+def _build_registry_model(
+    name: str | None,
+    filename: str | None,
+    *,
+    description: str = "",
+    sdr_vocals: float | None = None,
+    sdr_instrumental: float | None = None,
+) -> dict:
+    """Build one registry model dict (type/stems from filename heuristics)."""
+    model_type = "Unknown"
+    stems = "Unknown"
+    if not filename:
+        pass
+    elif "demucs" in filename.lower() and "htdemucs" in filename.lower():
+        model_type = "Demucs v4"
+        stems = "4-stem (Drums/Bass/Other/Vocals)"
+    elif "bs_roformer" in filename.lower() or "bs-roformer" in filename.lower():
+        model_type = "BS-Roformer"
+        stems = "2-stem (Vocals/Instrumental)"
+    elif "mel_band_roformer" in filename.lower() or "melband" in filename.lower():
+        model_type = "MelBand Roformer"
+        stems = "2-stem (Vocals/Instrumental)"
+    elif "mdx23c" in filename.lower():
+        model_type = "MDX23C"
+        stems = "2-stem (Vocals/Instrumental)"
+    elif "mdx" in filename.lower():
+        model_type = "MDX-Net"
+        stems = "2-stem (Vocals/Instrumental)"
+    elif "vr" in filename.lower() or filename.lower().endswith(".pth"):
+        model_type = "VR Arch"
+        stems = "2-stem"
+
+    model = {
+        "name": name or filename,
+        "filename": filename,
+        "sdr_vocals": sdr_vocals,
+        "sdr_instrumental": sdr_instrumental,
+        "type": model_type,
+        "stems": stems,
+        "description": description,
+    }
+    # Enrich with quality database information and extract SDR from filename
+    return _enrich_model_with_quality_data(model)
+
+
+# The friendly-name prefixes in the download lists duplicate the arch,
+# e.g. "Roformer Model: Mel-Roformer-Karaoke-…" — strip for display.
+_DOWNLOAD_LIST_NAME_PREFIXES = (
+    "Roformer Model: ",
+    "MDX23C Model: ",
+    "MDX-Net Model: ",
+    "VR Arch Single Model v4: ",
+    "VR Arch Single Model v5: ",
+)
+
+
+def _extract_models_from_download_lists(data: dict, models: list[dict]) -> None:
+    """Parse the current audio-separator ``models.json`` schema.
+
+    Since ~v0.30 the bundled registry is four flat maps keyed by friendly
+    name: ``{"vr_download_list": {"Name": "file.pth" | {"model.ckpt":
+    "config.yaml", ...}}, "mdx_download_list": ..., ...}``. A dict value
+    lists the model's files — the first key is the weights file audio-
+    separator uses as the model identifier; the rest are configs it
+    fetches automatically.
+    """
+    for list_key, entries in data.items():
+        if not (list_key.endswith("_download_list") and isinstance(entries, dict)):
+            continue
+        for friendly_name, value in entries.items():
+            filename: str | None = None
+            if isinstance(value, str):
+                filename = value
+            elif isinstance(value, dict) and value:
+                filename = next(iter(value))
+            if not filename:
+                continue
+            name = friendly_name
+            for prefix in _DOWNLOAD_LIST_NAME_PREFIXES:
+                if name.startswith(prefix):
+                    name = name[len(prefix) :]
+                    break
+            models.append(_build_registry_model(name, filename))
+
+
 def _extract_models_from_registry(data: Any, models: list[dict]) -> None:
-    """Recursively extract model info from audio-separator's nested JSON structure."""
+    """Extract model info from audio-separator's registry JSON.
+
+    Handles both the current bundled ``models.json`` schema (flat
+    ``*_download_list`` maps — see ``_extract_models_from_download_lists``)
+    and the older/CLI nested structure of dicts carrying ``filename`` keys.
+    """
     if isinstance(data, dict):
-        # Check if this looks like a model entry
+        if any(key.endswith("_download_list") for key in data):
+            _extract_models_from_download_lists(data, models)
+            return
+        # Check if this looks like an (old-schema / CLI) model entry
         if "filename" in data or "model_filename" in data:
             filename = data.get("filename") or data.get("model_filename")
             name = (
@@ -709,44 +805,15 @@ def _extract_models_from_registry(data: Any, models: list[dict]) -> None:
                 elif isinstance(data["sdr"], (int, float)):
                     sdr_vocals = data["sdr"]
 
-            # Determine model type from filename
-            model_type = "Unknown"
-            stems = "Unknown"
-            if not filename:
-                pass
-            elif "demucs" in filename.lower() and "htdemucs" in filename.lower():
-                model_type = "Demucs v4"
-                stems = "4-stem (Drums/Bass/Other/Vocals)"
-            elif "bs_roformer" in filename.lower() or "bs-roformer" in filename.lower():
-                model_type = "BS-Roformer"
-                stems = "2-stem (Vocals/Instrumental)"
-            elif (
-                "mel_band_roformer" in filename.lower() or "melband" in filename.lower()
-            ):
-                model_type = "MelBand Roformer"
-                stems = "2-stem (Vocals/Instrumental)"
-            elif "mdx" in filename.lower():
-                model_type = "MDX-Net"
-                stems = "2-stem (Vocals/Instrumental)"
-            elif "vr" in filename.lower():
-                model_type = "VR Arch"
-                stems = "2-stem"
-
-            # Create base model dict
-            model = {
-                "name": name,
-                "filename": filename,
-                "sdr_vocals": sdr_vocals,
-                "sdr_instrumental": sdr_instrumental,
-                "type": model_type,
-                "stems": stems,
-                "description": data.get("description", ""),
-            }
-
-            # Enrich with quality database information and extract SDR from filename
-            model = _enrich_model_with_quality_data(model)
-
-            models.append(model)
+            models.append(
+                _build_registry_model(
+                    name,
+                    filename,
+                    description=data.get("description", ""),
+                    sdr_vocals=sdr_vocals,
+                    sdr_instrumental=sdr_instrumental,
+                )
+            )
         else:
             # Recurse into nested structures
             for value in data.values():
