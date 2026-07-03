@@ -5,6 +5,9 @@ This module owns the code that is common to every backend:
 
 - ``_open_clip`` — opens a video via VapourSynth + FFMS2 with PTS-aware
   metadata on frame 0 (for the PTS correction bugfix).
+- ``frame_abs_time_s`` / ``probe_timeline_integrity`` — real per-frame
+  container timestamps and gap detection (frame-index vs wall-clock
+  divergence, e.g. sources with dropped frame slots).
 - ``_get_project_root`` / ``get_backend_model_dir`` — filesystem layout for
   backend weights. Used by ``backends.isc``, ``backends.sscd_*`` to find
   their model files.
@@ -20,13 +23,14 @@ backend uses a different path entirely because it's pairwise.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Callable
 
 
 # ── Project layout ────────────────────────────────────────────────────────────
@@ -68,7 +72,7 @@ def open_clip(video_path: str, vs: Any, temp_dir: Path | None = None):
     the relative delta between source and target start_pts_s so sub
     timing (which is always wall-clock) is preserved.
     """
-    from ...frame_utils.video_reader import _get_ffms2_cache_path  # noqa: PLC0415
+    from ...frame_utils.video_reader import _get_ffms2_cache_path
 
     core = vs.core
 
@@ -92,6 +96,91 @@ def open_clip(video_path: str, vs: Any, temp_dir: Path | None = None):
         start_pts_s = 0.0
 
     return clip, rgb_clip, start_pts_s
+
+
+def frame_abs_time_s(clip: Any, n: int) -> float | None:
+    """Real container timestamp of frame ``n`` in seconds, or ``None``.
+
+    Reads the ffms2 ``_AbsoluteTime`` frame prop. Returns ``None`` when the
+    prop is missing or the frame can't be fetched — callers must fall back
+    to frame-index math in that case, never guess.
+    """
+    try:
+        t = clip.get_frame(n).props.get("_AbsoluteTime")
+        return float(t) if t is not None else None
+    except Exception:
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineProbe:
+    """Result of checking a clip's frame-index ↔ wall-clock mapping.
+
+    ``ok=None`` means timestamps were unavailable and nothing could be
+    verified (distinct from ``ok=True``, which is a positive confirmation).
+    """
+
+    ok: bool | None
+    num_frames: int
+    missing_slots: int  # >0: dropped frame slots (pts gaps); <0: extra frames
+    first_divergence_index: int | None  # first frame where index != pts slot
+    first_divergence_time_s: float | None  # its wall-clock time
+
+    @property
+    def has_gaps(self) -> bool:
+        return self.ok is False
+
+
+def probe_timeline_integrity(
+    num_frames: int,
+    fps: float,
+    start_pts_s: float,
+    pts_lookup: Callable[[int], float | None],
+) -> TimelineProbe:
+    """Check whether frame index ``n`` sits at wall-clock slot ``n``.
+
+    A clean CFR file satisfies ``round((pts(n) - pts(0)) * fps) == n`` for
+    every frame. A dropped frame slot (pts gap — e.g. a WEB encode missing
+    one frame while keeping the remaining timestamps) breaks this from the
+    gap onward, which silently corrupts any ``frame_index * frame_duration``
+    arithmetic.
+
+    Cost: 1 pts read for the last frame; plus O(log n) reads to locate the
+    first divergence when one exists (divergence index is monotonic because
+    later frames inherit the accumulated slot shift).
+    """
+    if num_frames < 2 or fps <= 0:
+        return TimelineProbe(True, num_frames, 0, None, None)
+
+    def slot_of(n: int) -> int | None:
+        t = pts_lookup(n)
+        if t is None:
+            return None
+        return round((t - start_pts_s) * fps)
+
+    last_slot = slot_of(num_frames - 1)
+    if last_slot is None:
+        return TimelineProbe(None, num_frames, 0, None, None)
+
+    missing = last_slot - (num_frames - 1)
+    if missing == 0:
+        return TimelineProbe(True, num_frames, 0, None, None)
+
+    # Binary search the first frame whose slot diverges from its index.
+    lo, hi = 0, num_frames - 1  # slot(lo) == lo (frame 0 by construction)
+    while lo + 1 < hi:
+        mid = (lo + hi) // 2
+        mid_slot = slot_of(mid)
+        if mid_slot is None:
+            # Can't refine further; report what we know.
+            break
+        if mid_slot == mid:
+            lo = mid
+        else:
+            hi = mid
+    first_idx = hi
+    first_time = pts_lookup(first_idx)
+    return TimelineProbe(False, num_frames, missing, first_idx, first_time)
 
 
 # ── Feature-based sliding (ISC, SSCD, pHash, dHash share this) ───────────────

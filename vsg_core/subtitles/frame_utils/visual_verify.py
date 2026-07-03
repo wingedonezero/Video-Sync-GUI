@@ -212,7 +212,9 @@ def _detect_vfr(clip: object, fps: float, num_frames: int) -> bool:
 
 
 def _build_vfr_table(
-    clip: object, num_frames: int, log: Callable[[str], None] | None = None,
+    clip: object,
+    num_frames: int,
+    log: Callable[[str], None] | None = None,
 ) -> list[float]:
     """
     Build a full per-frame timestamp table for VFR content.
@@ -251,16 +253,31 @@ def _build_vfr_table(
     return times
 
 
+def _frame_time_s(clip: object, n: int) -> float | None:
+    """Real container timestamp of frame ``n`` in seconds, or ``None``."""
+    try:
+        t = clip.get_frame(n).props.get("_AbsoluteTime")  # type: ignore[attr-defined]
+        return float(t) if t is not None else None
+    except Exception:
+        return None
+
+
 def _time_to_frame_idx(
     time_s: float,
     fps: float,
     num_frames: int,
     vfr_times: list[float] | None = None,
+    clip: object | None = None,
 ) -> int:
     """
     Convert a time (seconds) to a frame index.
 
-    For CFR: simple ``int(time_s * fps)``.
+    For CFR: ``int(time_s * fps)``, then verified against the frame's real
+    ``_AbsoluteTime`` when ``clip`` is provided. A container with dropped
+    frame slots (pts gaps) keeps wall-clock timestamps but shifts indices,
+    so pure index math lands one frame off after the gap — small enough to
+    evade the VFR detector's 500ms drift threshold, but exactly the error
+    this verifier exists to catch.
     For VFR: binary search in the full per-frame timestamp table,
     returning the frame whose timestamp is closest to the target time.
 
@@ -269,6 +286,7 @@ def _time_to_frame_idx(
         fps: Frame rate.
         num_frames: Total frames (for clamping).
         vfr_times: Full per-frame timestamp table (seconds). None for CFR.
+        clip: Optional VapourSynth clip for real-timestamp verification.
 
     Returns:
         Frame index (0-based), clamped to [0, num_frames-1].
@@ -276,7 +294,30 @@ def _time_to_frame_idx(
     if not vfr_times:
         # CFR path
         idx = int(time_s * fps)
-        return max(0, min(idx, num_frames - 1))
+        idx = max(0, min(idx, num_frames - 1))
+        if clip is None:
+            return idx
+        # Verify the invariant pts(idx) <= time < pts(idx+1) against real
+        # timestamps; nudge by the measured drift when a pts gap broke the
+        # index<->time mapping. Bounded steps: constant local drift means
+        # one correction normally suffices.
+        for _ in range(3):
+            p = _frame_time_s(clip, idx)
+            if p is None:
+                return idx  # No timestamps — index math is the best we have.
+            if p > time_s + 1e-6 and idx > 0:
+                idx = max(0, idx - max(1, round((p - time_s) * fps)))
+                continue
+            if idx + 1 < num_frames:
+                p_next = _frame_time_s(clip, idx + 1)
+                if p_next is not None and p_next <= time_s:
+                    idx = min(
+                        num_frames - 1,
+                        idx + max(1, round((time_s - p_next) * fps) + 1),
+                    )
+                    continue
+            break
+        return idx
 
     # VFR path: binary search in full per-frame table
     pos = bisect.bisect_left(vfr_times, time_s)
@@ -309,7 +350,7 @@ def _get_y_plane(clip: object, idx: int, num_frames: int) -> np.ndarray:
         num_frames: Total frames (for clamping).
 
     Returns:
-        2D uint8 numpy array (height × width).
+        2D uint8 numpy array (height x width).
     """
     idx = max(0, min(idx, num_frames - 1))
     frame = clip.get_frame(idx)
@@ -414,7 +455,11 @@ def _verify_sample(
     """
     # Source frame at time T
     src_frame = _time_to_frame_idx(
-        time_s, src_fps, src_num_frames, src_vfr_times,
+        time_s,
+        src_fps,
+        src_num_frames,
+        src_vfr_times,
+        clip=src_clip,
     )
 
     # Target frame at time T + offset_ms/1000
@@ -424,7 +469,11 @@ def _verify_sample(
     #   T + (-1034/1000) = T - 1.034 → look earlier in target.
     target_time_s = time_s + (offset_ms / 1000.0)
     tgt_frame = _time_to_frame_idx(
-        target_time_s, tgt_fps, tgt_num_frames, tgt_vfr_times,
+        target_time_s,
+        tgt_fps,
+        tgt_num_frames,
+        tgt_vfr_times,
+        clip=tgt_clip,
     )
 
     # Extract raw Y planes
@@ -601,17 +650,12 @@ def _compute_region_stats(samples: list[SampleResult]) -> list[RegionStats]:
         def _eff_delta(s: SampleResult) -> int:
             return 0 if s.is_static else s.best_delta
 
-        exact = sum(
-            1 for s in region_list
-            if _eff_delta(s) == 0 and s.best_dist < 50.0
-        )
+        exact = sum(1 for s in region_list if _eff_delta(s) == 0 and s.best_dist < 50.0)
         within_1 = sum(
-            1 for s in region_list
-            if abs(_eff_delta(s)) <= 1 and s.best_dist < 50.0
+            1 for s in region_list if abs(_eff_delta(s)) <= 1 and s.best_dist < 50.0
         )
         within_2 = sum(
-            1 for s in region_list
-            if abs(_eff_delta(s)) <= 2 and s.best_dist < 50.0
+            1 for s in region_list if abs(_eff_delta(s)) <= 2 and s.best_dist < 50.0
         )
         unmatchable = sum(1 for s in region_list if s.classification == "unmatchable")
         static = sum(1 for s in region_list if s.is_static)
@@ -690,7 +734,9 @@ def run_visual_verify(
     _log(f"[VisualVerify] Source: {Path(source_video).name}")
     _log(f"[VisualVerify] Target: {Path(target_video).name}")
     _log(f"[VisualVerify] Offset: {offset_ms:+.3f}ms (frame_offset: {frame_offset})")
-    _log(f"[VisualVerify] Sample interval: {sample_interval_s}s, Search: ±{search_range}")
+    _log(
+        f"[VisualVerify] Sample interval: {sample_interval_s}s, Search: ±{search_range}"
+    )
 
     # Open both clips raw (no deinterlace, no IVTC)
     try:
@@ -745,13 +791,17 @@ def run_visual_verify(
 
     if src_is_vfr:
         src_vfr_times = _build_vfr_table(src_clip, src_num_frames, _log)
-        _log(f"[VisualVerify] Source VFR table: {len(src_vfr_times)} entries, "
-             f"range {src_vfr_times[0]:.3f}s - {src_vfr_times[-1]:.3f}s")
+        _log(
+            f"[VisualVerify] Source VFR table: {len(src_vfr_times)} entries, "
+            f"range {src_vfr_times[0]:.3f}s - {src_vfr_times[-1]:.3f}s"
+        )
 
     if tgt_is_vfr:
         tgt_vfr_times = _build_vfr_table(tgt_clip, tgt_num_frames, _log)
-        _log(f"[VisualVerify] Target VFR table: {len(tgt_vfr_times)} entries, "
-             f"range {tgt_vfr_times[0]:.3f}s - {tgt_vfr_times[-1]:.3f}s")
+        _log(
+            f"[VisualVerify] Target VFR table: {len(tgt_vfr_times)} entries, "
+            f"range {tgt_vfr_times[0]:.3f}s - {tgt_vfr_times[-1]:.3f}s"
+        )
 
     # Determine video duration from shorter clip
     src_duration_s = src_num_frames / src_raw_fps
@@ -829,20 +879,15 @@ def run_visual_verify(
         return 0 if s.is_static else s.best_delta
 
     main_exact = sum(
-        1 for s in main_samples
-        if _effective_delta(s) == 0 and s.best_dist < 50.0
+        1 for s in main_samples if _effective_delta(s) == 0 and s.best_dist < 50.0
     )
     main_within_1 = sum(
-        1 for s in main_samples
-        if abs(_effective_delta(s)) <= 1 and s.best_dist < 50.0
+        1 for s in main_samples if abs(_effective_delta(s)) <= 1 and s.best_dist < 50.0
     )
     main_within_2 = sum(
-        1 for s in main_samples
-        if abs(_effective_delta(s)) <= 2 and s.best_dist < 50.0
+        1 for s in main_samples if abs(_effective_delta(s)) <= 2 and s.best_dist < 50.0
     )
-    main_unmatchable = sum(
-        1 for s in main_samples if s.classification == "unmatchable"
-    )
+    main_unmatchable = sum(1 for s in main_samples if s.classification == "unmatchable")
     main_static = sum(1 for s in main_samples if s.is_static)
 
     result = VisualVerifyResult(
@@ -921,9 +966,7 @@ def write_visual_verify_report(
 
     # Generate filename
     timestamp_str = result.verify_timestamp.strftime("%Y%m%d_%H%M%S")
-    safe_job = "".join(
-        c if c.isalnum() or c in "._-" else "_" for c in result.job_name
-    )
+    safe_job = "".join(c if c.isalnum() or c in "._-" else "_" for c in result.job_name)
     filename = f"{safe_job}_{timestamp_str}_visual_verify.txt"
     output_path = output_dir / filename
 
@@ -935,9 +978,7 @@ def write_visual_verify_report(
     lines.append("=" * 70)
     lines.append("")
     lines.append(f"Job: {result.job_name}")
-    lines.append(
-        f"Timestamp: {result.verify_timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
-    )
+    lines.append(f"Timestamp: {result.verify_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"Source: {result.source_path}")
     lines.append(f"Target: {result.target_path}")
     lines.append(
@@ -955,8 +996,7 @@ def write_visual_verify_report(
         f"Search range: ±{result.search_range} frames"
     )
     lines.append(
-        f"Duration: {result.total_duration_s:.1f}s | "
-        f"Samples: {result.total_samples}"
+        f"Duration: {result.total_duration_s:.1f}s | Samples: {result.total_samples}"
     )
     lines.append("")
 
@@ -1001,8 +1041,7 @@ def write_visual_verify_report(
     for rs in result.regions:
         if rs.name == "credits":
             lines.append(
-                f"  Region: {rs.name} — {rs.total} samples "
-                f"[different content expected]"
+                f"  Region: {rs.name} — {rs.total} samples [different content expected]"
             )
             lines.append(
                 f"    Unmatchable: {rs.unmatchable} ({100.0 * rs.unmatchable / rs.total:.1f}%)"
@@ -1031,7 +1070,7 @@ def write_visual_verify_report(
     lines.append("")
 
     if result.credits.detected:
-        lines.append(f"  Credits detected: YES")
+        lines.append("  Credits detected: YES")
         lines.append(
             f"  Boundary: {_format_time(result.credits.boundary_time_s or 0)} "
             f"(sample #{result.credits.boundary_sample})"

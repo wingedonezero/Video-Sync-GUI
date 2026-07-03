@@ -30,13 +30,20 @@ from __future__ import annotations
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from .backends import BackendResult, SlidingBackend, get_backend
-from .sliding_core import compute_gradient, open_clip
+from .sliding_core import (
+    compute_gradient,
+    frame_abs_time_s,
+    open_clip,
+    probe_timeline_integrity,
+)
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # ── Main entrypoint ───────────────────────────────────────────────────────────
 
@@ -95,7 +102,7 @@ def calculate_sliding_offset(
         confidence, and backend identification — see the return block
         for the exact shape.
     """
-    from ....models.settings import AppSettings  # noqa: PLC0415
+    from ....models.settings import AppSettings
 
     if settings is None:
         settings = AppSettings()
@@ -141,7 +148,7 @@ def calculate_sliding_offset(
 
     # ─── VAPOURSYNTH / TORCH AVAILABILITY ───────────────────────
     try:
-        import vapoursynth as vs  # noqa: PLC0415
+        import vapoursynth as vs
     except ImportError as e:
         log(f"[SlidingVerified] VapourSynth not available: {e}")
         return total_delay_ms, {
@@ -154,7 +161,7 @@ def calculate_sliding_offset(
         }
 
     try:
-        import torch  # noqa: PLC0415
+        import torch
     except ImportError as e:
         log(f"[SlidingVerified] PyTorch not available: {e}")
         return total_delay_ms, {
@@ -195,6 +202,52 @@ def calculate_sliding_offset(
         f"[SlidingVerified] Target: {tgt_yuv.num_frames}f @ {tgt_fps:.3f}fps, "
         f"{tgt_yuv.width}x{tgt_yuv.height}  start_pts={tgt_start_pts_s:+.6f}s"
     )
+
+    # ─── TIMELINE INTEGRITY (frame-index ↔ wall-clock) ───────────
+    # A source with dropped frame slots (pts gaps) keeps correct wall-clock
+    # timestamps but its frame indices no longer map to wall-clock via
+    # index * frame_duration. The matcher measures in index space, so every
+    # per-position offset below is converted to wall-clock using the REAL
+    # timestamps of the matched frame pair. This probe exists to tell the
+    # user (and the final audit) which regime the files are in.
+    src_probe = probe_timeline_integrity(
+        src_yuv.num_frames,
+        src_fps,
+        src_start_pts_s,
+        lambda n: frame_abs_time_s(src_yuv, n),
+    )
+    tgt_probe = probe_timeline_integrity(
+        tgt_yuv.num_frames,
+        tgt_fps,
+        tgt_start_pts_s,
+        lambda n: frame_abs_time_s(tgt_yuv, n),
+    )
+    for label, probe in (("Source", src_probe), ("Target", tgt_probe)):
+        if probe.ok is True:
+            log(f"[SlidingVerified] Timeline integrity: {label} OK (no pts gaps)")
+        elif probe.ok is None:
+            log(
+                f"[SlidingVerified] ⚠ Timeline integrity: {label} timestamps "
+                f"unavailable — cannot verify frame-index ↔ wall-clock mapping"
+            )
+        else:
+            where = (
+                f"first gap at ~{probe.first_divergence_time_s:.3f}s "
+                f"(frame index {probe.first_divergence_index})"
+                if probe.first_divergence_time_s is not None
+                else "location unknown"
+            )
+            log(
+                f"[SlidingVerified] ⚠ Timeline integrity: {label} has "
+                f"{abs(probe.missing_slots)} "
+                f"{'missing' if probe.missing_slots > 0 else 'extra'} frame "
+                f"slot(s) — {where}"
+            )
+            log(
+                f"[SlidingVerified]   {label} frame indices diverge from "
+                f"wall-clock after this point; offsets will be computed from "
+                f"real timestamps."
+            )
 
     # ─── PTS OFFSET CORRECTION ───────────────────────────────────
     # If source and target have different container PTS start times,
@@ -303,7 +356,7 @@ def calculate_sliding_offset(
     log(f"[SlidingVerified] Slide range: ±{slide_pad} frames (±{slide_range_sec}s)")
     log(f"[SlidingVerified] Backend load time: {t_model:.1f}s")
 
-    # Select test positions (evenly across 10%–90%)
+    # Select test positions (evenly across 10%-90%)
     positions_pct = [10 + 80 * (i + 0.5) / num_positions for i in range(num_positions)]
 
     log("[SlidingVerified] ─────────────────────────────────────")
@@ -374,11 +427,28 @@ def calculate_sliding_offset(
         # raw_offset_frames is the frame-index offset the matcher found. Some
         # (or all) of this may be due to the PTS label mismatch already
         # absorbed into tgt_center above. We subtract pts_delta_frames so
-        # that offset_frames represents only the *additional* wall-clock
-        # shift (= what the sub shifter should actually apply).
+        # that index_offset_frames represents only the *additional*
+        # wall-clock shift under the gapless-CFR assumption.
         raw_offset_frames = (tgt_window_start + best_pos) - src_start
-        offset_frames = raw_offset_frames - pts_delta_frames
+        index_offset_frames = raw_offset_frames - pts_delta_frames
+
+        # Subtitles are wall-clock timed, so the offset that matters is the
+        # REAL timestamp difference of the matched frame pair — not
+        # index_offset * frame_duration, which silently assumes neither file
+        # has pts gaps (dropped frame slots). When timestamps are available
+        # they are authoritative; the index value is kept for the
+        # self-consistency check and reporting.
+        src_abs = frame_abs_time_s(src_yuv, src_start)
+        tgt_abs = frame_abs_time_s(tgt_yuv, tgt_window_start + best_pos)
+        if src_abs is not None and tgt_abs is not None:
+            wallclock_ms = (tgt_abs - src_abs) * 1000.0
+            offset_frames = int(round(wallclock_ms / src_frame_dur_ms))
+            pts_based = True
+        else:
+            offset_frames = index_offset_frames
+            pts_based = False
         offset_ms = offset_frames * src_frame_dur_ms
+        divergence_frames = offset_frames - index_offset_frames
 
         # Score gradient (how sharp is the peak)
         gradient = compute_gradient(scores, best_pos)
@@ -390,6 +460,9 @@ def calculate_sliding_offset(
             "src_start": src_start,
             "offset_frames": offset_frames,
             "offset_ms": offset_ms,
+            "index_offset_frames": index_offset_frames,
+            "divergence_frames": divergence_frames,
+            "pts_based": pts_based,
             "score": float(scores[best_pos]),
             "matches": int(match_counts[best_pos]),
             "total": len(src_frames),
@@ -405,15 +478,22 @@ def calculate_sliding_offset(
             "best_pos": best_pos,
             "tgt_window_start": tgt_window_start,
             "src_start": src_start,
+            "divergence_frames": divergence_frames,
         }
         landscapes.append(landscape)
 
+        divergence_note = (
+            f" [timeline-gap corrected from index {index_offset_frames:+d}f]"
+            if divergence_frames != 0
+            else ("" if pts_based else " [index-math: timestamps unavailable]")
+        )
         log(
             f"[SlidingVerified]   [{i + 1}/{num_positions}] {pct:.0f}% @{src_start}f → "
             f"offset={offset_frames:+d}f ({offset_ms:+.1f}ms) "
             f"score={scores[best_pos]:.4f} "
             f"match={int(match_counts[best_pos])}/{len(src_frames)} "
             f"grad={gradient:.4f}/f ({dt:.1f}s)"
+            f"{divergence_note}"
         )
 
     dt_total = time.time() - t_total_start
@@ -439,6 +519,17 @@ def calculate_sliding_offset(
     consensus_count = consensus[1]
     consensus_ms = consensus_frames * src_frame_dur_ms
 
+    # Timeline self-consistency: how the index-space answer relates to the
+    # wall-clock answer. Zero divergence everywhere = the gapless-CFR
+    # assumption held and the result is identical to pre-fix behavior.
+    index_offsets_f = [r["index_offset_frames"] for r in results]
+    index_consensus_frames = Counter(index_offsets_f).most_common(1)[0][0]
+    divergences = [r["divergence_frames"] for r in results if r["pts_based"]]
+    positions_pts_based = sum(1 for r in results if r["pts_based"])
+    timeline_correction_frames = consensus_frames - index_consensus_frames
+    timeline_correction_applied = timeline_correction_frames != 0
+    divergence_inconsistent = len(set(divergences)) > 1
+
     # Confidence assessment
     consensus_ratio = consensus_count / len(results)
     mean_score = float(np.mean(scores_list))
@@ -460,6 +551,37 @@ def calculate_sliding_offset(
         f"[SlidingVerified] Consensus: {consensus_frames:+d}f = {consensus_ms:+.1f}ms "
         f"({consensus_count}/{len(results)} positions)"
     )
+
+    # Timeline status — always one explicit line so "normal" is a positive
+    # statement, not an absence of warnings.
+    if timeline_correction_applied:
+        log(
+            f"[SlidingVerified] ⚠ TIMELINE GAP CORRECTION APPLIED: frame-index "
+            f"match was {index_consensus_frames:+d}f "
+            f"({index_consensus_frames * src_frame_dur_ms:+.1f}ms) but real "
+            f"timestamps give {consensus_frames:+d}f ({consensus_ms:+.1f}ms)"
+        )
+        log(
+            "[SlidingVerified]   A container has dropped/extra frame slots; "
+            "the wall-clock (timestamp) offset is authoritative for subtitles."
+        )
+    elif positions_pts_based == len(results):
+        log(
+            "[SlidingVerified] Timeline check: OK — frame-index and wall-clock "
+            "offsets agree at all positions"
+        )
+    if positions_pts_based < len(results):
+        log(
+            f"[SlidingVerified] ⚠ Timeline check: "
+            f"{len(results) - positions_pts_based}/{len(results)} position(s) "
+            f"had no timestamps and used frame-index math"
+        )
+    if divergence_inconsistent:
+        log(
+            f"[SlidingVerified] ⚠ Timeline divergence is INCONSISTENT across "
+            f"positions ({sorted(set(divergences))}) — possible mid-file "
+            f"timestamp anomaly; verify output manually"
+        )
     log(
         f"[SlidingVerified] Mean score: {mean_score:.4f}, "
         f"Range: [{min_score:.4f}, {max(scores_list):.4f}]"
@@ -489,7 +611,10 @@ def calculate_sliding_offset(
         bp = land["best_pos"]
         lsrc_start = land["src_start"]
         ltgt_ws = land["tgt_window_start"]
-        best_off_f = (ltgt_ws + bp) - lsrc_start - pts_delta_frames
+        # Label slide positions in wall-clock frames: index math plus this
+        # window's measured index↔timestamp divergence (0 for clean files).
+        ldiv = land.get("divergence_frames", 0)
+        best_off_f = (ltgt_ws + bp) - lsrc_start - pts_delta_frames + ldiv
         best_off_ms = best_off_f * src_frame_dur_ms
 
         log(
@@ -501,7 +626,7 @@ def calculate_sliding_offset(
         for delta in range(-5, 6):
             pos = bp + delta
             if 0 <= pos < len(sc):
-                off_f = (ltgt_ws + pos) - lsrc_start - pts_delta_frames
+                off_f = (ltgt_ws + pos) - lsrc_start - pts_delta_frames + ldiv
                 off_ms = off_f * src_frame_dur_ms
                 marker = " ★" if delta == 0 else ""
                 log(
@@ -578,6 +703,18 @@ def calculate_sliding_offset(
         "tgt_start_pts_s": tgt_start_pts_s,
         "pts_delta_s": pts_delta_s,
         "pts_delta_frames": pts_delta_frames,
+        # Timeline integrity metadata — consumed by SlidingConfidenceAuditor
+        "timeline_src_ok": src_probe.ok,
+        "timeline_src_missing_slots": src_probe.missing_slots,
+        "timeline_src_first_gap_s": src_probe.first_divergence_time_s,
+        "timeline_tgt_ok": tgt_probe.ok,
+        "timeline_tgt_missing_slots": tgt_probe.missing_slots,
+        "timeline_tgt_first_gap_s": tgt_probe.first_divergence_time_s,
+        "timeline_correction_applied": timeline_correction_applied,
+        "timeline_correction_frames": timeline_correction_frames,
+        "timeline_divergence_inconsistent": divergence_inconsistent,
+        "index_consensus_frames": index_consensus_frames,
+        "positions_pts_based": positions_pts_based,
     }
 
 
@@ -632,9 +769,7 @@ def _write_debug_report(
         lines.append(f"Frame duration: {src_frame_dur_ms:.2f}ms")
         lines.append(f"Audio correlation: {pure_correlation_ms:+.3f}ms")
         if pts_delta_frames != 0:
-            lines.append(
-                f"PTS delta correction applied: {pts_delta_frames:+d} frames"
-            )
+            lines.append(f"PTS delta correction applied: {pts_delta_frames:+d} frames")
         lines.append("")
         lines.append(
             f"RESULT: {consensus_frames:+d}f = {consensus_ms:+.1f}ms "
