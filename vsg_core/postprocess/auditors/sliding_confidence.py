@@ -61,7 +61,7 @@ class SlidingConfidenceAuditor(BaseAuditor):
             details = vv_result.get("details")
             if not details:
                 continue
-            reason = details.get("reason", "")
+            reason = str(details.get("reason", ""))
             if reason in _SLIDING_REASONS:
                 sliding_sources.append((source_key, details))
             elif reason.startswith(_FALLBACK_PREFIX):
@@ -159,6 +159,13 @@ class SlidingConfidenceAuditor(BaseAuditor):
                     "case, please verify subs manually in the output file"
                 )
 
+            # Timeline integrity — frame-index ↔ wall-clock mapping of both
+            # containers, and whether the matcher had to correct its answer
+            # using real timestamps (dropped-frame-slot sources). A clean
+            # "OK" is stated positively so a normal job is distinguishable
+            # from a job where the check never ran.
+            self._render_timeline(source_key, details)
+
             # Cross-check disagreement — when a secondary backend was
             # configured and its result differs from the primary beyond
             # the tolerance. Agreement is informational (no issue count).
@@ -218,3 +225,99 @@ class SlidingConfidenceAuditor(BaseAuditor):
             )
 
         return total
+
+    def _render_timeline(self, source_key: str, details: dict) -> None:
+        """Render timeline-integrity results for one source.
+
+        Covers four states explicitly:
+        1. Normal - both containers gapless, index and wall-clock agree.
+        2. Gap correction - a container has dropped/extra frame slots and
+           the matcher corrected its offset using real timestamps (issue).
+        3. Timestamps unavailable - the check could not run (issue, because
+           the offset then rests on the unverified gapless-CFR assumption).
+        4. Inconsistent divergence - index-vs-timestamp disagreement varies
+           across positions, suggesting a mid-file anomaly (issue).
+
+        Older result payloads (pre-fix runs, e.g. replayed jobs) have none
+        of these keys - stay silent rather than claim a check that never ran.
+        """
+        if "timeline_correction_applied" not in details:
+            return
+
+        src_ok = details.get("timeline_src_ok")
+        tgt_ok = details.get("timeline_tgt_ok")
+        corrected = details.get("timeline_correction_applied", False)
+        correction_f = details.get("timeline_correction_frames", 0)
+        inconsistent = details.get("timeline_divergence_inconsistent", False)
+        num_positions = details.get("num_positions", 0)
+        pts_based = details.get("positions_pts_based", 0)
+
+        if corrected:
+            index_f = details.get("index_consensus_frames", 0)
+            final_f = details.get("frame_offset", 0)
+            self.log(
+                f"  ⚠ {source_key}: TIMELINE GAP CORRECTION "
+                f"({index_f:+d}f frame-index -> {final_f:+d}f wall-clock, "
+                f"{correction_f:+d}f)"
+            )
+            for label, ok, slots, gap_s in (
+                (
+                    "Source",
+                    src_ok,
+                    details.get("timeline_src_missing_slots", 0),
+                    details.get("timeline_src_first_gap_s"),
+                ),
+                (
+                    "Target",
+                    tgt_ok,
+                    details.get("timeline_tgt_missing_slots", 0),
+                    details.get("timeline_tgt_first_gap_s"),
+                ),
+            ):
+                if ok is False:
+                    where = f" at ~{gap_s:.3f}s" if gap_s is not None else ""
+                    self.log(
+                        f"    {label}: {abs(slots)} "
+                        f"{'missing' if slots > 0 else 'extra'} frame "
+                        f"slot(s){where}"
+                    )
+            self.log(
+                "    Offsets were computed from real container timestamps - "
+                "the corrected value is authoritative. Spot-check the output "
+                "once to confirm."
+            )
+            self._track_issue(
+                f"{source_key}: timeline gap correction applied "
+                f"({correction_f:+d}f) - a container has dropped/extra frame "
+                "slots; offset taken from real timestamps, spot-check output"
+            )
+        elif src_ok is True and tgt_ok is True and pts_based == num_positions:
+            self.log(
+                f"    ✓ Timeline integrity OK (no pts gaps; frame-index "
+                f"and wall-clock agree at all {num_positions} positions)"
+            )
+        else:
+            self.log(
+                f"  ⚠ {source_key}: timeline integrity UNVERIFIED "
+                f"(timestamps unavailable for "
+                f"{num_positions - pts_based}/{num_positions} position(s))"
+            )
+            self.log(
+                "    Offset rests on the gapless-CFR assumption - verify "
+                "subs manually if the source is a web encode."
+            )
+            self._track_issue(
+                f"{source_key}: timeline integrity could not be verified "
+                "(container timestamps unavailable) - verify subs manually"
+            )
+
+        if inconsistent:
+            self.log(
+                f"  ⚠ {source_key}: index-vs-timestamp divergence varies "
+                "across positions - possible mid-file timestamp anomaly"
+            )
+            self._track_issue(
+                f"{source_key}: inconsistent timeline divergence across "
+                "positions - possible mid-file timestamp anomaly, verify "
+                "subs manually"
+            )
