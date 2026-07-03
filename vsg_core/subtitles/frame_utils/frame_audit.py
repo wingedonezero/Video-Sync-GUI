@@ -83,6 +83,14 @@ class FrameAuditResult:
     total_events: int
     audit_timestamp: datetime
 
+    # True when the audited track came from OCR (bitmap-origin timing).
+    # OCR timestamps sit at arbitrary whole milliseconds, so ASS's
+    # centisecond storage unavoidably wobbles ~90% of durations by <=9ms
+    # (frame span unaffected). The final auditor reports those
+    # informationally instead of counting them as issues; native ASS/SRT
+    # deltas keep counting because there they are rare and meaningful.
+    ocr_origin: bool = False
+
     # Non-comment events actually evaluated (comments are skipped, so this is
     # the correct denominator for the on-frame percentages).
     audited_events: int = 0
@@ -221,6 +229,7 @@ def run_frame_audit(
         offset_applied_ms=offset_ms,
         total_events=len(subtitle_data.events),
         audit_timestamp=datetime.now(),
+        ocr_origin=getattr(subtitle_data, "ocr_metadata", None) is not None,
     )
 
     if log:
