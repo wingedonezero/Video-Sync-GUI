@@ -167,6 +167,17 @@ class AppSettings(BaseModel):
     subtitle_rounding: SubtitleRoundingStr = "floor"
     subtitle_target_fps: float = 0.0
 
+    # When True, text-subtitle lines that outlast the reference video are
+    # fixed at save time: a line that starts before the video's end but ends
+    # past it gets its end clamped to the last centisecond at-or-before the
+    # video end (centisecond-aligned so ASS storage cannot round it back
+    # past); a line that starts at/after the video end is dropped (it could
+    # only ever render on a held dead frame). Comments are never touched —
+    # they are not rendered and do not extend container duration. Off by
+    # default: without it, one stray line stretches the muxed file's
+    # duration to the line's end (container duration = longest track).
+    subtitle_clamp_to_video_end: bool = False
+
     # =========================================================================
     # Video-Verified Sync Settings (sliding-window matcher)
     # =========================================================================

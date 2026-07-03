@@ -289,17 +289,51 @@ def process_subtitle_track(
                 item.framelocked_stats = sync_result.details
 
     # ================================================================
-    # STEP 3b: Audit final subtitle end-times vs video (read-only)
+    # STEP 3b: Clamp (opt-in) + audit final subtitle end-times vs video
     # ================================================================
-    # SubtitleData now carries final timing (stepping/sync applied). Record
-    # how the last lines sit relative to the reference video for the post-mux
-    # SubtitleDurationAuditor — no clamping, just a watchlist signal.
+    # SubtitleData now carries final timing (stepping/sync applied). When
+    # the opt-in clamp is enabled and the video duration is known, fix the
+    # lines that outlast the video (end clamped to the last centisecond
+    # at-or-before video end; lines starting past it dropped — comments
+    # untouched). Then record the end-time comparison for the post-mux
+    # SubtitleDurationAuditor.
+    clamp_result = None
+    if ctx.settings.subtitle_clamp_to_video_end and video_duration_ms:
+        from vsg_core.subtitles.operations.duration_audit import (
+            clamp_events_to_video_end,
+        )
+
+        clamp_result = clamp_events_to_video_end(
+            subtitle_data.events, video_duration_ms
+        )
+        for act in clamp_result.actions:
+            if act.action == "clamped":
+                runner._log_message(
+                    f"[SubtitleClamp] Line {act.event_index} "
+                    f'"{act.text_preview}": end {act.end_ms:.0f}ms -> '
+                    f"{act.new_end_ms:.0f}ms (video ends at "
+                    f"{video_duration_ms:.0f}ms)"
+                )
+            else:
+                runner._log_message(
+                    f"[SubtitleClamp] Line {act.event_index} "
+                    f'"{act.text_preview}": starts at {act.start_ms:.0f}ms, '
+                    f"past video end ({video_duration_ms:.0f}ms) — dropped"
+                )
+        if clamp_result.touched:
+            runner._log_message(
+                f"[SubtitleClamp] {clamp_result.events_clamped} end(s) clamped, "
+                f"{clamp_result.events_dropped} line(s) dropped "
+                f"(video end, cs-aligned: {clamp_result.clamp_target_ms}ms)"
+            )
+
     track_name = item.track.props.name or f"Track {item.track.id}"
     ctx.subtitle_duration_audit_results[f"{item.track.source}_t{item.track.id}"] = (
         audit_subtitle_duration(
             subtitle_data.events,
             video_duration_ms,
             f"{track_name} ({item.track.source})",
+            clamp_result=clamp_result,
         )
     )
 

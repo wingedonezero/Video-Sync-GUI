@@ -63,6 +63,21 @@ class SubtitleDurationAuditor(BaseAuditor):
 
         video_s = (result.video_duration_ms or 0.0) / 1000
 
+        # Opt-in clamp ran on this track — state what it fixed (info, not
+        # issues: the fix working as configured). Clamps and drops are
+        # reported separately by design.
+        if result.clamp_applied and result.events_clamped > 0:
+            self.log(
+                f"  ✓ {label}: {result.events_clamped} line end(s) clamped "
+                f"to video end ({video_s:.3f}s)"
+            )
+        if result.clamp_applied and result.events_dropped > 0:
+            self.log(
+                f"  ✓ {label}: {result.events_dropped} line(s) dropped "
+                f"(started at/after video end {video_s:.3f}s — could never "
+                "display)"
+            )
+
         if result.events_overflow > 0:
             msg = (
                 f"{label}: {result.events_overflow} subtitle line(s) end past "

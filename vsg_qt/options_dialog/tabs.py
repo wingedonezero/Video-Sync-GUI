@@ -1738,6 +1738,31 @@ class SubtitleSyncTab(QWidget):
             "• ceil: Round up - subtitles appear slightly later"
         )
         output_layout.addRow("Rounding:", self.widgets["subtitle_rounding"])
+
+        self.widgets["subtitle_clamp_to_video_end"] = QCheckBox()
+        self.widgets["subtitle_clamp_to_video_end"].setChecked(False)
+        self.widgets["subtitle_clamp_to_video_end"].setToolTip(
+            "Fix subtitle lines that outlast the video (off by default):\n\n"
+            "The muxed file's duration is its longest track, so a single\n"
+            "subtitle line ending past the video (e.g. a 'Next episode'\n"
+            "sign) stretches playback past the last real frame — players\n"
+            "hold a dead frame until the line ends.\n\n"
+            "When enabled, only the offending lines are touched:\n"
+            "• A line that starts before the video's end but ends past it\n"
+            "  has its end clamped to the last centisecond at-or-before\n"
+            "  the video end (centisecond-aligned, so ASS storage cannot\n"
+            "  round it back past).\n"
+            "• A line that starts at/after the video end is dropped — it\n"
+            "  could only ever render on a held dead frame.\n"
+            "• Comment lines are never touched (not rendered; they do not\n"
+            "  extend the container duration).\n\n"
+            "Every clamp/drop is logged per line and summarized in the\n"
+            "final audit."
+        )
+        output_layout.addRow(
+            "Clamp Subs to Video End:",
+            self.widgets["subtitle_clamp_to_video_end"],
+        )
         main_layout.addWidget(output_group)
 
         # ===== TIME-BASED SETTINGS =====
@@ -1845,17 +1870,17 @@ class SubtitleSyncTab(QWidget):
         self.widgets["video_verified_ssim_input_size"] = QComboBox()
         for size in (128, 256, 384, 512):
             self.widgets["video_verified_ssim_input_size"].addItem(
-                f"{size}×{size}", size
+                f"{size}x{size}", size
             )
         self.widgets["video_verified_ssim_input_size"].setCurrentIndex(1)  # default 256
         self.widgets["video_verified_ssim_input_size"].setToolTip(
             "Input resize size for the SSIM backend — frames are downsampled\n"
-            "to size×size before pairwise SSIM scoring. Larger = sharper\n"
+            "to sizexsize before pairwise SSIM scoring. Larger = sharper\n"
             "peaks but more VRAM and slower per position.\n\n"
-            "• 128×128: Fastest, lowest VRAM (~16 MB per position)\n"
-            "• 256×256: Default — good balance\n"
-            "• 384×384: Sharper peaks (~140 MB per position)\n"
-            "• 512×512: Sharpest (~250 MB per position, 8 GB VRAM minimum)\n\n"
+            "• 128x128: Fastest, lowest VRAM (~16 MB per position)\n"
+            "• 256x256: Default — good balance\n"
+            "• 384x384: Sharper peaks (~140 MB per position)\n"
+            "• 512x512: Sharpest (~250 MB per position, 8 GB VRAM minimum)\n\n"
             "Only active when Backend (or Cross-check) is SSIM."
         )
         vv_layout.addRow(
