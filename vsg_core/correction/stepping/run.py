@@ -333,6 +333,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                 runner=runner,
                 tool_paths=ctx.tool_paths,
                 log=log,
+                temp_dir=ctx.temp_dir,
             )
             if not passed:
                 log("[SteppingCorrection] QA check FAILED — skipping correction.")
@@ -601,10 +602,10 @@ def _run_splice_verification(
                 "severity": severity,
                 "message": message,
                 "details": {
-                    "segment_index": int(transition_idx)  # type: ignore[arg-type]
+                    "segment_index": int(transition_idx)
                     if isinstance(transition_idx, (int, float))
                     else 0,
-                    "expected_silence_at": float(src2_t)  # type: ignore[arg-type]
+                    "expected_silence_at": float(src2_t)
                     if isinstance(src2_t, (int, float))
                     else 0.0,
                 },

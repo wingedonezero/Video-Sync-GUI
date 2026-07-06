@@ -17,6 +17,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from ...io.runner import CommandRunner
     from ...models.settings import AppSettings
@@ -30,6 +31,7 @@ def verify_correction(
     runner: CommandRunner,
     tool_paths: dict[str, str | None],
     log: Callable[[str], None],
+    temp_dir: Path,
     skip_mode: bool = False,
 ) -> tuple[bool, dict[str, object]]:
     """Verify corrected audio matches reference at *base_delay_ms*.
@@ -46,9 +48,7 @@ def verify_correction(
         get_audio_stream_info,
         normalize_lang,
     )
-    from ...analysis.correlation.dense import run_dense_correlation
     from ...analysis.correlation.filtering import apply_bandpass, apply_lowpass
-    from ...analysis.correlation.run import _resolve_method
 
     log("  [QA] Running dense correlation on corrected audio...")
 
@@ -59,12 +59,8 @@ def verify_correction(
         # --- 1. Select audio streams ---
         ref_lang = normalize_lang(settings.analysis_lang_source1)
 
-        idx_ref, _ = get_audio_stream_info(
-            ref_file_path, ref_lang, runner, tool_paths
-        )
-        idx_tgt, _ = get_audio_stream_info(
-            corrected_path, None, runner, tool_paths
-        )
+        idx_ref, _ = get_audio_stream_info(ref_file_path, ref_lang, runner, tool_paths)
+        idx_tgt, _ = get_audio_stream_info(corrected_path, None, runner, tool_paths)
 
         if idx_ref is None or idx_tgt is None:
             log("  [QA] FAILED: Could not locate audio streams")
@@ -106,27 +102,50 @@ def verify_correction(
                 tgt_pcm = apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps, log)
 
         # --- 4. Run dense correlation ---
-        method = _resolve_method(settings, source_separated=False)
+        # start/end pct: dense correlation's own defaults (this QA scan
+        # has always used the full 5-95% range, not the analysis-step
+        # scan_start/end_percentage settings).
+        if settings.correlation_run_in_subprocess:
+            from pathlib import Path as _Path
 
-        results = run_dense_correlation(
-            ref_pcm=ref_pcm,
-            tgt_pcm=tgt_pcm,
-            sr=DEFAULT_SR,
-            method=method,
-            window_s=settings.dense_window_s,
-            hop_s=settings.dense_hop_s,
-            min_match=qa_threshold,
-            silence_threshold_db=settings.dense_silence_threshold_db,
-            outlier_threshold_ms=settings.dense_outlier_threshold_ms,
-            log=log,
-            dbscan_epsilon_ms=settings.detection_dbscan_epsilon_ms,
-            dbscan_min_samples_pct=settings.detection_dbscan_min_samples_pct,
-        )
+            from ...analysis.correlation.dense_launcher import (
+                run_dense_correlation_subprocess,
+            )
 
-        # Release GPU resources
-        from ...analysis.correlation.gpu_backend import cleanup_gpu
+            log("  [QA] Running dense correlation in subprocess (GPU isolation)...")
+            results = run_dense_correlation_subprocess(
+                ref_pcm,
+                tgt_pcm,
+                DEFAULT_SR,
+                settings,
+                use_source_separated=False,
+                multi_corr=False,
+                min_match=qa_threshold,
+                start_pct=5.0,
+                end_pct=95.0,
+                temp_dir=temp_dir,
+                tag=f"qa_{_Path(corrected_path).stem}".replace(" ", "_"),
+                log=log,
+            )
+        else:
+            from ...analysis.correlation.dense_runner import run_correlation_job
+            from ...analysis.correlation.gpu_backend import cleanup_gpu
 
-        cleanup_gpu()
+            results = run_correlation_job(
+                ref_pcm,
+                tgt_pcm,
+                DEFAULT_SR,
+                settings,
+                use_source_separated=False,
+                multi_corr=False,
+                min_match=qa_threshold,
+                start_pct=5.0,
+                end_pct=95.0,
+                log=log,
+            ).selected
+
+            # Release GPU resources
+            cleanup_gpu()
 
         # --- 5. Evaluate results ---
         accepted = [r for r in results if r.accepted]

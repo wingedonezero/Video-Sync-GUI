@@ -23,7 +23,10 @@ Settings are organized by category:
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict
 
@@ -241,6 +244,12 @@ class AppSettings(BaseModel):
     early_cluster_early_pct: float = 15.0
     early_cluster_min_presence_pct: float = 10.0
 
+    # Run dense correlation in an isolated subprocess. The ROCm runtime
+    # keeps a busy-polling thread alive from the first HIP context until
+    # process exit, so torch/GPU work must not run inside the long-lived
+    # GUI process. False = in-process escape hatch (debugging only).
+    correlation_run_in_subprocess: bool = True
+
     # Multi-Correlation Comparison
     multi_correlation_enabled: bool = False
     multi_corr_scc: bool = True
@@ -299,6 +308,9 @@ class AppSettings(BaseModel):
     # MPEG-2, interlaced, or fps-mismatched pairs skip refinement and keep
     # the silence-derived splice points.
     stepping_frame_refinement_enabled: bool = True
+    # Run the torch/VapourSynth frame-refinement pass in an isolated
+    # subprocess (same ROCm rationale as correlation_run_in_subprocess).
+    stepping_frame_refinement_run_in_subprocess: bool = True
 
     # Boundary Refinement — Transient Detection
     stepping_transient_detection_enabled: bool = True
@@ -395,9 +407,11 @@ class AppSettings(BaseModel):
             default = field_info.default
             if default is not None:
                 result[name] = default
-            # Check for default_factory
+            # Check for default_factory. Pydantic types this as possibly
+            # taking the validated data dict; ours are all zero-arg.
             elif field_info.default_factory is not None:
-                result[name] = field_info.default_factory()
+                factory = cast("Callable[[], Any]", field_info.default_factory)
+                result[name] = factory()
             else:
                 result[name] = None
         return result
