@@ -748,6 +748,26 @@ class AnalysisTab(QWidget):
         core_layout.addRow(
             "Minimum Match Confidence (%):", self.widgets["min_match_pct"]
         )
+
+        self.widgets["correlation_run_in_subprocess"] = QCheckBox()
+        self.widgets["correlation_run_in_subprocess"].setChecked(True)
+        self.widgets["correlation_run_in_subprocess"].setToolTip(
+            "Run dense correlation in a separate subprocess:\n\n"
+            "ON (Default): The torch/GPU correlation work runs in an\n"
+            "  isolated subprocess that exits when the analysis is done.\n"
+            "  The ROCm runtime keeps a busy-polling thread alive from\n"
+            "  the first GPU use until the process exits, so without\n"
+            "  isolation the app pins one CPU core for as long as it\n"
+            "  stays open after any job. Also reclaims the torch GPU\n"
+            "  context (VRAM + host RAM) after each analysis. Adds a\n"
+            "  few seconds of subprocess startup per source.\n\n"
+            "OFF: Run in the main app process (debugging only). Expect\n"
+            "  ~5% constant CPU usage and held GPU memory until the app\n"
+            "  is closed."
+        )
+        core_layout.addRow(
+            "Run in Subprocess:", self.widgets["correlation_run_in_subprocess"]
+        )
         core_layout.addRow(
             "Delay Selection Method:", self.widgets["delay_selection_mode"]
         )
@@ -1487,6 +1507,24 @@ class SteppingTab(QWidget):
         )
 
         segment_layout.addRow(self.widgets["stepping_frame_refinement_enabled"])
+
+        self.widgets["stepping_frame_refinement_run_in_subprocess"] = QCheckBox(
+            "Run frame refinement in a subprocess"
+        )
+        self.widgets["stepping_frame_refinement_run_in_subprocess"].setChecked(True)
+        self.widgets["stepping_frame_refinement_run_in_subprocess"].setToolTip(
+            "Run the torch/VapourSynth frame-match pass in an isolated\n"
+            "subprocess that exits when refinement is done.\n\n"
+            "Same rationale as the correlation subprocess toggle: the\n"
+            "ROCm runtime keeps a busy-polling thread alive from the\n"
+            "first GPU use until the process exits, so running this\n"
+            "in-process pins one CPU core for the lifetime of the app.\n"
+            "Disable only for debugging.\n"
+            "Default: Enabled"
+        )
+        segment_layout.addRow(
+            self.widgets["stepping_frame_refinement_run_in_subprocess"]
+        )
 
         # ===== SECTION 4: QUALITY ASSURANCE =====
         segment_layout.addRow(QLabel(""))
