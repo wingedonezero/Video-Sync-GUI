@@ -237,6 +237,49 @@ def refine_splice_points(
         log(f"[FrameRefine] gated — {reason}")
         return _stamp_all(splice_points, mode="skipped_gate", reason=reason)
 
+    fps = float(src2_props.get("fps") if src2_props else 0)  # type: ignore[arg-type]
+    if fps <= 0:
+        return _stamp_all(splice_points, mode="skipped_gate", reason="bad fps")
+
+    if getattr(settings, "stepping_frame_refinement_run_in_subprocess", True):
+        return _refine_via_subprocess(
+            splice_points,
+            src1_video_path=src1_video_path,
+            src2_video_path=src2_video_path,
+            fps=fps,
+            settings=settings,
+            temp_dir=temp_dir,
+            log=log,
+        )
+
+    return _refine_in_process(
+        splice_points,
+        src1_video_path=src1_video_path,
+        src2_video_path=src2_video_path,
+        fps=fps,
+        settings=settings,
+        temp_dir=temp_dir,
+        log=log,
+    )
+
+
+def _refine_in_process(
+    splice_points: list[SplicePoint],
+    *,
+    src1_video_path: str,
+    src2_video_path: str,
+    fps: float,
+    settings: AppSettings,
+    temp_dir: Path | None,
+    log: Callable[[str], None],
+) -> list[SplicePoint]:
+    """Run the torch/VapourSynth refinement pass in this process.
+
+    Called by ``frame_refinement_subprocess.py`` (the default) or
+    directly when ``stepping_frame_refinement_run_in_subprocess`` is
+    off. Initializes a HIP context when CUDA is available — never call
+    this from the long-lived GUI process unless explicitly requested.
+    """
     # Lazy heavy imports — only loaded when we actually plan to refine.
     try:
         import torch
@@ -255,9 +298,6 @@ def refine_splice_points(
             splice_points, mode="skipped_no_video", reason=f"import failed: {exc}"
         )
 
-    fps = float(src2_props.get("fps") if src2_props else 0)  # type: ignore[arg-type]
-    if fps <= 0:
-        return _stamp_all(splice_points, mode="skipped_gate", reason="bad fps")
     period_ms = 1000.0 / fps
 
     # Bring up pHash + VS clips once for the whole batch.
@@ -292,6 +332,157 @@ def refine_splice_points(
         refined.append(refined_sp)
 
     return refined
+
+
+def _refine_via_subprocess(
+    splice_points: list[SplicePoint],
+    *,
+    src1_video_path: str,
+    src2_video_path: str,
+    fps: float,
+    settings: AppSettings,
+    temp_dir: Path | None,
+    log: Callable[[str], None],
+) -> list[SplicePoint]:
+    """Run the refinement pass in an isolated subprocess.
+
+    The child rebuilds lightweight splice points, runs
+    ``_refine_in_process``, and returns per-splice
+    ``(src2_time_s, FrameRefinementResult)`` via JSON; those are applied
+    to OUR splice points, preserving ``boundary_result`` /
+    ``snap_metadata``, which never cross the boundary. Any subprocess
+    failure stamps all points and continues — this function never
+    raises, matching the refinement module's contract.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path as _Path
+
+    from .frame_refinement_subprocess import (
+        JSON_PREFIX,
+        frame_refinement_result_from_dict,
+        splice_point_to_payload,
+    )
+
+    if temp_dir is None:
+        work_dir = _Path(src2_video_path).parent
+    else:
+        work_dir = _Path(temp_dir)
+
+    splices_path = work_dir / "frame_refine_splices.json"
+    config_path = work_dir / "frame_refine_config.json"
+    output_path = work_dir / "frame_refine_result.json"
+
+    def _fail(reason: str) -> list[SplicePoint]:
+        log(f"[FrameRefine] ERROR: {reason} — keeping audio-derived splice points")
+        return _stamp_all(
+            splice_points,
+            mode="skipped_no_video",
+            reason=f"subprocess failed: {reason}",
+        )
+
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+        with open(splices_path, "w", encoding="utf-8") as f:
+            json.dump(
+                [splice_point_to_payload(i, sp) for i, sp in enumerate(splice_points)],
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(settings.model_dump(), f, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        return _fail(f"could not write inputs ({exc})")
+
+    # NOTE: Use --flag=value syntax for numeric args to prevent argparse
+    # from misinterpreting negative numbers as flags.
+    cmd = [
+        sys.executable,
+        "-m",
+        "vsg_core.correction.stepping.frame_refinement_subprocess",
+        "--src1-video",
+        str(src1_video_path),
+        "--src2-video",
+        str(src2_video_path),
+        f"--fps={fps}",
+        "--splices-json",
+        str(splices_path),
+        "--config-json",
+        str(config_path),
+        "--output-json",
+        str(output_path),
+    ]
+    if temp_dir is not None:
+        cmd.extend(["--temp-dir", str(temp_dir)])
+
+    # Pin the child to the discrete GPU (device 0); on dual-GPU ROCm
+    # systems the iGPU otherwise SIGSEGVs on first kernel launch.
+    env = {**os.environ}
+    env.setdefault("HIP_VISIBLE_DEVICES", "0")
+
+    json_payload = None
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            env=env,
+        )
+    except Exception as exc:
+        return _fail(f"launch failed ({exc})")
+
+    if process.stdout:
+        for line in process.stdout:
+            line = line.rstrip("\n")
+            if line.startswith(JSON_PREFIX):
+                try:
+                    json_payload = json.loads(line.split(JSON_PREFIX, 1)[1])
+                except json.JSONDecodeError:
+                    json_payload = None
+            elif line:
+                log(line)
+
+    return_code = process.wait()
+
+    if process.stderr:
+        for line in process.stderr:
+            line = line.rstrip("\n")
+            if line:
+                log(f"[FrameRefine] stderr: {line}")
+
+    if return_code != 0:
+        error_detail = None
+        if json_payload and not json_payload.get("success"):
+            error_detail = json_payload.get("error")
+        return _fail(error_detail or f"exit code {return_code}")
+
+    if not json_payload or not json_payload.get("success"):
+        return _fail("subprocess returned no result")
+
+    try:
+        with open(output_path, encoding="utf-8") as f:
+            result = json.load(f)
+        entries = result["splices"]
+        if len(entries) != len(splice_points):
+            return _fail(
+                f"result count mismatch ({len(entries)} != {len(splice_points)})"
+            )
+        refined: list[SplicePoint] = []
+        for sp, entry in zip(splice_points, entries):
+            fr = frame_refinement_result_from_dict(entry["frame_refinement"])
+            refined.append(
+                replace(
+                    sp, src2_time_s=float(entry["src2_time_s"]), frame_refinement=fr
+                )
+            )
+        return refined
+    except Exception as exc:
+        return _fail(f"could not read result ({exc})")
 
 
 def _refine_one(

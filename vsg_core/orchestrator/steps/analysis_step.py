@@ -29,11 +29,8 @@ from vsg_core.analysis.correlation import (
     apply_lowpass,
     decode_audio,
     get_audio_stream_info,
-    get_method,
-    list_methods,
     normalize_lang,
 )
-from vsg_core.analysis.correlation.methods.scc import Scc
 from vsg_core.analysis.delay_selection import (
     calculate_delay,
     find_first_stable_segment_delay,
@@ -57,7 +54,6 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from vsg_core.analysis.correlation.registry import CorrelationMethod
     from vsg_core.analysis.types import DiagnosisResult
     from vsg_core.io.runner import CommandRunner
     from vsg_core.models.context_types import (
@@ -83,28 +79,6 @@ def _should_use_source_separated_mode(
         return False
     per_source = source_settings.get(source_key, {})
     return per_source.get("use_source_separation", False)
-
-
-def _resolve_method(
-    settings: AppSettings, *, source_separated: bool
-) -> CorrelationMethod:
-    """
-    Resolve the correlation method to use based on settings.
-
-    For SCC, creates a fresh instance with the peak_fit setting applied.
-    For all other methods, looks up the registered instance.
-    """
-    method_name = (
-        settings.correlation_method_source_separated
-        if source_separated
-        else settings.correlation_method
-    )
-
-    # SCC is special: it has a configurable peak_fit parameter
-    if "Standard Correlation" in method_name or "SCC" in method_name:
-        return Scc(peak_fit=settings.audio_peak_fit)
-
-    return get_method(method_name)
 
 
 def _apply_source_separation(
@@ -897,168 +871,58 @@ class AnalysisStep:
         # --- 4 & 5. Correlate (dense sliding window) ---
         min_match = float(settings.min_match_pct)
 
-        from vsg_core.analysis.correlation.dense import run_dense_correlation
+        multi_corr_enabled = settings.multi_correlation_enabled and (not ctx.and_merge)
 
-        multi_corr_enabled = settings.multi_correlation_enabled and (
-            not ctx.and_merge
-        )
+        if settings.correlation_run_in_subprocess:
+            from vsg_core.analysis.correlation.dense_launcher import (
+                run_dense_correlation_subprocess,
+            )
 
-        if multi_corr_enabled:
-            results = self._run_dense_multi_correlation(
-                ref_pcm=ref_pcm,
-                tgt_pcm=tgt_pcm,
-                sr=DEFAULT_SR,
-                settings=settings,
+            log(
+                "[Correlation] Running dense correlation in subprocess (GPU isolation)..."
+            )
+            results = run_dense_correlation_subprocess(
+                ref_pcm,
+                tgt_pcm,
+                DEFAULT_SR,
+                settings,
                 use_source_separated=use_source_separated_settings,
+                multi_corr=multi_corr_enabled,
                 min_match=min_match,
+                start_pct=settings.scan_start_percentage,
+                end_pct=settings.scan_end_percentage,
+                temp_dir=ctx.temp_dir,
+                tag=source_key.replace(" ", "_"),
                 log=log,
             )
+            # No cleanup_gpu() here: the GPU state died with the subprocess,
+            # and calling it would import torch into this process.
+            del ref_pcm
+            del tgt_pcm
         else:
-            method = _resolve_method(
-                settings, source_separated=use_source_separated_settings
-            )
-            results = run_dense_correlation(
-                ref_pcm=ref_pcm,
-                tgt_pcm=tgt_pcm,
-                sr=DEFAULT_SR,
-                method=method,
-                window_s=settings.dense_window_s,
-                hop_s=settings.dense_hop_s,
+            from vsg_core.analysis.correlation.dense_runner import run_correlation_job
+
+            results = run_correlation_job(
+                ref_pcm,
+                tgt_pcm,
+                DEFAULT_SR,
+                settings,
+                use_source_separated=use_source_separated_settings,
+                multi_corr=multi_corr_enabled,
                 min_match=min_match,
-                silence_threshold_db=settings.dense_silence_threshold_db,
-                outlier_threshold_ms=settings.dense_outlier_threshold_ms,
                 start_pct=settings.scan_start_percentage,
                 end_pct=settings.scan_end_percentage,
                 log=log,
-                dbscan_epsilon_ms=settings.detection_dbscan_epsilon_ms,
-                dbscan_min_samples_pct=settings.detection_dbscan_min_samples_pct,
-            )
+            ).selected
 
-        # Release audio arrays and GPU resources
-        del ref_pcm
-        del tgt_pcm
-        from vsg_core.analysis.correlation.gpu_backend import cleanup_gpu
-
-        cleanup_gpu()
-
-        return results
-
-    def _run_dense_multi_correlation(
-        self,
-        ref_pcm: np.ndarray,
-        tgt_pcm: np.ndarray,
-        sr: int,
-        settings: AppSettings,
-        use_source_separated: bool,
-        min_match: float,
-        log: Callable[[str], None],
-    ) -> list[ChunkResult]:
-        """
-        Run multiple correlation methods using dense sliding window.
-
-        Each enabled method gets its own dense correlation pass with
-        full summary logging. Returns the primary method's results
-        for actual delay calculation.
-        """
-        from vsg_core.analysis.correlation.dense import run_dense_correlation
-
-        # Find enabled methods
-        enabled_methods: list[CorrelationMethod] = []
-        for method in list_methods():
-            if getattr(settings, method.config_key, False):
-                if isinstance(method, Scc):
-                    method = Scc(peak_fit=settings.audio_peak_fit)
-                enabled_methods.append(method)
-
-        if not enabled_methods:
-            log("[MULTI-CORRELATION] No methods enabled, falling back to single method")
-            method = _resolve_method(settings, source_separated=use_source_separated)
-            return run_dense_correlation(
-                ref_pcm=ref_pcm,
-                tgt_pcm=tgt_pcm,
-                sr=sr,
-                method=method,
-                window_s=settings.dense_window_s,
-                hop_s=settings.dense_hop_s,
-                min_match=min_match,
-                silence_threshold_db=settings.dense_silence_threshold_db,
-                outlier_threshold_ms=settings.dense_outlier_threshold_ms,
-                start_pct=settings.scan_start_percentage,
-                end_pct=settings.scan_end_percentage,
-                log=log,
-                dbscan_epsilon_ms=settings.detection_dbscan_epsilon_ms,
-                dbscan_min_samples_pct=settings.detection_dbscan_min_samples_pct,
-            )
-
-        log(
-            f"\n[MULTI-CORRELATION] Running {len(enabled_methods)} methods "
-            f"(dense sliding window)"
-        )
-
-        all_results: dict[str, list[ChunkResult]] = {}
-
-        for method in enabled_methods:
-            log(f"\n{'=' * 70}")
-            log(f"  MULTI-CORRELATION: {method.name}")
-            log(f"{'=' * 70}")
-
-            results = run_dense_correlation(
-                ref_pcm=ref_pcm,
-                tgt_pcm=tgt_pcm,
-                sr=sr,
-                method=method,
-                window_s=settings.dense_window_s,
-                hop_s=settings.dense_hop_s,
-                min_match=min_match,
-                silence_threshold_db=settings.dense_silence_threshold_db,
-                outlier_threshold_ms=settings.dense_outlier_threshold_ms,
-                start_pct=settings.scan_start_percentage,
-                end_pct=settings.scan_end_percentage,
-                log=log,
-                dbscan_epsilon_ms=settings.detection_dbscan_epsilon_ms,
-                dbscan_min_samples_pct=settings.detection_dbscan_min_samples_pct,
-            )
-            all_results[method.name] = results
-
-            # Free GPU memory between methods
+            # Release audio arrays and GPU resources
+            del ref_pcm
+            del tgt_pcm
             from vsg_core.analysis.correlation.gpu_backend import cleanup_gpu
 
             cleanup_gpu()
 
-        # Log comparison summary
-        log(f"\n{'=' * 70}")
-        log("  MULTI-CORRELATION SUMMARY (Dense)")
-        log(f"{'=' * 70}")
-
-        for method_name, method_results in all_results.items():
-            accepted = [r for r in method_results if r.accepted]
-            if accepted:
-                import numpy as _np
-
-                delays = _np.array([r.raw_delay_ms for r in accepted])
-                median_d = float(_np.median(delays))
-                std_d = float(_np.std(delays))
-                avg_match = sum(r.match_pct for r in accepted) / len(accepted)
-                outliers = int(_np.sum(_np.abs(delays - median_d) > 50.0))
-                log(
-                    f"  {method_name}: {median_d:+.3f}ms median | "
-                    f"std={std_d:.3f}ms | "
-                    f"conf={avg_match:.1f}% | "
-                    f"accepted={len(accepted)}/{len(method_results)} | "
-                    f"outliers={outliers}"
-                )
-            else:
-                log(f"  {method_name}: NO ACCEPTED WINDOWS")
-
-        log(f"{'=' * 70}\n")
-
-        # Use first method's results for actual processing
-        first_method_name = next(iter(all_results.keys()))
-        log(
-            f"[MULTI-CORRELATION] Using '{first_method_name}' results "
-            f"for delay calculation"
-        )
-        return all_results[first_method_name]
+        return results
 
     def _handle_stepping(
         self,
