@@ -17,8 +17,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from vsg_core.subtitles.operations.style_ops import _scale_override_tags
-
+from vsg_core.subtitles.operations.style_ops import (  # noqa: E402
+    _scale_override_tags,
+)
 
 # Test parameters: 720p -> 1080p style rescale
 # scale = min(1920/1280, 1080/720) = min(1.5, 1.5) = 1.5
@@ -227,7 +228,9 @@ def test_multiple_t_blocks():
     """Multiple \\t() blocks in one override block."""
     text = "{\\fs20\\t(0,500,\\fs40)\\t(500,1000,\\bord4)}Text"
     result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
-    assert result == "{\\fs30\\t(0,500,\\fs60)\\t(500,1000,\\bord6)}Text", f"Got: {result}"
+    assert result == "{\\fs30\\t(0,500,\\fs60)\\t(500,1000,\\bord6)}Text", (
+        f"Got: {result}"
+    )
     print("  PASSED: multiple \\t() blocks")
 
 
@@ -245,6 +248,172 @@ def test_nested_t():
     result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
     assert result == "{\\t(0,1000,\\t(500,800,\\fs30))}Text", f"Got: {result}"
     print("  PASSED: nested \\t() recursively processed")
+
+
+# --- Vector drawings (\p mode) ---
+
+
+def test_p1_drawing_scaled():
+    """Drawing coords after \\p1 should be scaled uniformly."""
+    text = "{\\p1}m 0 0 l 100 50"
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    assert result == "{\\p1}m 0 0 l 150 75", f"Got: {result}"
+    print("  PASSED: \\p1 drawing scaled")
+
+
+def test_p1_drawing_no_offset():
+    """Drawings are anchor-relative — scaled but NOT offset (Aegisub
+    passes zero shift); the \\pos anchor carries the border offset."""
+    text = "{\\an7\\pos(100,200)\\p1}m 40 20 l 80 60"
+    result = _scale_override_tags(
+        text, BORDER_SCALE, BORDER_SCALE_H, BORDER_OFFSET_X, BORDER_OFFSET_Y
+    )
+    # pos: (100*2.25+150, 200*2.25+0) = (375,450)
+    # drawing: pure *2.25, no +150: m 90 45 l 180 135
+    assert result == "{\\an7\\pos(375,450)\\p1}m 90 45 l 180 135", f"Got: {result}"
+    print("  PASSED: \\p1 drawing scaled without border offset")
+
+
+def test_p1_drawing_bezier():
+    """Bezier segments (b) alternate x/y like line segments."""
+    text = "{\\p1}m 0 0 b 10 20 30 40 50 60"
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    assert result == "{\\p1}m 0 0 b 15 30 45 60 75 90", f"Got: {result}"
+    print("  PASSED: bezier drawing scaled")
+
+
+def test_p0_text_not_scaled():
+    """Text after \\p0 leaves drawing mode — numbers in it stay untouched."""
+    text = "{\\p1}m 0 0 l 100 50{\\p0}Wait 10 seconds"
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    assert result == "{\\p1}m 0 0 l 150 75{\\p0}Wait 10 seconds", f"Got: {result}"
+    print("  PASSED: text after \\p0 not scaled")
+
+
+def test_p_mode_toggles():
+    """Multiple \\p1/\\p0 toggles in one event."""
+    text = "{\\p1}m 0 0{\\p0}A{\\p1}l 20 20{\\p0}B 5"
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    assert result == "{\\p1}m 0 0{\\p0}A{\\p1}l 30 30{\\p0}B 5", f"Got: {result}"
+    print("  PASSED: \\p mode toggles handled")
+
+
+def test_p1_real_world_cover():
+    """Real Death March cover-box line: pos/blur scaled AND drawing scaled."""
+    text = (
+        "{\\an7\\pos(878.59,502.45)\\fscx59.93\\fscy59.93\\c&HAC490A&\\blur8\\p1}"
+        "m -157 -83 l 146 -96 143 -31 -153 -12"
+    )
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    expected = (
+        "{\\an7\\pos(1317.885,753.675)\\fscx59.93\\fscy59.93\\c&HAC490A&\\blur12\\p1}"
+        "m -235.5 -124.5 l 219 -144 214.5 -46.5 -229.5 -18"
+    )
+    assert result == expected, f"Got: {result}"
+    print("  PASSED: real-world cover drawing")
+
+
+# --- Vector clips ---
+
+
+def test_vector_clip_scaled():
+    """\\clip with drawing content — absolute coords, scaled."""
+    text = "{\\clip(m 10 20 l 30 40)}Text"
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    assert result == "{\\clip(m 15 30 l 45 60)}Text", f"Got: {result}"
+    print("  PASSED: vector \\clip scaled")
+
+
+def test_vector_clip_with_border_offsets():
+    """Vector clip coords are absolute script pixels — they DO get offsets."""
+    text = "{\\clip(m 40 20 l 80 60)}Text"
+    result = _scale_override_tags(
+        text, BORDER_SCALE, BORDER_SCALE_H, BORDER_OFFSET_X, BORDER_OFFSET_Y
+    )
+    # x: 40*2.25+150=240, 80*2.25+150=330; y: 20*2.25=45, 60*2.25=135
+    assert result == "{\\clip(m 240 45 l 330 135)}Text", f"Got: {result}"
+    print("  PASSED: vector \\clip with border offsets")
+
+
+def test_vector_clip_scale_exponent():
+    """\\clip(<scale>, <drawing>) — exponent preserved, coords scaled."""
+    text = "{\\clip(2,m 10 20 l 30 40)}Text"
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    assert result == "{\\clip(2,m 15 30 l 45 60)}Text", f"Got: {result}"
+    print("  PASSED: vector \\clip with scale exponent")
+
+
+def test_vector_iclip_scaled():
+    """\\iclip with drawing content behaves like vector \\clip."""
+    text = "{\\iclip(m 10 20 l 30 40)}Text"
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    assert result == "{\\iclip(m 15 30 l 45 60)}Text", f"Got: {result}"
+    print("  PASSED: vector \\iclip scaled")
+
+
+def test_vector_clip_inside_t():
+    """Vector clip inside \\t() should also be scaled."""
+    text = "{\\t(0,500,\\clip(m 10 20 l 30 40))}Text"
+    result = _scale_override_tags(text, SCALE, SCALE_H, OFFSET_X, OFFSET_Y)
+    assert result == "{\\t(0,500,\\clip(m 15 30 l 45 60))}Text", f"Got: {result}"
+    print("  PASSED: vector \\clip inside \\t() scaled")
+
+
+# --- apply_rescale: style spacing + LayoutRes headers ---
+
+
+def _make_rescale_data():
+    """Minimal 1280x720 SubtitleData for apply_rescale tests."""
+    from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleStyle
+
+    data = SubtitleData()
+    data.script_info["PlayResX"] = "1280"
+    data.script_info["PlayResY"] = "720"
+    data.styles = OrderedDict([("Default", SubtitleStyle.default())])
+    data.events = []
+    return data
+
+
+def test_style_spacing_rescaled():
+    """Style letter spacing should be scaled by the uniform factor."""
+    from vsg_core.subtitles.operations.style_ops import apply_rescale
+
+    data = _make_rescale_data()
+    data.styles["Default"].spacing = 2.0
+    result = apply_rescale(data, (1920, 1080))
+    assert result.success
+    assert data.styles["Default"].spacing == 3.0, (
+        f"Got: {data.styles['Default'].spacing}"
+    )
+    print("  PASSED: style spacing rescaled")
+
+
+def test_layoutres_updated_when_present():
+    """LayoutResX/Y should follow PlayRes when the script declares them."""
+    from vsg_core.subtitles.operations.style_ops import apply_rescale
+
+    data = _make_rescale_data()
+    data.script_info["LayoutResX"] = "1280"
+    data.script_info["LayoutResY"] = "720"
+    result = apply_rescale(data, (1920, 1080))
+    assert result.success
+    assert data.script_info["LayoutResX"] == "1920"
+    assert data.script_info["LayoutResY"] == "1080"
+    print("  PASSED: LayoutRes updated when present")
+
+
+def test_layoutres_not_added_when_absent():
+    """Scripts without LayoutRes must not gain the headers."""
+    from vsg_core.subtitles.operations.style_ops import apply_rescale
+
+    data = _make_rescale_data()
+    result = apply_rescale(data, (1920, 1080))
+    assert result.success
+    assert "LayoutResX" not in data.script_info
+    assert "LayoutResY" not in data.script_info
+    print("  PASSED: LayoutRes not added when absent")
 
 
 # --- Preservation tests ---
@@ -350,6 +519,23 @@ def run_all_tests():
         test_multiple_t_blocks,
         test_tags_before_and_after_t,
         test_nested_t,
+        # Vector drawings (\p mode)
+        test_p1_drawing_scaled,
+        test_p1_drawing_no_offset,
+        test_p1_drawing_bezier,
+        test_p0_text_not_scaled,
+        test_p_mode_toggles,
+        test_p1_real_world_cover,
+        # Vector clips
+        test_vector_clip_scaled,
+        test_vector_clip_with_border_offsets,
+        test_vector_clip_scale_exponent,
+        test_vector_iclip_scaled,
+        test_vector_clip_inside_t,
+        # apply_rescale: spacing + LayoutRes
+        test_style_spacing_rescaled,
+        test_layoutres_updated_when_present,
+        test_layoutres_not_added_when_absent,
         # Preservation
         test_colors_preserved,
         test_alpha_preserved,

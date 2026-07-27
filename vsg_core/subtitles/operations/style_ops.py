@@ -67,6 +67,46 @@ def _split_transform_args(content: str) -> tuple[str, str]:
     return content, ""
 
 
+# Matches \p<N> drawing-mode tags (\p1, \p2, ...) — but not \pos/\pbo,
+# since those have no digit directly after the 'p'.
+_DRAWING_MODE_RE = re.compile(r"\\p(\d+)")
+
+
+def _scale_drawing(
+    drawing: str,
+    scale_x: float,
+    scale_y: float,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
+) -> str:
+    """Scale coordinates in an ASS drawing command string (m/n/l/b/s/p/c).
+
+    Mirrors Aegisub's transform_drawing: numbers alternate x/y, and any
+    command letter resets the alternation to x.  Offsets are only passed
+    for vector clips (absolute script coordinates); drawings after \\p
+    are anchor-relative, so their offsets stay 0.
+    """
+    out: list[str] = []
+    is_x = True
+    for token in re.split(r"(\s+)", drawing):
+        if not token or token.isspace():
+            out.append(token)
+            continue
+        try:
+            value = float(token)
+        except ValueError:
+            out.append(token)
+            is_x = True
+            continue
+        if is_x:
+            scaled = value * scale_x + offset_x
+        else:
+            scaled = value * scale_y + offset_y
+        is_x = not is_x
+        out.append(f"{scaled:.3f}".rstrip("0").rstrip("."))
+    return "".join(out)
+
+
 def _scale_override_tags(
     text: str, scale: float, scale_h: float, offset_x: float, offset_y: float
 ) -> str:
@@ -81,6 +121,9 @@ def _scale_override_tags(
     - \\t() transform blocks are recursively processed so pixel-based
       tags inside animations are correctly rescaled.
     - \\iclip is handled identically to \\clip.
+    - Vector drawings after \\p1..\\pN are scaled (no offset — the anchor
+      already carries it); vector clips are scaled with offsets, since
+      their coordinates are absolute script pixels.
 
     Args:
         text: Event text with ASS override tags
@@ -94,7 +137,9 @@ def _scale_override_tags(
     """
 
     # Tags that need vertical scaling (absolute pixel sizes)
-    _SCALE_H_TAGS = frozenset(("fs", "blur", "be", "fsp", "ybord", "yshad", "pbo", "shad"))
+    _SCALE_H_TAGS = frozenset(
+        ("fs", "blur", "be", "fsp", "ybord", "yshad", "pbo", "shad")
+    )
     # Tags that need uniform/horizontal scaling (absolute pixel sizes)
     _SCALE_TAGS = frozenset(("bord", "xbord", "xshad"))
     # Position tags with (x, y) that need offsets
@@ -117,6 +162,19 @@ def _scale_override_tags(
 
         tag_lower = tag_name.lower()
         parts = [p.strip() for p in args.split(",")]
+
+        # Vector clips: \clip(<drawing>) or \clip(<scale>, <drawing>).
+        # Coordinates are absolute script pixels, so they get scale AND
+        # border offsets — same treatment Aegisub gives them (rect clips
+        # keep going through the numeric path below).
+        if (
+            tag_lower in _CLIP_TAGS
+            and len(parts) <= 2
+            and re.search(r"[a-zA-Z]", parts[-1])
+        ):
+            scaled_drawing = _scale_drawing(parts[-1], scale, scale, offset_x, offset_y)
+            return ",".join([*parts[:-1], scaled_drawing])
+
         scaled_parts = []
 
         for i, part in enumerate(parts):
@@ -175,9 +233,7 @@ def _scale_override_tags(
             ):
                 # Process everything before this \t with the regex pass
                 if i > last_end:
-                    segments.append(
-                        _process_simple_tags(block_content[last_end:i])
-                    )
+                    segments.append(_process_simple_tags(block_content[last_end:i]))
 
                 close = _find_matching_paren(block_content, i + 2)
                 if close > 0:
@@ -205,17 +261,13 @@ def _scale_override_tags(
 
         # Process remaining content after the last \t() block
         if last_end < len(block_content):
-            segments.append(
-                _process_simple_tags(block_content[last_end:])
-            )
+            segments.append(_process_simple_tags(block_content[last_end:]))
 
         return "".join(segments)
 
     def _process_simple_tags(content: str) -> str:
         """Process non-\\t tags via regex (unchanged logic)."""
-        tag_pattern = re.compile(
-            r"\\([a-zA-Z]+)(\([^)]*\)|(?:\-?\d+(?:\.\d+)?))?"
-        )
+        tag_pattern = re.compile(r"\\([a-zA-Z]+)(\([^)]*\)|(?:\-?\d+(?:\.\d+)?))?")
 
         def replace_tag(match: re.Match[str]) -> str:
             tag_name = match.group(1)
@@ -246,12 +298,23 @@ def _scale_override_tags(
 
         return tag_pattern.sub(replace_tag, content)
 
-    def replace_block(match: re.Match[str]) -> str:
-        block_content = match.group(1)
-        scaled_content = process_override_block(block_content)
-        return "{" + scaled_content + "}"
-
-    return re.sub(r"\{([^}]*)\}", replace_block, text)
+    # Walk alternating override blocks / text runs, tracking \p drawing
+    # mode: text after \p1..\pN is a vector drawing whose coordinates
+    # must be scaled too.  Aegisub resamples these with zero shift — the
+    # anchor position (\pos / margins) already carries the border offset.
+    segments = re.split(r"(\{[^}]*\})", text)
+    drawing_mode = 0
+    result: list[str] = []
+    for segment in segments:
+        if segment.startswith("{") and segment.endswith("}"):
+            result.append("{" + process_override_block(segment[1:-1]) + "}")
+            for p_match in _DRAWING_MODE_RE.finditer(segment):
+                drawing_mode = int(p_match.group(1))
+        elif drawing_mode > 0:
+            result.append(_scale_drawing(segment, scale, scale))
+        else:
+            result.append(segment)
+    return "".join(result)
 
 
 # Color attributes that need Qt->ASS conversion
@@ -569,6 +632,9 @@ def apply_rescale(
         style.outline *= scale_h
         style.shadow *= scale_h
 
+        # Letter spacing is horizontal — uniform factor (Aegisub: spacing *= rx)
+        style.spacing *= scale
+
         # Margins are edge-relative, scale uniformly without offsets
         style.margin_l = int(style.margin_l * scale + 0.5)
         style.margin_r = int(style.margin_r * scale + 0.5)
@@ -597,6 +663,13 @@ def apply_rescale(
     # Update script info
     data.script_info["PlayResX"] = str(target_x)
     data.script_info["PlayResY"] = str(target_y)
+
+    # Keep LayoutRes in step with PlayRes when the script declares it — a
+    # stale LayoutRes skews perspective tags (\frz/\fax) under libass.
+    if "LayoutResX" in data.script_info:
+        data.script_info["LayoutResX"] = str(target_x)
+    if "LayoutResY" in data.script_info:
+        data.script_info["LayoutResY"] = str(target_y)
 
     # Record operation
     record = OperationRecord(
