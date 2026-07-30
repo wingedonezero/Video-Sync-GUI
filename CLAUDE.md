@@ -43,8 +43,9 @@ the UI thread). The worker runs the core pipeline:
 
 ```
 analyze (compute SEC/TER delays) → global shift (remove negative offsets)
-→ extract tracks → subtitle transforms → optional audio correction
-→ chapters + attachments → mux (mkvmerge) → post-process/validate
+→ extract tracks → optional lossless FLAC conversion → optional audio
+correction → subtitle transforms → chapters + attachments → mux (mkvmerge)
+→ post-process/validate
 ```
 
 `CommandRunner` (`vsg_core/io/`) is the single choke point that shells out to

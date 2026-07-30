@@ -19,7 +19,11 @@ class TrackWidgetLogic:
     def init_ui_state(self) -> None:
         """Sets the initial state of the UI based on track data."""
         is_subs = self.track_data.get("type") == "subtitles"
+        is_audio = self.track_data.get("type") == "audio"
         is_external = self.track_data.get("source") == "External"
+
+        if is_audio:
+            self.v.cb_flac.setChecked(self.track_data.get("convert_to_flac", False))
 
         # Show/hide controls based on track type
         self.v.cb_forced.setVisible(is_subs)
@@ -113,6 +117,10 @@ class TrackWidgetLogic:
 
             if corr_parts:
                 parts.append("🎯 " + ", ".join(corr_parts))
+
+        # Show FLAC conversion for audio tracks
+        if self.track_data.get("type") == "audio" and self.v.cb_flac.isChecked():
+            parts.append("→FLAC")
 
         # Show generated track filter info
         if is_generated:
@@ -238,6 +246,7 @@ class TrackWidgetLogic:
     def get_config(self) -> dict[str, Any]:
         """Returns the current configuration from the widget's controls."""
         is_subs = self.track_data.get("type") == "subtitles"
+        is_audio = self.track_data.get("type") == "audio"
 
         size_mult_value = 1.0
         if is_subs:
@@ -254,6 +263,7 @@ class TrackWidgetLogic:
             "is_forced_display": self.v.cb_forced.isChecked() if is_subs else False,
             "perform_ocr": self.v.cb_ocr.isChecked() if is_subs else False,
             "convert_to_ass": self.v.cb_convert.isChecked() if is_subs else False,
+            "convert_to_flac": self.v.cb_flac.isChecked() if is_audio else False,
             "rescale": self.v.cb_rescale.isChecked() if is_subs else False,
             "size_multiplier": size_mult_value,
             "style_patch": self.track_data.get("style_patch"),

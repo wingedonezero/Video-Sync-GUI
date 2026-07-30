@@ -34,6 +34,13 @@ LANGUAGE_CODES = [
 ]
 
 
+# mkvmerge codec IDs eligible for lossless FLAC conversion. Mirrors
+# vsg_core.orchestrator.steps.conversion_step; the pipeline re-checks at run
+# time (including object-audio detection via ffprobe), so this gate is purely
+# cosmetic.
+FLAC_ELIGIBLE_CODEC_PREFIXES = ("A_PCM", "A_MS/ACM", "A_TRUEHD", "A_DTS")
+
+
 class TrackSettingsLogic:
     """Logic layer for TrackSettingsDialog."""
 
@@ -53,6 +60,29 @@ class TrackSettingsLogic:
     def init_for_type_and_codec(self, track_type: str, codec_id: str) -> None:
         """Shows or hides widgets based on the track type."""
         is_subs = track_type == "subtitles"
+        is_audio = track_type == "audio"
+
+        # Show audio group only for audio tracks
+        self.v.audio_group.setVisible(is_audio)
+        if is_audio:
+            codec_upper = (codec_id or "").upper()
+            is_flac_eligible = "A_FLAC" not in codec_upper and any(
+                prefix in codec_upper for prefix in FLAC_ELIGIBLE_CODEC_PREFIXES
+            )
+            self.v.cb_flac.setEnabled(is_flac_eligible)
+            if is_flac_eligible:
+                self.v.cb_flac.setToolTip(
+                    "Losslessly re-encode this track to FLAC (verified "
+                    "bit-identical). Object-based audio (Atmos/DTS:X), lossy "
+                    "DTS profiles, and tracks pending audio correction are "
+                    "skipped automatically at run time."
+                )
+            else:
+                self.v.cb_flac.setChecked(False)
+                self.v.cb_flac.setToolTip(
+                    "Only lossless codecs (PCM, TrueHD, DTS-HD MA) can be "
+                    "converted to FLAC without quality loss."
+                )
 
         # Show subtitle group only for subtitles
         self.v.subtitle_group.setVisible(is_subs)
@@ -81,6 +111,7 @@ class TrackSettingsLogic:
         custom_name: str = "",
         perform_ocr: bool = False,
         convert_to_ass: bool = False,
+        convert_to_flac: bool = False,
         rescale: bool = False,
         size_multiplier: float = 1.0,
         **kwargs,  # Accept and ignore any other arguments
@@ -94,6 +125,9 @@ class TrackSettingsLogic:
 
         # Set custom track name
         self.v.custom_name_input.setText(custom_name)
+
+        # Set audio options
+        self.v.cb_flac.setChecked(bool(convert_to_flac))
 
         # Set subtitle options
         self.v.cb_ocr.setChecked(bool(perform_ocr))
@@ -111,6 +145,7 @@ class TrackSettingsLogic:
             "custom_name": self.v.custom_name_input.text().strip(),
             "perform_ocr": self.v.cb_ocr.isChecked(),
             "convert_to_ass": self.v.cb_convert.isChecked(),
+            "convert_to_flac": self.v.cb_flac.isChecked(),
             "rescale": self.v.cb_rescale.isChecked(),
             "size_multiplier": self.v.size_multiplier.value(),
         }

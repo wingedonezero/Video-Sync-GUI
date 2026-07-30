@@ -50,6 +50,7 @@ class TrackWidget(QWidget):
         # Hidden controls whose state is managed by the settings dialog
         self.cb_ocr = QCheckBox("Perform OCR")
         self.cb_convert = QCheckBox("To ASS")
+        self.cb_flac = QCheckBox("To FLAC")
         self.cb_rescale = QCheckBox("Rescale")
         self.size_multiplier = QDoubleSpinBox()
         self.size_multiplier.setRange(0.1, 10.0)
@@ -116,6 +117,7 @@ class TrackWidget(QWidget):
             # Update the hidden controls on this widget
             self.cb_ocr.setChecked(new_config.get("perform_ocr", False))
             self.cb_convert.setChecked(new_config.get("convert_to_ass", False))
+            self.cb_flac.setChecked(new_config.get("convert_to_flac", False))
             self.cb_rescale.setChecked(new_config.get("rescale", False))
             self.size_multiplier.setValue(new_config.get("size_multiplier", 1.0))
 

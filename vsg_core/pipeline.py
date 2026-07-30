@@ -210,6 +210,9 @@ class JobPipeline:
                 stepping_detected_separated=ctx.stepping_detected_separated,
                 stepping_quality_issues=ctx.stepping_quality_issues,
                 sync_stability_issues=ctx.sync_stability_issues,
+                flac_conversions=ctx.flac_conversions,
+                flac_conversion_skips=ctx.flac_conversion_skips,
+                flac_conversion_failures=ctx.flac_conversion_failures,
             )
 
         except Exception as e:

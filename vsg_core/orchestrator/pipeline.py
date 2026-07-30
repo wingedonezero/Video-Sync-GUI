@@ -17,6 +17,7 @@ from vsg_core.orchestrator.steps import (
     AudioCorrectionStep,
     ChaptersStep,
     Context,
+    ConversionStep,
     ExtractStep,
     MuxStep,
     SubtitlesStep,
@@ -143,6 +144,23 @@ class Orchestrator:
         except Exception as e:
             log(f"[FATAL] Extraction phase failed: {e}")
             raise RuntimeError(f"Extraction phase failed: {e}") from e
+
+        if any(
+            item.track.type == "audio" and item.convert_to_flac
+            for item in (ctx.extracted_items or [])
+        ):
+            log("--- Audio FLAC Conversion Phase ---")
+            progress(0.45)
+            try:
+                ctx = ConversionStep().run(ctx, runner)
+                StepValidator.validate_conversion(ctx)
+                log("[Validation] Audio FLAC conversion phase validated successfully.")
+            except PipelineValidationError as e:
+                log(f"[FATAL] Audio FLAC conversion validation failed: {e}")
+                raise
+            except Exception as e:
+                log(f"[FATAL] Audio FLAC conversion phase failed: {e}")
+                raise RuntimeError(f"Audio FLAC conversion phase failed: {e}") from e
 
         if ctx.settings.stepping_enabled and (
             ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags

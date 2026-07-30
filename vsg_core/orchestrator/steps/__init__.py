@@ -4,6 +4,7 @@ from .attachments_step import AttachmentsStep
 from .audio_correction_step import AudioCorrectionStep
 from .chapters_step import ChaptersStep
 from .context import Context
+from .conversion_step import ConversionStep
 from .extract_step import ExtractStep
 from .mux_step import MuxStep
 from .subtitles_step import SubtitlesStep
@@ -14,6 +15,7 @@ __all__ = [
     "AudioCorrectionStep",
     "ChaptersStep",
     "Context",
+    "ConversionStep",
     "ExtractStep",
     "MuxStep",
     "SubtitlesStep",

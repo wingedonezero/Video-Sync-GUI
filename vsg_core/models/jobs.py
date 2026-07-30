@@ -49,6 +49,13 @@ class PlanItem:
     sync_to: str | None = None
     is_preserved: bool = False
     is_corrected: bool = False
+    # Lossless FLAC conversion (ConversionStep). ``convert_to_flac`` is the
+    # user's request from the manual layout; ``flac_converted`` is set only
+    # after a verified conversion, with ``original_extracted_path`` keeping
+    # the pre-conversion extraction for auditing.
+    convert_to_flac: bool = False
+    flac_converted: bool = False
+    original_extracted_path: Path | None = None
     # Set on stepping-corrected tracks whose content is already shifted to
     # Source 1's audio-content timeline.  For these, mkvmerge must apply
     # `container_delay_ms` directly (which we store as Source 1's audio
@@ -128,3 +135,6 @@ class PipelineResult:
     stepping_detected_separated: list[str] = field(default_factory=list)
     stepping_quality_issues: list[SteppingQualityIssue] = field(default_factory=list)
     sync_stability_issues: list[SyncStabilityIssue] = field(default_factory=list)
+    flac_conversions: list[str] = field(default_factory=list)
+    flac_conversion_skips: list[str] = field(default_factory=list)
+    flac_conversion_failures: list[str] = field(default_factory=list)

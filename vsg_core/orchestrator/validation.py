@@ -79,6 +79,66 @@ class StepValidator:
                 )
 
     @staticmethod
+    def validate_conversion(ctx: Context) -> None:
+        """
+        Validates FLAC conversion results.
+        Raises PipelineValidationError if validation fails.
+
+        Every flagged audio track must be exactly one of: converted (with a
+        real FLAC file and its original kept on disk), or recorded as a
+        skip/failure so the outcome surfaces in the final report.
+        """
+        from vsg_core.orchestrator.steps.conversion_step import item_label
+
+        errors = []
+        recorded = [
+            *ctx.flac_conversion_skips,
+            *ctx.flac_conversion_failures,
+        ]
+
+        for item in ctx.extracted_items or []:
+            if item.track.type != "audio" or item.is_preserved:
+                continue
+
+            label = item_label(item)
+
+            if item.flac_converted:
+                if (
+                    not item.extracted_path
+                    or not item.extracted_path.exists()
+                    or item.extracted_path.suffix.lower() != ".flac"
+                ):
+                    errors.append(
+                        f"{label}: converted but FLAC file missing at "
+                        f"{item.extracted_path}"
+                    )
+                if (
+                    not item.original_extracted_path
+                    or not item.original_extracted_path.exists()
+                ):
+                    errors.append(
+                        f"{label}: converted but original extraction missing at "
+                        f"{item.original_extracted_path}"
+                    )
+                if item.track.props.codec_id != "A_FLAC":
+                    errors.append(
+                        f"{label}: converted but codec_id is "
+                        f"'{item.track.props.codec_id}', expected 'A_FLAC'"
+                    )
+            elif item.convert_to_flac:
+                if not any(entry.startswith(f"{label}:") for entry in recorded):
+                    errors.append(
+                        f"{label}: flagged for FLAC conversion but neither "
+                        f"converted nor recorded as skipped/failed"
+                    )
+
+        if errors:
+            raise PipelineValidationError(
+                "FLAC conversion validation failed:\n"
+                + "\n".join(f"  - {e}" for e in errors)
+            )
+
+    @staticmethod
     def validate_correction(ctx: Context) -> None:
         """
         Validates audio correction results.
