@@ -117,6 +117,12 @@ class Context:
     # Store sync stability issues (correlation variance) for reporting
     sync_stability_issues: list[SyncStabilityIssue] = field(default_factory=list)
 
+    # FLAC conversion outcomes (ConversionStep), as "label: detail" strings
+    # for the final report. Failures keep the original track in the mux.
+    flac_conversions: list[str] = field(default_factory=list)
+    flac_conversion_skips: list[str] = field(default_factory=list)
+    flac_conversion_failures: list[str] = field(default_factory=list)
+
     # Cache video-verified subtitle sync results per source
     # Format: {"Source 2": {"original_delay_ms": 100.0, "corrected_delay_ms": 102.5, ...}}
     video_verified_sources: dict[str, VideoVerifiedResult] = field(default_factory=dict)

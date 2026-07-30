@@ -45,6 +45,7 @@ class ManualLayoutItem(TypedDict, total=False):
     # Processing options
     perform_ocr: bool
     convert_to_ass: bool
+    convert_to_flac: bool
     rescale: bool
     size_multiplier: float
 

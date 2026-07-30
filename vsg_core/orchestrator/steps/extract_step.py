@@ -234,6 +234,7 @@ class ExtractStep:
             plan_item.apply_track_name = bool(sel.get("apply_track_name", False))
             plan_item.perform_ocr = bool(sel.get("perform_ocr", False))
             plan_item.convert_to_ass = bool(sel.get("convert_to_ass", False))
+            plan_item.convert_to_flac = bool(sel.get("convert_to_flac", False))
             plan_item.rescale = bool(sel.get("rescale", False))
 
             # Fix: Ensure size_multiplier defaults to 1.0 and handle None/empty values

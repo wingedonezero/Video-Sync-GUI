@@ -34,6 +34,9 @@ class TrackSettingsDialog(QDialog):
         # Custom track name (for all track types)
         self.custom_name_input = QLineEdit()
 
+        # Audio-specific controls
+        self.cb_flac = QCheckBox("Convert to FLAC (lossless, max compression)")
+
         # Subtitle-specific controls
         self.cb_ocr = QCheckBox("Perform OCR")
         self.cb_convert = QCheckBox("Convert to ASS (SRT only)")
@@ -67,6 +70,12 @@ class TrackSettingsDialog(QDialog):
         name_layout.addRow("Custom Name:", self.custom_name_input)
         layout.addWidget(name_group)
 
+        # Audio section (conditionally visible)
+        self.audio_group = QGroupBox("Audio Options")
+        audio_layout = QVBoxLayout(self.audio_group)
+        audio_layout.addWidget(self.cb_flac)
+        layout.addWidget(self.audio_group)
+
         # Subtitle section (conditionally visible)
         self.subtitle_group = QGroupBox("Subtitle Options")
         subtitle_layout = QVBoxLayout(self.subtitle_group)
@@ -77,7 +86,9 @@ class TrackSettingsDialog(QDialog):
         subtitle_layout.addWidget(self.sync_exclusion_btn)
         layout.addWidget(self.subtitle_group)
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)

@@ -133,6 +133,12 @@ class ReportWriter:
                 "detected_separated": job_result.get("stepping_detected_separated", []),
                 "quality_issues": job_result.get("stepping_quality_issues", []),
             },
+            # FLAC conversion outcomes (failures keep the original track)
+            "flac_conversion": {
+                "converted": job_result.get("flac_conversions", []),
+                "skipped": job_result.get("flac_conversion_skips", []),
+                "failed": job_result.get("flac_conversion_failures", []),
+            },
             # Audit results
             "audit_results": {
                 "total_issues": job_result.get("issues", 0),

@@ -12,6 +12,7 @@ from .chapters import ChaptersAuditor
 from .codec_integrity import CodecIntegrityAuditor
 from .dolby_vision import DolbyVisionAuditor
 from .drift_correction import DriftCorrectionAuditor
+from .flac_conversion import FlacConversionAuditor
 from .frame_audit import FrameAuditAuditor
 from .frame_locked import FrameLockedAuditor
 from .global_shift import GlobalShiftAuditor
@@ -42,6 +43,7 @@ __all__ = [
     "CodecIntegrityAuditor",
     "DolbyVisionAuditor",
     "DriftCorrectionAuditor",
+    "FlacConversionAuditor",
     "FrameAuditAuditor",
     "FrameLockedAuditor",
     "GlobalShiftAuditor",
