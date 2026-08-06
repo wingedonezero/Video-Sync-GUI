@@ -8,9 +8,11 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLineEdit,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from .logic import TrackSettingsLogic
@@ -33,6 +35,13 @@ class TrackSettingsDialog(QDialog):
 
         # Custom track name (for all track types)
         self.custom_name_input = QLineEdit()
+
+        # Saved-name picker (subtitle tracks only; fills the custom name box)
+        self.saved_names_btn = QPushButton("Saved…")
+        self.saved_names_btn.setToolTip(
+            "Pick a name from your saved custom track names."
+        )
+        self.saved_names_btn.clicked.connect(self._open_saved_names_dialog)
 
         # Audio-specific controls
         self.cb_flac = QCheckBox("Convert to FLAC (lossless, max compression)")
@@ -67,7 +76,12 @@ class TrackSettingsDialog(QDialog):
         # Track name section (always visible)
         name_group = QGroupBox("Track Name")
         name_layout = QFormLayout(name_group)
-        name_layout.addRow("Custom Name:", self.custom_name_input)
+        name_row = QWidget()
+        name_row_layout = QHBoxLayout(name_row)
+        name_row_layout.setContentsMargins(0, 0, 0, 0)
+        name_row_layout.addWidget(self.custom_name_input)
+        name_row_layout.addWidget(self.saved_names_btn)
+        name_layout.addRow("Custom Name:", name_row)
         layout.addWidget(name_group)
 
         # Audio section (conditionally visible)
@@ -96,6 +110,18 @@ class TrackSettingsDialog(QDialog):
         # --- Initial State ---
         self._logic.apply_initial_values(**kwargs)
         self._logic.init_for_type_and_codec(track_type, codec_id)
+
+    def _open_saved_names_dialog(self) -> None:
+        """Open the saved-names picker and fill the custom name box."""
+        from vsg_qt.track_names_dialog import TrackNamesDialog
+
+        dialog = TrackNamesDialog(
+            select_mode=True,
+            initial_text=self.custom_name_input.text(),
+            parent=self,
+        )
+        if dialog.exec() and dialog.selected_name:
+            self.custom_name_input.setText(dialog.selected_name)
 
     def _open_sync_exclusion_dialog(self) -> None:
         """Open the sync exclusion configuration dialog."""
