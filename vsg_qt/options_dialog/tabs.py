@@ -2289,7 +2289,23 @@ class MergeBehaviorTab(QWidget):
         form2.addWidget(self.widgets["post_mux_normalize_timestamps"])
         form2.addWidget(self.widgets["post_mux_strip_tags"])
         main_layout.addWidget(post_merge_group)
+
+        names_group = QGroupBox("Custom Track Names")
+        names_layout = QVBoxLayout(names_group)
+        manage_names_btn = QPushButton("Manage Saved Track Names…")
+        manage_names_btn.setToolTip(
+            "Maintain the reusable list of custom track names offered by the\n"
+            "'Saved…' button on subtitle tracks in the track settings dialog."
+        )
+        manage_names_btn.clicked.connect(self._open_track_names_manager)
+        names_layout.addWidget(manage_names_btn)
+        main_layout.addWidget(names_group)
         main_layout.addStretch(1)
+
+    def _open_track_names_manager(self) -> None:
+        from vsg_qt.track_names_dialog import TrackNamesDialog
+
+        TrackNamesDialog(select_mode=False, parent=self).exec()
 
 
 class LoggingTab(QWidget):

@@ -62,6 +62,9 @@ class TrackSettingsLogic:
         is_subs = track_type == "subtitles"
         is_audio = track_type == "audio"
 
+        # Saved-name picker only applies to subtitle tracks (any codec)
+        self.v.saved_names_btn.setVisible(is_subs)
+
         # Show audio group only for audio tracks
         self.v.audio_group.setVisible(is_audio)
         if is_audio:
