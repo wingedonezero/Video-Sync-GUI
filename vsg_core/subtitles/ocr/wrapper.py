@@ -297,6 +297,12 @@ def _run_ocr_subprocess(
                     json_payload = json.loads(line.split(json_prefix, 1)[1])
                 except json.JSONDecodeError:
                     json_payload = None
+            elif "not documented. Make sure to add it to the docstring" in line:
+                # transformers' auto_docstring lints its OWN bundled model
+                # classes at import time and print()s "[ERROR] `loss` is
+                # part of ..." lines for PaddleOCR-VL. Upstream cosmetic
+                # noise, not an OCR error - drop it.
+                continue
             elif line:
                 runner._log_message(line)
 
