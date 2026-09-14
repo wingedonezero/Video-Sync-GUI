@@ -1219,17 +1219,29 @@ def _read_audio_file(path: Path) -> tuple[int, np.ndarray]:
     return sample_rate, np.ascontiguousarray(data)
 
 
-def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
+def _log_separator_stderr(
+    log: Callable[[str], None], stderr: str, model_filename: str = ""
+) -> None:
     last_progress = -10
     # Fixed regex pattern: single backslash to match pipe character
     progress_pattern = re.compile(r"(\d{1,3})%\|")
     info_pattern = re.compile(r"^\d{4}-\d{2}-\d{2} .* - INFO - ")
     warning_pattern = re.compile(r"^\d{4}-\d{2}-\d{2} .* - (WARNING|ERROR|CRITICAL) - ")
     miopen_pattern = re.compile(r"^MIOpen\(HIP\): Warning")
+    # INFO lines worth surfacing: which device inference actually ran on,
+    # and any model download (a download here means the model directory
+    # setting is wrong or the model is missing).
+    info_whitelist = ("setting Torch device", "Downloading model", "Model downloaded")
+    is_onnx_model = model_filename.lower().endswith(".onnx")
     for line in stderr.splitlines():
         if not line.strip():
             continue
         if miopen_pattern.match(line) or "MIOpen(HIP): Warning" in line:
+            continue
+        # The ONNXruntime provider warning only matters for .onnx models;
+        # torch-based models (demucs/roformer) never touch ONNXruntime, and
+        # showing it there suggests the GPU is unused when it is not.
+        if "CUDAExecutionProvider not available" in line and not is_onnx_model:
             continue
         # Always show DEBUG lines
         if "DEBUG:" in line:
@@ -1248,6 +1260,8 @@ def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
                 )
             continue
         if info_pattern.match(line) and not warning_pattern.match(line):
+            if any(marker in line for marker in info_whitelist):
+                log(f"[SOURCE SEPARATION] {line}")
             continue
         log(f"[SOURCE SEPARATION] {line}")
 
@@ -1414,13 +1428,13 @@ def separate_audio(
                 log(f"[SOURCE SEPARATION] Python executable: {python_exe}")
                 log(f"[SOURCE SEPARATION] sys.executable: {sys.executable}")
                 if stderr:
-                    _log_separator_stderr(log, stderr)
+                    _log_separator_stderr(log, stderr, model_filename)
                 if stdout:
                     log(f"[SOURCE SEPARATION] STDOUT: {stdout}")
                 return None
 
             if result.stderr:
-                _log_separator_stderr(log, result.stderr)
+                _log_separator_stderr(log, result.stderr, model_filename)
 
             try:
                 response = json.loads(result.stdout.strip())
