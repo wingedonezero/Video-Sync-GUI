@@ -1509,7 +1509,6 @@ def apply_source_separation(
     Returns:
         Tuple of (ref_pcm, tgt_pcm) - both separated or both original
     """
-    import gc
     import sys
 
     log = log_func or (lambda x: None)
@@ -1619,8 +1618,12 @@ def apply_source_separation(
 
     log("[SOURCE SEPARATION] Both sources processed successfully")
 
-    # Only do gc at the very end, after all operations are complete
-    # and we have valid results to return
-    gc.collect()
+    # NOTE: No gc.collect() here. This function runs on a QThreadPool worker
+    # thread, and a collection there can finalize cyclic garbage that contains
+    # QWidget wrappers left over from closed dialogs. Shiboken then queues
+    # their C++ deletion onto an UNLOCKED main-thread list while the GUI
+    # thread is draining it for our log signals -> segfault in
+    # BindingManager::runDeletionInMainThread. Confirmed from the core dump
+    # of the 2026-09-09 crash. Let refcounting free the arrays.
 
     return ref_separated, tgt_separated
