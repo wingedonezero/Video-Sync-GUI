@@ -1538,7 +1538,12 @@ def apply_source_separation(
 
     device = settings.source_separation_device
     timeout = settings.source_separation_timeout
-    model_dir = None  # Model directory not configurable via AppSettings
+    # Use the configured model directory. Without it the worker falls back
+    # to /tmp/audio-separator-models (tmpfs on this class of system): models
+    # silently re-download after every reboot and the download lives in RAM.
+    model_dir: str | None = settings.source_separation_model_dir or None
+    if model_dir == "__PATH_NEEDS_RESOLUTION__":  # unresolved sentinel guard
+        model_dir = None
 
     log(f"[SOURCE SEPARATION] Mode: {mode}")
     log(f"[SOURCE SEPARATION] Model: {model_filename}")
