@@ -1000,6 +1000,7 @@ def resample_audio(audio_np: np.ndarray, orig_sr: int, target_sr: int) -> np.nda
 _WORKER_SCRIPT = '''
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -1011,6 +1012,20 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 import numpy as np
 from scipy.io import wavfile
 from audio_separator.separator import Separator
+
+def stem_tokens(path):
+    """Lower-cased stem names embedded as "(Stem)" tokens in a filename.
+
+    audio-separator names outputs "<base>_(<Stem>)_<model>.wav". Matching on
+    the parenthesized token instead of a substring of the whole name keeps
+    model filenames like "bs_roformer_instrumental_..." from making every
+    stem look like an instrumental (which previously selected the vocals
+    file in instrumental mode).
+    """
+    return {m.lower() for m in re.findall(r'\\(([^)]*)\\)', Path(path).name)}
+
+def is_vocal_stem(path):
+    return bool(stem_tokens(path) & {'vocals', 'vocal'})
 
 def load_wav_file(path):
     """Load WAV file and return float32 mono audio."""
@@ -1086,21 +1101,20 @@ def run_separation(args):
     target_stem = args['target_stem']
     selected_file = None
 
-    # Try to find file matching the target stem (case-insensitive)
+    # Try to find a file whose "(Stem)" token matches the target stem
     for f in output_files:
         if isinstance(f, (str, Path)):
             f_path = Path(f)
             if f_path.exists():
-                # Check if filename contains the target stem
-                if target_stem.lower() in f_path.name.lower():
+                if target_stem.lower() in stem_tokens(f_path):
                     selected_file = str(f_path)
                     print(f"DEBUG: Selected {f_path.name} for stem {target_stem}", file=sys.stderr)
                     return selected_file
 
     # For instrumental, need to mix non-vocal stems together
     if not selected_file and target_stem.lower() == 'instrumental':
-        # Look for files NOT containing 'vocal'
-        non_vocal_files = [f for f in output_files if 'vocal' not in Path(f).name.lower()]
+        # Look for stems that are NOT the vocals stem
+        non_vocal_files = [f for f in output_files if not is_vocal_stem(f)]
 
         if len(non_vocal_files) == 0:
             raise RuntimeError('No non-vocal stems found for instrumental mode')
@@ -1135,9 +1149,9 @@ def run_separation(args):
 
             return str(mixed_output)
 
-    # For vocals, look for a file with 'vocal' in the name
+    # For vocals, look for a file whose stem token is the vocals stem
     if not selected_file and target_stem.lower() == 'vocals':
-        vocal_files = [f for f in output_files if 'vocal' in Path(f).name.lower()]
+        vocal_files = [f for f in output_files if is_vocal_stem(f)]
         if vocal_files:
             selected_file = str(vocal_files[0])
             print(f"DEBUG: Selected {Path(selected_file).name} for vocals", file=sys.stderr)
