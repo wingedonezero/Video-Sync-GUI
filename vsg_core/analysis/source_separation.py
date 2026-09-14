@@ -1275,6 +1275,7 @@ def separate_audio(
     device: str = "auto",
     timeout_seconds: int = 900,
     model_dir: str | None = None,
+    temp_dir_base: str | None = None,
 ) -> np.ndarray | None:
     """
     Separate audio using python-audio-separator in an isolated subprocess.
@@ -1375,7 +1376,24 @@ def separate_audio(
     if model_dir:
         log(f"[SOURCE SEPARATION] Model directory: {model_dir}")
 
-    with tempfile.TemporaryDirectory(prefix="audio_sep_") as temp_dir:
+    # Keep the working files on real disk. The default temp dir is /tmp,
+    # which is tmpfs (RAM) on this class of system - the input WAV plus four
+    # stereo 32-bit stems cost ~1 GB of RAM per 10 minutes of audio, and a
+    # crash mid-separation strands them in RAM until reboot.
+    resolved_temp_base: str | None = None
+    if temp_dir_base:
+        try:
+            Path(temp_dir_base).mkdir(parents=True, exist_ok=True)
+            resolved_temp_base = temp_dir_base
+        except OSError as e:
+            log(
+                f"[SOURCE SEPARATION] WARNING: Cannot use temp root "
+                f"'{temp_dir_base}' ({e}), falling back to system temp"
+            )
+
+    with tempfile.TemporaryDirectory(
+        prefix="audio_sep_", dir=resolved_temp_base
+    ) as temp_dir:
         temp_path = Path(temp_dir)
         input_path = temp_path / "input.wav"
         script_path = temp_path / "worker.py"
@@ -1559,6 +1577,12 @@ def apply_source_separation(
     if model_dir == "__PATH_NEEDS_RESOLUTION__":  # unresolved sentinel guard
         model_dir = None
 
+    # Working files (input WAV + stems) go under temp_root on real disk,
+    # like the rest of the pipeline, instead of RAM-backed /tmp.
+    temp_dir_base: str | None = settings.temp_root or None
+    if temp_dir_base == "__PATH_NEEDS_RESOLUTION__":
+        temp_dir_base = None
+
     log(f"[SOURCE SEPARATION] Mode: {mode}")
     log(f"[SOURCE SEPARATION] Model: {model_filename}")
     log(f"[SOURCE SEPARATION] Applying to Source 1 vs {role_tag} comparison")
@@ -1606,7 +1630,15 @@ def apply_source_separation(
     # Separate reference (Source 1)
     log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
     ref_separated = separate_audio(
-        ref_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir
+        ref_pcm_copy,
+        sample_rate,
+        mode,
+        model_filename,
+        log,
+        device,
+        timeout,
+        model_dir,
+        temp_dir_base,
     )
     if ref_separated is None:
         log(
@@ -1636,7 +1668,15 @@ def apply_source_separation(
         pass
 
     tgt_separated = separate_audio(
-        tgt_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir
+        tgt_pcm_copy,
+        sample_rate,
+        mode,
+        model_filename,
+        log,
+        device,
+        timeout,
+        model_dir,
+        temp_dir_base,
     )
 
     # Release tgt copy memory
