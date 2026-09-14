@@ -1,6 +1,7 @@
 # vsg_qt/main_window/controller.py
 from __future__ import annotations
 
+import gc
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -142,6 +143,17 @@ class MainController:
         self._start_worker(initial_jobs, and_merge=False, output_dir=output_dir)
 
     def _start_worker(self, jobs: list[dict], and_merge: bool, output_dir: str) -> None:
+        # Collect cyclic garbage NOW, on the GUI thread, before the worker
+        # thread starts. Closed dialogs (job queue, track picker, options)
+        # leave QWidget wrappers in reference cycles; if the interpreter's
+        # collector later runs on the worker thread it finalizes them there,
+        # and Shiboken's deferred main-thread deletion list is not
+        # thread-safe (see the 2026-09-09 segfault). Collecting here means
+        # no widget garbage exists for the worker to trip over. Two passes
+        # so cycles freed by the first pass release their children too.
+        gc.collect()
+        gc.collect()
+
         self.v.log_output.clear()
         self.v.status_label.setText(f"Starting batch of {len(jobs)} jobs…")
         self.v.progress_bar.setValue(0)
