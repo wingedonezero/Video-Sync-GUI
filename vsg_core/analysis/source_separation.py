@@ -41,6 +41,14 @@ else:
         return os.environ.copy()
 
 
+# Chunked-inference parameters (passed to the worker; keep RAM bounded).
+# 300 s of mono 48 kHz audio keeps the htdemucs worker around 2-3 GB
+# regardless of track length; 15 s of real context on each side of a
+# window keeps the model from seeing an artificial edge inside the kept
+# region.
+SEPARATION_CHUNK_SECONDS = 300
+SEPARATION_CHUNK_OVERLAP_SECONDS = 15
+
 # Separation modes available in the UI
 SEPARATION_MODES = {
     "none": None,
@@ -1042,24 +1050,9 @@ def load_wav_file(path):
 
     return sample_rate, data
 
-def run_separation(args):
-    output_dir = Path(args['output_dir'])
-
-    # Don't use output_single_stem - get all stems and select manually
-    separator = Separator(
-        output_dir=str(output_dir),
-        output_format='WAV',
-        sample_rate=args['sample_rate'],
-        model_file_dir=args.get('model_dir') or "/tmp/audio-separator-models/",
-    )
-
-    model_filename = args.get('model_filename')
-    if model_filename and model_filename != 'default':
-        separator.load_model(model_filename=model_filename)
-    else:
-        separator.load_model()
-
-    output_files = separator.separate(args['input_path'])
+def _separate_file(separator, output_dir, input_path, target_stem, verbose=True):
+    """Run one separator pass on input_path; return the target stem file path."""
+    output_files = separator.separate(input_path)
 
     # Convert all paths to absolute paths (separator might return relative paths)
     if output_files:
@@ -1073,21 +1066,18 @@ def run_separation(args):
                 abs_output_files.append(str(f_path))
         output_files = abs_output_files
 
-    # Debug: List all files in output directory
+    # Debug: list produced files (first pass only when chunking)
     all_files = []
     if output_dir.exists():
         all_files = list(output_dir.rglob('*.wav'))
+    if verbose:
         print(f"DEBUG: Found {len(all_files)} WAV files in {output_dir}", file=sys.stderr)
         for f in all_files:
             print(f"DEBUG: - {f.name}", file=sys.stderr)
-
-    # Debug: What separator.separate() returned
-    print(f"DEBUG: separator.separate() returned {len(output_files) if output_files else 0} files", file=sys.stderr)
-    if output_files:
-        for f in output_files:
+        print(f"DEBUG: separator.separate() returned {len(output_files) if output_files else 0} files", file=sys.stderr)
+        for f in (output_files or []):
             f_path = Path(f)
-            exists = f_path.exists()
-            print(f"DEBUG: - {f_path.name} (exists={exists})", file=sys.stderr)
+            print(f"DEBUG: - {f_path.name} (exists={f_path.exists()})", file=sys.stderr)
 
     # If separator.separate() returned empty, try to find files manually
     if not output_files and all_files:
@@ -1098,7 +1088,6 @@ def run_separation(args):
         raise RuntimeError('No output files produced by audio-separator')
 
     # Find the correct output file for the target stem
-    target_stem = args['target_stem']
     selected_file = None
 
     # Try to find a file whose "(Stem)" token matches the target stem
@@ -1108,7 +1097,8 @@ def run_separation(args):
             if f_path.exists():
                 if target_stem.lower() in stem_tokens(f_path):
                     selected_file = str(f_path)
-                    print(f"DEBUG: Selected {f_path.name} for stem {target_stem}", file=sys.stderr)
+                    if verbose:
+                        print(f"DEBUG: Selected {f_path.name} for stem {target_stem}", file=sys.stderr)
                     return selected_file
 
     # For instrumental, need to mix non-vocal stems together
@@ -1121,18 +1111,21 @@ def run_separation(args):
         elif len(non_vocal_files) == 1:
             # Only one non-vocal file, use it directly
             selected_file = str(non_vocal_files[0])
-            print(f"DEBUG: Using {Path(selected_file).name} as instrumental (only non-vocal file)", file=sys.stderr)
+            if verbose:
+                print(f"DEBUG: Using {Path(selected_file).name} as instrumental (only non-vocal file)", file=sys.stderr)
             return selected_file
         else:
             # Multiple non-vocal stems - need to mix them together (like old Demucs)
-            print(f"DEBUG: Mixing {len(non_vocal_files)} non-vocal stems for instrumental", file=sys.stderr)
+            if verbose:
+                print(f"DEBUG: Mixing {len(non_vocal_files)} non-vocal stems for instrumental", file=sys.stderr)
 
             mixed_audio = None
             sample_rate = None
 
             for stem_file in non_vocal_files:
                 sr, audio = load_wav_file(Path(stem_file))
-                print(f"DEBUG: - Loading {Path(stem_file).name}", file=sys.stderr)
+                if verbose:
+                    print(f"DEBUG: - Loading {Path(stem_file).name}", file=sys.stderr)
 
                 if sample_rate is None:
                     sample_rate = sr
@@ -1145,7 +1138,8 @@ def run_separation(args):
             # Save mixed audio to a new file
             mixed_output = output_dir / 'mixed_instrumental.wav'
             wavfile.write(str(mixed_output), sample_rate, mixed_audio.astype(np.float32))
-            print(f"DEBUG: Saved mixed instrumental to {mixed_output.name}", file=sys.stderr)
+            if verbose:
+                print(f"DEBUG: Saved mixed instrumental to {mixed_output.name}", file=sys.stderr)
 
             return str(mixed_output)
 
@@ -1154,7 +1148,8 @@ def run_separation(args):
         vocal_files = [f for f in output_files if is_vocal_stem(f)]
         if vocal_files:
             selected_file = str(vocal_files[0])
-            print(f"DEBUG: Selected {Path(selected_file).name} for vocals", file=sys.stderr)
+            if verbose:
+                print(f"DEBUG: Selected {Path(selected_file).name} for vocals", file=sys.stderr)
             return selected_file
 
     # If still no match, use the first file as fallback
@@ -1170,6 +1165,78 @@ def run_separation(args):
         raise RuntimeError(f'Selected file does not exist: {selected_file}')
 
     return selected_file
+
+def run_separation(args):
+    output_dir = Path(args['output_dir'])
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Don't use output_single_stem - get all stems and select manually
+    separator = Separator(
+        output_dir=str(output_dir),
+        output_format='WAV',
+        sample_rate=args['sample_rate'],
+        model_file_dir=args.get('model_dir') or "/tmp/audio-separator-models/",
+    )
+
+    model_filename = args.get('model_filename')
+    if model_filename and model_filename != 'default':
+        separator.load_model(model_filename=model_filename)
+    else:
+        separator.load_model()
+
+    target_stem = args['target_stem']
+    chunk_seconds = int(args.get('chunk_seconds') or 0)
+    overlap_seconds = int(args.get('chunk_overlap_seconds') or 15)
+
+    in_sr, in_data = wavfile.read(args['input_path'], mmap=True)
+    n = int(in_data.shape[0])
+    chunk_len = chunk_seconds * in_sr
+    overlap = overlap_seconds * in_sr
+
+    # Short input (or chunking disabled, or unexpected multi-channel input):
+    # identical single-pass behavior to before.
+    if chunk_len <= 0 or in_data.ndim > 1 or n <= chunk_len + overlap:
+        del in_data
+        return _separate_file(separator, output_dir, args['input_path'], target_stem)
+
+    # Long input: separate in fixed windows so peak RAM is bounded by the
+    # window length instead of the whole track. Each window is padded with
+    # `overlap` seconds of real context on both sides so the model never
+    # sees an artificial edge inside the kept region; only the unpadded
+    # core [start, end) is copied into the result, keeping the output
+    # sample-exact with the input length.
+    n_chunks = (n + chunk_len - 1) // chunk_len
+    print(f"DEBUG: Chunked separation: {n_chunks} windows of {chunk_seconds}s (+{overlap_seconds}s context each side)", file=sys.stderr)
+    out = np.zeros(n, dtype=np.float32)
+    chunk_in = Path(args['input_path']).parent / 'chunk_input.wav'
+    for ci in range(n_chunks):
+        start = ci * chunk_len
+        end = min(n, start + chunk_len)
+        pstart = max(0, start - overlap)
+        pend = min(n, end + overlap)
+        # Remove the previous window's stems so this pass starts clean
+        for f in output_dir.glob('*.wav'):
+            f.unlink()
+        wavfile.write(str(chunk_in), in_sr, np.ascontiguousarray(in_data[pstart:pend], dtype=np.float32))
+        selected = _separate_file(separator, output_dir, str(chunk_in), target_stem, verbose=(ci == 0))
+        sel_sr, sel_data = load_wav_file(Path(selected))
+        if sel_sr != in_sr:
+            raise RuntimeError(f'Chunk sample rate mismatch: {sel_sr} vs {in_sr}')
+        core_off = start - pstart
+        need = end - start
+        core = sel_data[core_off:core_off + need]
+        if core.shape[0] < need:
+            core = np.concatenate([core, np.zeros(need - core.shape[0], dtype=np.float32)])
+        out[start:end] = core
+        print(f"DEBUG: Chunk {ci + 1}/{n_chunks} done", file=sys.stderr)
+    del in_data
+    for f in output_dir.glob('*.wav'):
+        f.unlink()
+    if chunk_in.exists():
+        chunk_in.unlink()
+    final_path = output_dir / 'separated_full.wav'
+    wavfile.write(str(final_path), in_sr, out)
+    return str(final_path)
 
 def cleanup_gpu():
     """Release GPU resources before subprocess exits."""
@@ -1414,6 +1481,8 @@ def separate_audio(
             "sample_rate": sample_rate,
             "model_filename": model_filename,
             "model_dir": model_dir,
+            "chunk_seconds": SEPARATION_CHUNK_SECONDS,
+            "chunk_overlap_seconds": SEPARATION_CHUNK_OVERLAP_SECONDS,
         }
 
         python_exe = _get_venv_python()
@@ -1425,13 +1494,24 @@ def separate_audio(
             env["ROCR_VISIBLE_DEVICES"] = ""
             env["HIP_VISIBLE_DEVICES"] = ""
 
-        # Enforce reasonable timeout bounds to prevent infinite hangs
-        # 0 or negative means "use max timeout" (2 hours), not "no timeout"
+        # Enforce reasonable timeout bounds to prevent infinite hangs.
+        # 0 or negative means "use max timeout" (2 hours), not "no timeout".
+        # The configured timeout is treated as per-window: long tracks are
+        # processed in SEPARATION_CHUNK_SECONDS windows, so slow models on
+        # long files scale linearly and used to be killed mid-run.
+        n_windows = max(
+            1, -(-len(pcm_data) // (SEPARATION_CHUNK_SECONDS * sample_rate))
+        )
         if timeout_seconds <= 0:
             timeout = 7200  # 2 hours max
             log("[SOURCE SEPARATION] Using maximum timeout of 2 hours")
         else:
-            timeout = min(timeout_seconds, 7200)  # Cap at 2 hours
+            timeout = min(timeout_seconds * n_windows, 7200)  # Cap at 2 hours
+            if n_windows > 1:
+                log(
+                    f"[SOURCE SEPARATION] {n_windows} windows; "
+                    f"timeout scaled to {timeout}s"
+                )
 
         try:
             result = subprocess.run(
