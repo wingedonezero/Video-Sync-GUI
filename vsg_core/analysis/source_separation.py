@@ -1340,10 +1340,13 @@ def separate_audio(
             )
             pcm_data = pcm_data.astype(np.float32)
 
-        # Now check contiguity and make a copy if needed
-        # Making a copy is ALWAYS safer as it ensures we own the memory
-        log("[SOURCE SEPARATION] DEBUG: Creating safe array copy...")
-        pcm_data = np.array(pcm_data, dtype=np.float32, copy=True, order="C")
+        # Ensure C-contiguity without copying: ascontiguousarray returns
+        # the SAME array when it is already contiguous float32 (the normal
+        # case - decode_audio produces exactly that). The unconditional
+        # full copy that used to live here was added while chasing what
+        # turned out to be the Shiboken main-thread-deletion crash; it cost
+        # one full track of RAM per call and fixed nothing.
+        pcm_data = np.ascontiguousarray(pcm_data, dtype=np.float32)
         log(
             f"[SOURCE SEPARATION] DEBUG: Array validated - shape={pcm_data.shape}, size={pcm_data.nbytes} bytes"
         )
@@ -1399,7 +1402,9 @@ def separate_audio(
         script_path = temp_path / "worker.py"
         output_dir = temp_path / "output"
 
-        wavfile.write(input_path, sample_rate, pcm_data.astype(np.float32))
+        # pcm_data is guaranteed float32 above; astype() here would copy
+        # the whole track again for nothing.
+        wavfile.write(input_path, sample_rate, pcm_data)
         script_path.write_text(_WORKER_SCRIPT)
 
         args = {
@@ -1604,18 +1609,11 @@ def apply_source_separation(
         log(f"[SOURCE SEPARATION] ERROR: Failed to validate inputs: {e}")
         return ref_pcm, tgt_pcm
 
-    # CRITICAL: Create defensive copies FIRST, before ANY gc operations.
-    # This ensures we have clean, owned memory before triggering any cleanup.
-    log("[SOURCE SEPARATION] DEBUG: Creating defensive copies...")
-    try:
-        ref_pcm_copy = np.array(ref_pcm, dtype=np.float32, copy=True, order="C")
-        tgt_pcm_copy = np.array(tgt_pcm, dtype=np.float32, copy=True, order="C")
-        log(
-            f"[SOURCE SEPARATION] DEBUG: Copies created - ref={ref_pcm_copy.nbytes} bytes, tgt={tgt_pcm_copy.nbytes} bytes"
-        )
-    except Exception as e:
-        log(f"[SOURCE SEPARATION] ERROR: Failed to create copies: {e}")
-        return ref_pcm, tgt_pcm
+    # No defensive copies: separate_audio() never mutates its input (it
+    # normalizes dtype/contiguity without copying and writes it to a WAV),
+    # and the "corrupted array" crashes these copies were guarding against
+    # were the Shiboken main-thread-deletion bug, not array corruption.
+    # The copies doubled the resident cost of both tracks for nothing.
 
     # Flush before any operations that might crash
     try:
@@ -1630,7 +1628,7 @@ def apply_source_separation(
     # Separate reference (Source 1)
     log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
     ref_separated = separate_audio(
-        ref_pcm_copy,
+        ref_pcm,
         sample_rate,
         mode,
         model_filename,
@@ -1647,9 +1645,6 @@ def apply_source_separation(
         # Just return originals - let Python handle cleanup naturally
         return ref_pcm, tgt_pcm
 
-    # Release ref copy memory - but do NOT gc.collect() yet
-    del ref_pcm_copy
-
     # Small delay between separations to allow subprocess cleanup to complete.
     # This is safer than gc.collect() which can trigger problematic destructors.
     time.sleep(0.2)
@@ -1657,7 +1652,7 @@ def apply_source_separation(
     # Separate target
     log(f"[SOURCE SEPARATION] Processing target audio ({role_tag})...")
     log(
-        f"[SOURCE SEPARATION] DEBUG: tgt_pcm_copy shape={tgt_pcm_copy.shape}, dtype={tgt_pcm_copy.dtype}"
+        f"[SOURCE SEPARATION] DEBUG: tgt_pcm shape={tgt_pcm.shape}, dtype={tgt_pcm.dtype}"
     )
 
     # Flush before second separation
@@ -1668,7 +1663,7 @@ def apply_source_separation(
         pass
 
     tgt_separated = separate_audio(
-        tgt_pcm_copy,
+        tgt_pcm,
         sample_rate,
         mode,
         model_filename,
@@ -1678,9 +1673,6 @@ def apply_source_separation(
         model_dir,
         temp_dir_base,
     )
-
-    # Release tgt copy memory
-    del tgt_pcm_copy
 
     if tgt_separated is None:
         log(
