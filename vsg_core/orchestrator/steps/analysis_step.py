@@ -88,8 +88,15 @@ def _apply_source_separation(
     settings: AppSettings,
     log: Callable[[str], None],
     role_tag: str,
+    ref_cache: dict[tuple[str, int | None], np.ndarray] | None = None,
+    ref_cache_key: tuple[str, int | None] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Apply source separation if configured. Returns (ref, tgt) arrays."""
+    """Apply source separation if configured. Returns (ref, tgt) arrays.
+
+    ref_cache holds the separated Source 1 audio for this job, keyed by
+    (file, track index): Source 1 is identical for every target source, so
+    it only needs to be separated once per job.
+    """
     separation_mode = settings.source_separation_mode
     if not separation_mode or separation_mode == "none":
         return ref_pcm, tgt_pcm
@@ -97,7 +104,23 @@ def _apply_source_separation(
     try:
         from vsg_core.analysis.source_separation import apply_source_separation
 
-        return apply_source_separation(ref_pcm, tgt_pcm, sr, settings, log, role_tag)
+        cached_ref = None
+        if ref_cache is not None and ref_cache_key is not None:
+            cached_ref = ref_cache.get(ref_cache_key)
+
+        ref_out, tgt_out = apply_source_separation(
+            ref_pcm, tgt_pcm, sr, settings, log, role_tag, cached_ref
+        )
+        if (
+            ref_cache is not None
+            and ref_cache_key is not None
+            and cached_ref is None
+            and ref_out is not ref_pcm
+        ):
+            # Separation succeeded (originals are returned on failure);
+            # remember the separated reference for the next target source.
+            ref_cache[ref_cache_key] = ref_out
+        return ref_out, tgt_out
     except ImportError as e:
         log(
             "WARNING: Source separation was enabled but dependencies are not available!"
@@ -155,6 +178,11 @@ class AnalysisStep:
         source1_file = ctx.sources.get("Source 1")
         if not source1_file:
             raise ValueError("Context is missing Source 1 for analysis.")
+
+        # Per-job cache of the separated Source 1 audio, keyed by
+        # (file, track index). AnalysisStep is constructed per job, so the
+        # cache lives exactly as long as one job.
+        self._separated_ref_cache: dict[tuple[str, int | None], np.ndarray] = {}
 
         log = runner._log_message
         settings = ctx.settings
@@ -862,7 +890,14 @@ class AnalysisStep:
         # --- 2b. Source Separation (Optional) ---
         if use_source_separated_settings:
             ref_pcm, tgt_pcm = _apply_source_separation(
-                ref_pcm, tgt_pcm, DEFAULT_SR, settings, log, source_key
+                ref_pcm,
+                tgt_pcm,
+                DEFAULT_SR,
+                settings,
+                log,
+                source_key,
+                ref_cache=self._separated_ref_cache,
+                ref_cache_key=(source1_file, idx_ref),
             )
 
         # --- 3. Filtering ---
