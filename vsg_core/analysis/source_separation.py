@@ -1615,6 +1615,7 @@ def apply_source_separation(
     settings: AppSettings,
     log_func: Callable[[str], None] | None = None,
     role_tag: str = "Source 2",
+    cached_ref: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Apply source separation to both reference and target audio, or neither.
@@ -1705,19 +1706,25 @@ def apply_source_separation(
     # NOTE: We deliberately avoid gc.collect() here as it can trigger buggy
     # C extension destructors that corrupt memory state.
 
-    # Separate reference (Source 1)
-    log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
-    ref_separated = separate_audio(
-        ref_pcm,
-        sample_rate,
-        mode,
-        model_filename,
-        log,
-        device,
-        timeout,
-        model_dir,
-        temp_dir_base,
-    )
+    # Separate reference (Source 1), unless the caller already separated
+    # it earlier in this job (Source 1 is identical for every target, so
+    # re-separating it per target doubled the work and the peak memory).
+    if cached_ref is not None:
+        log("[SOURCE SEPARATION] Reusing separated Source 1 audio from this job")
+        ref_separated = cached_ref
+    else:
+        log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
+        ref_separated = separate_audio(
+            ref_pcm,
+            sample_rate,
+            mode,
+            model_filename,
+            log,
+            device,
+            timeout,
+            model_dir,
+            temp_dir_base,
+        )
     if ref_separated is None:
         log(
             "[SOURCE SEPARATION] Reference separation failed, using original audio for both"
