@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..data import SubtitleData
-    from ..frame_utils.frame_clock import FrameClock
+    from ..frame_utils.frame_table import FrameGrid
     from ..frame_utils.surgical_rounding import (
         SurgicalBatchStats,
         SurgicalEventResult,
@@ -29,7 +29,7 @@ def write_ass_file(
     data: SubtitleData,
     path: Path,
     rounding: str = "floor",
-    clock: FrameClock | None = None,
+    clock: FrameGrid | None = None,
 ) -> SurgicalBatchStats | None:
     """
     Write SubtitleData to ASS file.
@@ -45,7 +45,7 @@ def write_ass_file(
         data: SubtitleData to write
         path: Output path
         rounding: Rounding mode ("floor", "round", "ceil")
-        clock: Exact CFR frame grid (None = plain rounding only, e.g. VFR/MPEG-2)
+        clock: Target frame grid (None = plain rounding only)
 
     Returns:
         SurgicalBatchStats if surgical rounding was applied, None otherwise

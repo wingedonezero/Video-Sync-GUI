@@ -17,8 +17,9 @@ For an event, the end is coordinated with the start: when the start was bumped
 floor->ceil, the end is bumped too if that preserves the original duration and
 stays on its own frame.
 
-Frames come from an exact :class:`FrameClock` (integer grid from the fps
-fraction). There is no millisecond tolerance: a value is on a frame or it is
+Frames come from a :class:`FrameGrid` — the real per-frame timestamps
+(:class:`FrameTable`) or the exact CFR formula (:class:`FrameClock`). There is
+no millisecond tolerance: a value is on a frame or it is
 not, judged against the real grid. Whole-frame sync shifts are made exact at the
 apply step (see :class:`FrameShift`), so frame-locked values reach this code
 sitting exactly on a frame with no slop to absorb.
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..data import SubtitleEvent
-    from .frame_clock import FrameClock
+    from .frame_table import FrameGrid
 
 
 @dataclass(slots=True)
@@ -81,7 +82,7 @@ class SurgicalBatchStats:
 
 def surgical_round_single(
     exact_ms: float,
-    clock: FrameClock,
+    clock: FrameGrid,
     precision_ms: int = 10,
 ) -> SurgicalRoundResult:
     """
@@ -92,7 +93,7 @@ def surgical_round_single(
 
     Args:
         exact_ms: Exact time in milliseconds (float, after offset applied)
-        clock: Exact CFR frame grid for the target video
+        clock: Frame grid of the target video (real timestamps or CFR formula)
         precision_ms: Rounding granularity — 10 for ASS (centiseconds),
                       1 for SRT/ms-based formats. Defaults to 10 so existing
                       ASS call sites are unchanged.
@@ -146,7 +147,7 @@ def surgical_round_single(
 def surgical_round_event(
     start_ms: float,
     end_ms: float,
-    clock: FrameClock,
+    clock: FrameGrid,
     precision_ms: int = 10,
 ) -> SurgicalEventResult:
     """
@@ -163,7 +164,7 @@ def surgical_round_event(
     Args:
         start_ms: Exact start time in milliseconds
         end_ms: Exact end time in milliseconds
-        clock: Exact CFR frame grid for the target video
+        clock: Frame grid of the target video (real timestamps or CFR formula)
         precision_ms: Rounding granularity (10 for ASS, 1 for SRT)
 
     Returns:
@@ -215,7 +216,7 @@ def surgical_round_event(
 
 def surgical_round_batch(
     events: Sequence[SubtitleEvent],
-    clock: FrameClock,
+    clock: FrameGrid,
     precision_ms: int = 10,
 ) -> tuple[dict[int, SurgicalEventResult], SurgicalBatchStats]:
     """
@@ -223,7 +224,7 @@ def surgical_round_batch(
 
     Args:
         events: Sequence of SubtitleEvent objects
-        clock: Exact CFR frame grid for the target video
+        clock: Frame grid of the target video (real timestamps or CFR formula)
         precision_ms: Rounding granularity (10 for ASS, 1 for SRT)
 
     Returns:

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ....orchestrator.steps.context import Context
     from ...data import OperationResult, SubtitleData
     from ...frame_utils.frame_clock import FrameClock
+    from ...frame_utils.frame_table import FrameGrid
 
 
 @register_sync_plugin
@@ -64,6 +65,7 @@ class VideoVerifiedSync(SyncPlugin):
         settings: AppSettings | None = None,
         temp_dir: Path | None = None,
         frame_clock: FrameClock | None = None,
+        frame_grid: FrameGrid | None = None,
         **kwargs,
     ) -> OperationResult:
         """
@@ -87,6 +89,8 @@ class VideoVerifiedSync(SyncPlugin):
             runner: CommandRunner for logging
             settings: AppSettings with video-verified parameters
             temp_dir: Temp directory for index files
+            frame_clock: CFR formula grid, used only for exact whole-frame shifts
+            frame_grid: Target frame grid for the frame audit and save rounding
 
         Returns:
             OperationResult with statistics
@@ -164,6 +168,7 @@ class VideoVerifiedSync(SyncPlugin):
             temp_dir=temp_dir,
             ctx=kwargs.get("ctx"),
             frame_clock=frame_clock,
+            frame_grid=frame_grid,
         )
 
     def _apply_offset(
@@ -184,6 +189,7 @@ class VideoVerifiedSync(SyncPlugin):
         temp_dir: Path | None = None,
         ctx: Context | None = None,
         frame_clock: FrameClock | None = None,
+        frame_grid: FrameGrid | None = None,
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
         from ...data import OperationRecord, OperationResult
@@ -207,11 +213,11 @@ class VideoVerifiedSync(SyncPlugin):
         # Extract debug_paths from ctx if available
         debug_paths = ctx.debug_paths if ctx else None
 
-        # Run frame alignment audit (only with an exact CFR grid for the target)
-        if settings and frame_clock is not None:
+        # Run frame alignment audit (only with a frame grid for the target)
+        if settings and frame_grid is not None:
             self._run_frame_audit(
                 subtitle_data=subtitle_data,
-                clock=frame_clock,
+                clock=frame_grid,
                 offset_ms=final_offset_ms,
                 job_name=job_name,
                 settings=settings,
@@ -279,14 +285,14 @@ class VideoVerifiedSync(SyncPlugin):
                 "selection_reason": selection_reason,
                 "target_fps": target_fps,
                 **details,
-                "frame_clock": frame_clock,
+                "frame_grid": frame_grid,
             },
         )
 
     def _run_frame_audit(
         self,
         subtitle_data: SubtitleData,
-        clock: FrameClock,
+        clock: FrameGrid,
         offset_ms: float,
         job_name: str,
         settings: AppSettings,

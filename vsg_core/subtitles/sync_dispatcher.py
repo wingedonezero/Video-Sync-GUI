@@ -18,6 +18,11 @@ if TYPE_CHECKING:
     from vsg_core.orchestrator.steps.context import Context
     from vsg_core.subtitles.data import OperationResult, SubtitleData
     from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
+    from vsg_core.subtitles.frame_utils.frame_table import (
+        FrameGrid,
+        FrameGridNote,
+        FrameTable,
+    )
 
 from vsg_core.subtitles.sync_modes import get_sync_plugin
 
@@ -85,6 +90,10 @@ def apply_sync_mode(
     # the same effective behaviour those paths already have.
     target_clock = _detect_target_clock(ctx, target_video, runner)
 
+    # Frame grid for save-time rounding and the frame audit: Source 1's real
+    # frame timestamps. Whole-frame shifts (FrameShift) still use target_clock.
+    frame_grid = _resolve_frame_grid(ctx, target_video, target_clock, runner)
+
     runner._log_message(f"[Sync] Mode: {sync_mode}")
     runner._log_message(
         f"[Sync] Delay: {total_delay_ms:+.3f}ms (global: {global_shift_ms:+.3f}ms)"
@@ -102,6 +111,7 @@ def apply_sync_mode(
             target_video=target_video,
             item=item,
             target_clock=target_clock,
+            frame_grid=frame_grid,
             global_shift_ms=global_shift_ms,
         )
 
@@ -117,7 +127,7 @@ def apply_sync_mode(
             target_video=target_video,
             item=item,
             ctx=ctx,
-            target_clock=target_clock,
+            frame_grid=frame_grid,
         )
 
     # NORMAL PATH: Use sync plugin
@@ -143,6 +153,7 @@ def apply_sync_mode(
             debug_paths=ctx.debug_paths,
             ctx=ctx,
             frame_clock=target_clock,
+            frame_grid=frame_grid,
         )
 
         if result.success:
@@ -192,6 +203,7 @@ def _apply_cached_video_verified(
     target_video: Path | None,
     item,
     target_clock: FrameClock | None = None,
+    frame_grid: FrameGrid | None = None,
     global_shift_ms: float = 0.0,
 ) -> OperationResult:
     """
@@ -241,17 +253,17 @@ def _apply_cached_video_verified(
     job_name = _build_audit_job_name(target_video, item)
     _run_frame_audit_if_enabled(
         subtitle_data=subtitle_data,
-        clock=target_clock,
+        clock=frame_grid,
         offset_ms=cached["corrected_delay_ms"],
         job_name=job_name,
         ctx=ctx,
         runner=runner,
     )
 
-    # Carry the exact frame clock in details for surgical rounding at save time
+    # Carry the frame grid in details for surgical rounding at save time
     details = dict(cached["details"]) if cached.get("details") else {}
     details["target_fps"] = target_fps
-    details["frame_clock"] = target_clock
+    details["frame_grid"] = frame_grid
 
     return OperationResult(
         success=True,
@@ -274,7 +286,7 @@ def _apply_video_verified_reference(
     target_video: Path | None,
     item,
     ctx: Context,
-    target_clock: FrameClock | None = None,
+    frame_grid: FrameGrid | None = None,
 ) -> OperationResult:
     """
     Apply video-verified for Source 1 (reference video).
@@ -282,7 +294,8 @@ def _apply_video_verified_reference(
     Source 1 is the reference, so no frame matching is needed.
     Just apply the delay directly (which is just global_shift for Source 1).
     The delay is a global shift (often sub-frame), not a whole-frame offset, so
-    events take the flat delay; the clock is only used for save-time rounding.
+    events take the flat delay; the frame grid is only used for save-time
+    rounding and the frame audit.
     """
     from vsg_core.subtitles.data import OperationResult
     from vsg_core.subtitles.sync_utils import apply_delay_to_events
@@ -301,7 +314,7 @@ def _apply_video_verified_reference(
     job_name = _build_audit_job_name(target_video, item)
     _run_frame_audit_if_enabled(
         subtitle_data=subtitle_data,
-        clock=target_clock,
+        clock=frame_grid,
         offset_ms=total_delay_ms,
         job_name=job_name,
         ctx=ctx,
@@ -313,13 +326,13 @@ def _apply_video_verified_reference(
         operation="sync",
         events_affected=events_synced,
         summary=f"Video-verified (Source 1 reference): {total_delay_ms:+.1f}ms applied to {events_synced} events",
-        details={"target_fps": target_fps, "frame_clock": target_clock},
+        details={"target_fps": target_fps, "frame_grid": frame_grid},
     )
 
 
 def _run_frame_audit_if_enabled(
     subtitle_data: SubtitleData,
-    clock: FrameClock | None,
+    clock: FrameGrid | None,
     offset_ms: float,
     job_name: str,
     ctx: Context,
@@ -328,9 +341,10 @@ def _run_frame_audit_if_enabled(
     """
     Run frame alignment audit for video-verified sync.
 
-    Runs only when the target has a trustworthy exact CFR grid (``clock`` is
-    not None). VFR / MPEG-2 targets have no frame grid to audit against, so the
-    audit is skipped there — matching the plain-rounding save path. The summary
+    Runs only when the target has a frame grid (``clock`` is not None): its
+    real frame timestamps, or the CFR formula if those could not be read.
+    Without a grid the audit is skipped — matching the plain-rounding save
+    path (multi-source jobs onto an MPEG-2/interlaced/VFR Source 1). The summary
     is always logged; the detailed per-line report file is only written when the
     debug setting (video_verified_frame_audit) is enabled.
 
@@ -339,7 +353,8 @@ def _run_frame_audit_if_enabled(
     """
     if clock is None:
         runner._log_message(
-            "[FrameAudit] Skipped: no exact CFR frame grid for target (VFR/MPEG-2)"
+            "[FrameAudit] Skipped: no frame grid for target "
+            "(multi-source job onto VFR/MPEG-2/interlaced Source 1)"
         )
         return
 
@@ -442,6 +457,138 @@ def _detect_target_clock(
     except Exception as e:
         runner._log_message(f"[Sync] WARNING: Could not build frame clock: {e}")
         return None
+
+
+def _resolve_frame_grid(
+    ctx: Context,
+    target_video: Path | None,
+    target_clock: FrameClock | None,
+    runner: CommandRunner,
+) -> FrameGrid | None:
+    """Frame grid for save-time rounding and the frame audit.
+
+    Source 1's real frame timestamps replace the CFR formula wherever a grid is
+    used today (progressive targets, any job). They are also used for MPEG-2 /
+    interlaced / VFR targets in single-source jobs (remux / OCR), where Source
+    1's own tracks are the only subtitles — multi-source jobs onto such a target
+    keep plain rounding until frame matching supports them. If the timestamps
+    cannot be read, the old behaviour stands (formula, or no grid).
+    """
+    if target_video is None:
+        return target_clock
+    single_source = len(ctx.sources) == 1
+    if target_clock is None and not single_source:
+        return None
+    table = _source1_frame_table(ctx, target_video, target_clock, runner)
+    return table if table is not None else target_clock
+
+
+def _source1_frame_table(
+    ctx: Context,
+    target_video: Path,
+    target_clock: FrameClock | None,
+    runner: CommandRunner,
+) -> FrameTable | None:
+    """Source 1's real frame timestamps, read once per job and cached on ctx.
+
+    The first read also checks the timeline (holes, first frame not at 0) and,
+    for progressive targets, whether the CFR formula agreed with reality —
+    findings are logged and kept for the final frame-alignment audit.
+    """
+    key = str(target_video)
+    if key in ctx.frame_tables:
+        return ctx.frame_tables[key]
+
+    from vsg_core.subtitles.frame_utils.frame_table import (
+        FrameGridNote,
+        build_frame_table,
+        check_timeline,
+    )
+
+    log = runner._log_message
+    log("[FrameGrid] Reading Source 1 frame timestamps (ffms2 index)...")
+    table = build_frame_table(str(target_video), ctx.temp_dir, log)
+    ctx.frame_tables[key] = table
+    if table is None:
+        fallback = target_clock.label if target_clock else "plain rounding"
+        log(f"[FrameGrid] Falling back to {fallback}")
+        return None
+    log(f"[FrameGrid] Source 1: {table.label}")
+
+    notes: list[FrameGridNote] = []
+    timeline = check_timeline(table)
+    if timeline.first_frame_ms > 0:
+        notes.append(
+            FrameGridNote(
+                "info",
+                f"Source 1 first video frame is at {timeline.first_frame_ms:.0f} ms "
+                f"(not 0) - real timestamps account for it",
+            )
+        )
+    for gap in timeline.gaps:
+        notes.append(
+            FrameGridNote(
+                "warning",
+                f"Source 1 video timeline jumps {gap.jump_ms:.0f} ms at "
+                f"{_format_clock(gap.before_ms)} (frame {gap.frame}; regular frame "
+                f"period <= {timeline.regular_max_ms:.0f} ms) - a hole in the stream; "
+                f"check subtitles around it",
+            )
+        )
+    if target_clock is not None:
+        notes.extend(_compare_formula(table, target_clock))
+    else:
+        notes.append(
+            FrameGridNote(
+                "info",
+                "Source 1 has no CFR frame formula (MPEG-2/interlaced/VFR); "
+                "single-source job - rounding uses its real frame timestamps",
+            )
+        )
+
+    for note in notes:
+        prefix = "⚠ " if note.severity == "warning" else ""
+        log(f"[FrameGrid] {prefix}{note.message}")
+    ctx.frame_grid_notes.extend(notes)
+    return table
+
+
+def _compare_formula(table: FrameTable, clock: FrameClock) -> list[FrameGridNote]:
+    """Compare the CFR formula with the real timestamps it used to stand in for."""
+    from vsg_core.subtitles.frame_utils.frame_table import FrameGridNote
+
+    mismatches = [
+        n
+        for n, real in enumerate(table.times_ms)
+        if abs(real - clock.frame_ms(n)) >= 0.5
+    ]
+    if not mismatches:
+        return [
+            FrameGridNote(
+                "info",
+                f"{clock.label} matches the real timestamps on all "
+                f"{table.num_frames} frames - output identical to formula rounding",
+            )
+        ]
+    first = mismatches[0]
+    return [
+        FrameGridNote(
+            "warning",
+            f"{clock.label} disagrees with the real timestamps on "
+            f"{len(mismatches)} of {table.num_frames} frames (first: frame {first} "
+            f"real {table.times_ms[first]:.0f} ms vs formula {clock.frame_ms(first)} "
+            f"ms) - real timestamps used for rounding",
+        )
+    ]
+
+
+def _format_clock(ms: float) -> str:
+    """H:MM:SS.mmm for log lines."""
+    total = int(ms)
+    h, rem = divmod(total, 3_600_000)
+    m, rem = divmod(rem, 60_000)
+    s, msec = divmod(rem, 1000)
+    return f"{h}:{m:02d}:{s:02d}.{msec:03d}"
 
 
 def _build_track_label(item) -> str:

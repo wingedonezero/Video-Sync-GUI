@@ -68,6 +68,11 @@ class FrameClock:
         """Nominal frame period — for logging/reporting only, never grid math."""
         return 1000.0 * self.den / self.num
 
+    @property
+    def label(self) -> str:
+        """Short description for logs and reports (see ``FrameGrid``)."""
+        return f"{self.num}/{self.den} CFR formula"
+
 
 @dataclass(frozen=True, slots=True)
 class FrameShift:

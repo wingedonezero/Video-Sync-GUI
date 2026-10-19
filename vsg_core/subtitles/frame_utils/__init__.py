@@ -9,6 +9,7 @@ This package has been modularized for better maintainability:
 - frame_hashing.py: Perceptual hash and frame comparison functions
 - frame_audit.py: Frame alignment audit (centisecond rounding drift)
 - surgical_rounding.py: Surgical frame-aware rounding (floor→ceil when needed)
+- frame_table.py: Real frame grid from the video's own timestamps (FrameTable)
 - visual_verify.py: Visual frame verification (SSIM-based)
 
 All public functions and classes are re-exported here for backwards compatibility.
@@ -45,6 +46,15 @@ from .frame_hashing import (
     compute_mse,
     compute_perceptual_hash,
     compute_ssim,
+)
+from .frame_table import (
+    FrameGrid,
+    FrameGridNote,
+    FrameTable,
+    TimelineCheck,
+    TimelineGap,
+    build_frame_table,
+    check_timeline,
 )
 
 # ============================================================================
@@ -114,15 +124,22 @@ __all__ = [
     "FrameAuditIssue",
     "FrameAuditResult",
     "FrameClock",
+    "FrameGrid",
+    "FrameGridNote",
     "FrameShift",
+    "FrameTable",
     "MultiMetricResult",
     "RegionStats",
     "SampleResult",
     "SurgicalBatchStats",
     "SurgicalEventResult",
     "SurgicalRoundResult",
+    "TimelineCheck",
+    "TimelineGap",
     "VideoReader",
     "VisualVerifyResult",
+    "build_frame_table",
+    "check_timeline",
     "clear_vfr_cache",
     "compare_frames",
     "compare_frames_multi",

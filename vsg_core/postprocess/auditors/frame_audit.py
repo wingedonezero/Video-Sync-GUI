@@ -25,11 +25,18 @@ class FrameAuditAuditor(BaseAuditor):
         """
         Check stored frame audit results for issues.
 
-        Returns the number of tracks with frame drift issues.
+        Returns the number of tracks with frame drift issues, plus Source 1
+        frame-timeline warnings (holes in the stream, formula disagreement).
         """
+        for note in self.ctx.frame_grid_notes:
+            if note.severity == "warning":
+                self._report(f"Source 1 frame grid: {note.message}")
+            else:
+                self.log(f"[INFO] Source 1 frame grid: {note.message}")
+
         if not self.ctx.frame_audit_results:
             self.log("[INFO] No frame audit results available - skipping")
-            return 0
+            return len(self.issues)
 
         for track_key, result in self.ctx.frame_audit_results.items():
             start_issues = result.start_early + result.start_late

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
     from vsg_core.reporting import DebugOutputPaths
     from vsg_core.subtitles.frame_utils.frame_audit import FrameAuditResult
+    from vsg_core.subtitles.frame_utils.frame_table import FrameGridNote, FrameTable
     from vsg_core.subtitles.operations.bitmap_audit import BitmapAuditResult
     from vsg_core.subtitles.operations.duration_audit import (
         SubtitleDurationAuditResult,
@@ -136,6 +137,16 @@ class Context:
     # Frame audit results from video-verified sync (for final auditor)
     # Format: {"Source2_t3": FrameAuditResult, ...}
     frame_audit_results: dict[str, FrameAuditResult] = field(default_factory=dict)
+
+    # Real frame timestamps of the subtitle target video (Source 1), read once
+    # per job from the ffms2 index and shared by every text-subtitle track for
+    # save-time rounding and the frame audit. None = tried and unavailable.
+    # Format: {"/path/to/source1.mkv": FrameTable | None}
+    frame_tables: dict[str, FrameTable | None] = field(default_factory=dict)
+
+    # Findings about Source 1's frame timeline (holes, start offset, formula
+    # disagreement), surfaced by the frame-alignment auditor.
+    frame_grid_notes: list[FrameGridNote] = field(default_factory=list)
 
     # Bitmap subtitle (PGS/VobSub) timing audit results from the in-app
     # shifter. Populated by the PGS/VobSub branches of SubtitlesStep.
