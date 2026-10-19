@@ -39,7 +39,6 @@ from __future__ import annotations
 import re
 import struct
 from dataclasses import dataclass, field
-from fractions import Fraction
 from typing import TYPE_CHECKING
 
 from .bitmap_audit import (
@@ -52,7 +51,7 @@ from .bitmap_audit import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
+    from .bitmap_audit import FrameMapping
 
 # Fallback end-time bounds (only used when SPU has no stop-display).
 # Matches the OCR parser's defaults so audit numbers line up with what
@@ -315,7 +314,7 @@ def apply_constant_shift(
     sub_data: bytes | None,
     delay_ms: float,
     *,
-    target_clock: FrameClock | None = None,
+    frame_mapping: FrameMapping | None = None,
     frame_alignment_audit: bool = False,
     drop_negative: bool = True,
     log: Callable[[str], None] | None = None,
@@ -341,11 +340,10 @@ def apply_constant_shift(
     delay_ms
         Requested shift in milliseconds (float accepted; rounded to int
         ms to match mkvmerge precision and ``.idx`` text format).
-    target_clock
-        Exact CFR frame grid of the target video. Required together with
-        ``frame_alignment_audit=True`` for the Tier 2 audit. VFR /
-        MPEG-2 targets have no exact grid — pass ``None`` and Tier 2
-        is skipped.
+    frame_mapping
+        Source-to-Source-1 frame mapping on real frame timelines. Required
+        together with ``frame_alignment_audit=True`` for the Tier 2 audit.
+        Without a Source 1 grid pass ``None`` and Tier 2 is skipped.
     frame_alignment_audit
         Enable Tier 2 frame-alignment reporting (read-only).
     drop_negative
@@ -399,15 +397,12 @@ def apply_constant_shift(
     tier2: Tier2FrameAlignmentResult | None = None
     end_times: dict[int, int] = {}
     end_sources: dict[int, str] = {}
-    do_frame_audit = bool(frame_alignment_audit and target_clock is not None)
+    do_frame_audit = bool(frame_alignment_audit and frame_mapping is not None)
     if do_frame_audit:
         end_times, end_sources = infer_end_times(entries, sub_data)
-        assert target_clock is not None  # checked by do_frame_audit
-        # Exact expected whole-frame shift for the applied integer-ms delay:
-        # round-half-up of applied_ms * fps in pure integer arithmetic.
-        frame_shift = round(
-            Fraction(applied_ms * target_clock.num, 1000 * target_clock.den)
-        )
+        assert frame_mapping is not None  # checked by do_frame_audit
+        frame_shift = frame_mapping.nominal_shift(applied_ms)
+        tgt_grid = frame_mapping.target
 
         endpoint_audits: list[EndpointAudit] = []
         starts_total = 0
@@ -422,14 +417,14 @@ def apply_constant_shift(
                 continue
             # Start endpoint
             shifted_start_ms = ent.timestamp_ms + applied_ms
-            f_src = frame_of(float(ent.timestamp_ms), target_clock)
-            f_target = f_src + frame_shift
-            f_actual = frame_of(float(shifted_start_ms), target_clock)
+            f_src = frame_mapping.source_frame(float(ent.timestamp_ms))
+            f_target = frame_mapping.expected_target_frame(f_src, applied_ms)
+            f_actual = frame_of(float(shifted_start_ms), tgt_grid)
             on_target = f_actual == f_target
             would_corr = 0
             if not on_target:
                 new_int_ms = pick_integer_ms_in_frame(
-                    float(shifted_start_ms), f_target, target_clock
+                    float(shifted_start_ms), f_target, tgt_grid
                 )
                 if new_int_ms is not None:
                     would_corr = new_int_ms - shifted_start_ms
@@ -457,14 +452,14 @@ def apply_constant_shift(
             if src_end_ms is None:
                 continue
             shifted_end_ms = src_end_ms + applied_ms
-            f_src_e = frame_of(float(src_end_ms), target_clock)
-            f_target_e = f_src_e + frame_shift
-            f_actual_e = frame_of(float(shifted_end_ms), target_clock)
+            f_src_e = frame_mapping.source_frame(float(src_end_ms))
+            f_target_e = frame_mapping.expected_target_frame(f_src_e, applied_ms)
+            f_actual_e = frame_of(float(shifted_end_ms), tgt_grid)
             on_target_e = f_actual_e == f_target_e
             would_corr_e = 0
             if not on_target_e:
                 new_int_ms_e = pick_integer_ms_in_frame(
-                    float(shifted_end_ms), f_target_e, target_clock
+                    float(shifted_end_ms), f_target_e, tgt_grid
                 )
                 if new_int_ms_e is not None:
                     would_corr_e = new_int_ms_e - shifted_end_ms
@@ -488,9 +483,10 @@ def apply_constant_shift(
                 max_end_drift_ms = max(max_end_drift_ms, abs(would_corr_e))
 
         tier2 = Tier2FrameAlignmentResult(
-            target_fps=target_clock.num / target_clock.den,
-            frame_period_ms=target_clock.frame_duration_ms,
+            target_fps=1000.0 / tgt_grid.frame_duration_ms,
+            frame_period_ms=tgt_grid.frame_duration_ms,
             frame_shift=frame_shift,
+            grid_label=tgt_grid.label,
             starts_total=starts_total,
             starts_on_target=starts_on_target,
             ends_total=ends_total,

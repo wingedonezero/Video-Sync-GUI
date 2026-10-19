@@ -11,14 +11,15 @@ Tier model:
 * **Tier 1 (always)** — sanity checks that apply regardless of where
   the delay came from: dropped events, zero/negative/excessive
   durations, monotonicity, video-duration overflow.
-* **Tier 2 (when an exact frame grid is known)** — frame-alignment check
+* **Tier 2 (when Source 1 has a frame grid)** — frame-alignment check
   using the same model as text-sub ``frame_audit``: for each event
-  endpoint, compute the source frame ``F_src = clock.frame_of(source_pts)``
-  on the exact integer container grid (:class:`FrameClock`), the expected
-  output frame ``F_target = F_src + frame_shift``, and the actual output
-  frame ``F_actual = clock.frame_of(shifted_pts)``. An event is "correct"
-  iff ``F_actual == F_target``. VFR / MPEG-2 / interlaced targets have no
-  such grid — callers pass no clock and Tier 2 is skipped.
+  endpoint, find its source frame ``F_src`` on the real frame timeline of
+  the video the bitmaps were timed on, the expected output frame
+  ``F_target`` on Source 1 (``F_src + R`` for a verified frame match, else
+  the Source 1 frame nearest to the source frame's time plus the delay),
+  and the actual output frame ``F_actual`` the shifted time renders on. An
+  event is "correct" iff ``F_actual == F_target``. Without a Source 1 grid
+  (multi-source jobs onto MPEG-2 / interlaced / VFR) Tier 2 is skipped.
 
 **Audit-only model** — the shifter applies only the uniform shift
 (matches mkvmerge ``--sync`` byte-for-byte). When ``F_actual`` does
@@ -32,11 +33,13 @@ would have produced.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
+    from vsg_core.subtitles.frame_utils.frame_table import FrameGrid
 
 # Per-event sanity bounds (ms). Bitmap subs longer than 60 s or shorter
 # than 100 ms are suspicious but legal; we flag them rather than
@@ -130,7 +133,7 @@ class Tier2FrameAlignmentResult:
 
     target_fps: float
     frame_period_ms: float
-    frame_shift: int  # round(delay_ms / period); the intended frame translation
+    frame_shift: int  # intended frame translation (matched offset, or delay in frames)
     starts_total: int
     starts_on_target: int  # F_actual == F_target
     ends_total: int  # closed events only
@@ -140,6 +143,7 @@ class Tier2FrameAlignmentResult:
     max_start_drift_ms: int  # largest minimum nudge that would re-align a start
     max_end_drift_ms: int
     endpoints: tuple[EndpointAudit, ...] = field(default_factory=tuple)
+    grid_label: str = ""  # Source 1 frame grid the audit was judged on
 
     @property
     def all_starts_on_target(self) -> bool:
@@ -222,21 +226,51 @@ def tier1_sanity(
 # ----------------------------------------------------------------------
 
 
-def frame_of(ts_ms: float, clock: FrameClock) -> int:
+@dataclass(frozen=True, slots=True)
+class FrameMapping:
+    """How a bitmap track's frames map onto Source 1's frames (Tier 2).
+
+    With a frame match verified on both real timelines (``frame_offset`` R),
+    an endpoint's frame is read on the timeline of the video the bitmaps were
+    timed on (``source``) and is expected on Source 1 frame k+R. Otherwise the
+    endpoint's time is placed on Source 1's real frames (``target``) and is
+    expected to move by the delay in whole frames — computed with the exact
+    frame-rate fraction when known (``fps``), so near-half-frame delays are
+    judged exactly, never on millisecond-rounded times.
+    """
+
+    source: FrameGrid
+    target: FrameGrid
+    frame_offset: int | None = None
+    fps: Fraction | None = None  # exact target rate (e.g. 24000/1001) if known
+
+    def source_frame(self, source_ms: float) -> int:
+        grid = self.source if self.frame_offset is not None else self.target
+        return grid.frame_of(source_ms)
+
+    def expected_target_frame(self, source_frame: int, applied_ms: int) -> int:
+        return source_frame + self.nominal_shift(applied_ms)
+
+    def nominal_shift(self, applied_ms: int) -> int:
+        """The intended whole-frame translation: matched offset, or delay in frames."""
+        if self.frame_offset is not None:
+            return self.frame_offset
+        if self.fps is not None:
+            return round(Fraction(applied_ms) * self.fps / 1000)
+        return round(applied_ms / self.target.frame_duration_ms)
+
+
+def frame_of(ts_ms: float, clock: FrameGrid) -> int:
     """Return the video frame ``ts_ms`` renders against.
 
-    Delegates to :meth:`FrameClock.frame_of` — the exact integer container
-    grid, "first real frame at or after the timestamp" (player display
-    semantics). The previous float-grid form (``floor(ts / (1000/fps))``)
-    was 1ms wrong at ~4% of NTSC frames, the exact defect FrameClock was
-    built to eliminate.
+    "First real frame at or after the timestamp" (player display semantics),
+    judged on the grid's real container times — never a float
+    ``floor(ts / (1000/fps))`` model, which is 1 ms wrong at ~4% of NTSC frames.
     """
     return clock.frame_of(ts_ms)
 
 
-def integer_ms_window_for_frame(
-    target_frame: int, clock: FrameClock
-) -> tuple[int, int]:
+def integer_ms_window_for_frame(target_frame: int, clock: FrameGrid) -> tuple[int, int]:
     """Return ``(lo_ms, hi_ms)`` — the inclusive integer-ms range
     whose values all satisfy ``frame_of(ms, clock) == target_frame``.
 
@@ -244,13 +278,13 @@ def integer_ms_window_for_frame(
     ``(frame_ms(n-1), frame_ms(n)]``, so the integer window is
     ``[frame_ms(n-1) + 1, frame_ms(n)]``.
     """
-    hi = clock.frame_ms(target_frame)
-    lo = clock.frame_ms(target_frame - 1) + 1 if target_frame > 0 else 0
+    hi = math.floor(clock.frame_ms(target_frame))
+    lo = math.floor(clock.frame_ms(target_frame - 1)) + 1 if target_frame > 0 else 0
     return lo, hi
 
 
 def pick_integer_ms_in_frame(
-    desired_ms: float, target_frame: int, clock: FrameClock
+    desired_ms: float, target_frame: int, clock: FrameGrid
 ) -> int | None:
     """Pick the integer ms inside ``target_frame``'s window closest to ``desired_ms``.
 

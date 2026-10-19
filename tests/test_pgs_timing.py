@@ -15,6 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from vsg_core.subtitles.frame_utils.frame_clock import FrameClock  # noqa: E402
 from vsg_core.subtitles.operations.bitmap_audit import (  # noqa: E402
+    FrameMapping,
     frame_of,
     integer_ms_window_for_frame,
     pick_integer_ms_in_frame,
@@ -202,7 +203,10 @@ def test_apply_constant_shift_integer_frame_no_drift() -> None:
     event must land on F_src + 24."""
     data = FIXTURE.read_bytes()
     _, result = apply_constant_shift(
-        data, 1001.0, target_clock=CLOCK_NTSC_FILM, frame_alignment_audit=True
+        data,
+        1001.0,
+        frame_mapping=FrameMapping(source=CLOCK_NTSC_FILM, target=CLOCK_NTSC_FILM),
+        frame_alignment_audit=True,
     )
     assert result.tier2 is not None
     t2 = result.tier2
@@ -222,17 +226,20 @@ def test_apply_constant_shift_audit_does_not_change_output() -> None:
     data = FIXTURE.read_bytes()
     out_uniform, _ = apply_constant_shift(data, 1001.0, frame_alignment_audit=False)
     out_audited, _ = apply_constant_shift(
-        data, 1001.0, target_clock=CLOCK_NTSC_FILM, frame_alignment_audit=True
+        data,
+        1001.0,
+        frame_mapping=FrameMapping(source=CLOCK_NTSC_FILM, target=CLOCK_NTSC_FILM),
+        frame_alignment_audit=True,
     )
     assert out_uniform == out_audited
 
 
 def test_apply_constant_shift_audit_with_no_fps_skipped() -> None:
-    """frame_alignment_audit=True but target_clock=None → no Tier 2."""
+    """frame_alignment_audit=True but frame_mapping=None → no Tier 2."""
     data = FIXTURE.read_bytes()
     out_uniform, _ = apply_constant_shift(data, 1001.0)
     out_skipped, res_skipped = apply_constant_shift(
-        data, 1001.0, target_clock=None, frame_alignment_audit=True
+        data, 1001.0, frame_mapping=None, frame_alignment_audit=True
     )
     assert out_uniform == out_skipped
     assert res_skipped.tier2 is None
@@ -243,7 +250,10 @@ def test_audit_only_byte_count_and_segment_order_preserved() -> None:
     data = FIXTURE.read_bytes()
     src_segs, _ = walk_segments(data)
     out, _ = apply_constant_shift(
-        data, 1003.0, target_clock=CLOCK_NTSC_FILM, frame_alignment_audit=True
+        data,
+        1003.0,
+        frame_mapping=FrameMapping(source=CLOCK_NTSC_FILM, target=CLOCK_NTSC_FILM),
+        frame_alignment_audit=True,
     )
     out_segs, _ = walk_segments(out)
     assert len(out_segs) == len(src_segs)
@@ -255,7 +265,10 @@ def test_endpoint_audit_records_emitted() -> None:
     (start + end)."""
     data = FIXTURE.read_bytes()
     _, result = apply_constant_shift(
-        data, 1001.0, target_clock=CLOCK_NTSC_FILM, frame_alignment_audit=True
+        data,
+        1001.0,
+        frame_mapping=FrameMapping(source=CLOCK_NTSC_FILM, target=CLOCK_NTSC_FILM),
+        frame_alignment_audit=True,
     )
     assert result.tier2 is not None
     eps = result.tier2.endpoints

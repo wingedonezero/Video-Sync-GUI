@@ -32,7 +32,7 @@ from .frame_audit import (
 # ============================================================================
 # Exact frame grid
 # ============================================================================
-from .frame_clock import FrameClock, FrameShift
+from .frame_clock import FrameClock
 
 # ============================================================================
 # Frame hashing and comparison
@@ -50,6 +50,7 @@ from .frame_hashing import (
 from .frame_table import (
     FrameGrid,
     FrameGridNote,
+    FrameShift,
     FrameTable,
     TimelineCheck,
     TimelineGap,

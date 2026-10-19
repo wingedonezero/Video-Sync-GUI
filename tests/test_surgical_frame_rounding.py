@@ -13,13 +13,18 @@ Values used below were measured straight from the test MKV
 """
 
 from vsg_core.subtitles.frame_utils.frame_audit import _find_minimal_fix
-from vsg_core.subtitles.frame_utils.frame_clock import FrameClock, FrameShift
+from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
+from vsg_core.subtitles.frame_utils.frame_table import FrameShift, FrameTable
 from vsg_core.subtitles.frame_utils.surgical_rounding import (
     surgical_round_event,
     surgical_round_single,
 )
 
 CLOCK = FrameClock(24000, 1001)  # 23.976
+# The same grid as real container timestamps (what a clean BD remux stores).
+TABLE = FrameTable.from_timestamps(
+    [float(CLOCK.frame_ms(n)) for n in range(40000)], origin="formula grid"
+)
 
 
 # --- the exact grid matches the real container grid -------------------------
@@ -131,7 +136,7 @@ def test_is_on_frame_classifies_pgs_vs_mid_frame():
 def test_frame_shift_snaps_on_frame_value_exactly():
     # A frame-exact PGS start (frame 1828) shifted +10 whole frames lands exactly
     # on real frame 1838 — no float slop, no tolerance needed.
-    shift = FrameShift(CLOCK, 10)
+    shift = FrameShift(source=TABLE, target=TABLE, frames=10)
     out = shift.shifted_ms(76243.0, flat_delay_ms=10 * CLOCK.frame_duration_ms)
     assert out == CLOCK.frame_ms(1838) == 76660
     # and it rounds (floors) cleanly onto 1838
@@ -142,7 +147,7 @@ def test_frame_shift_snaps_on_frame_value_exactly():
 
 def test_frame_shift_leaves_mid_frame_value_flat():
     # Mid-frame values are not snapped; they take the flat delay.
-    shift = FrameShift(CLOCK, 4)
+    shift = FrameShift(source=TABLE, target=TABLE, frames=4)
     flat = 4 * CLOCK.frame_duration_ms
     out = shift.shifted_ms(76263.0, flat_delay_ms=flat)
     assert out == 76263.0 + flat
@@ -151,7 +156,7 @@ def test_frame_shift_leaves_mid_frame_value_flat():
 def test_frame_shift_preserves_frame_span_across_shift():
     # Both endpoints of an event move by the same whole-frame count, so the
     # frame span is preserved exactly (a 3-frame sub stays 3 frames).
-    shift = FrameShift(CLOCK, 4)
+    shift = FrameShift(source=TABLE, target=TABLE, frames=4)
     flat = 4 * CLOCK.frame_duration_ms
     start = 76243.0  # frame 1828
     end = float(CLOCK.frame_ms(1831))  # frame 1831

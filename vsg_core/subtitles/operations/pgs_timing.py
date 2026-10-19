@@ -42,11 +42,11 @@ PCS payload bytes used for event classification:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from fractions import Fraction
 from typing import TYPE_CHECKING
 
 from .bitmap_audit import (
     EndpointAudit,
+    FrameMapping,
     Tier2FrameAlignmentResult,
     frame_of,
     pick_integer_ms_in_frame,
@@ -54,8 +54,6 @@ from .bitmap_audit import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
 
 # Segment types
 SEG_PDS = 0x14
@@ -253,8 +251,7 @@ def _endpoint_audit(
     event_index: int,
     source_pts_ticks: int,
     applied_ms: int,
-    clock: FrameClock,
-    frame_shift: int,
+    mapping: FrameMapping,
 ) -> EndpointAudit:
     """Compute the read-only audit record for one event endpoint.
 
@@ -269,12 +266,14 @@ def _endpoint_audit(
     # shifted_ms is always integer-valued when source PTS is at a 90-tick
     # boundary (the common case for BD-authored PGS), but we store it as
     # float to be safe for sub-ms sources.
-    f_src = frame_of(source_ms, clock)
-    f_target = f_src + frame_shift
-    f_actual = frame_of(shifted_ms_float, clock)
+    f_src = mapping.source_frame(source_ms)
+    f_target = mapping.expected_target_frame(f_src, applied_ms)
+    f_actual = frame_of(shifted_ms_float, mapping.target)
     would_be_correction_ms = 0
     if f_actual != f_target:
-        new_int_ms = pick_integer_ms_in_frame(shifted_ms_float, f_target, clock)
+        new_int_ms = pick_integer_ms_in_frame(
+            shifted_ms_float, f_target, mapping.target
+        )
         if new_int_ms is not None:
             would_be_correction_ms = new_int_ms - int(round(shifted_ms_float))
     return EndpointAudit(
@@ -294,7 +293,7 @@ def apply_constant_shift(
     data: bytes | bytearray,
     delay_ms: float,
     *,
-    target_clock: FrameClock | None = None,
+    frame_mapping: FrameMapping | None = None,
     frame_alignment_audit: bool = False,
     drop_negative: bool = True,
     log: Callable[[str], None] | None = None,
@@ -315,16 +314,16 @@ def apply_constant_shift(
         Requested shift in milliseconds (float accepted; rounded to int
         ms to match mkvmerge's --sync precision and Matroska's default
         1 ms timestamp scale).
-    target_clock
-        Exact CFR frame grid of the target video. When set together with
-        ``frame_alignment_audit=True``, the shifter additionally
-        reports whether each event endpoint lands on its expected video
-        frame (``F_src + frame_shift``). Read-only diagnostic — no
-        bytes are rewritten based on this audit. VFR / MPEG-2 targets
-        have no exact grid — pass ``None`` and Tier 2 is skipped.
+    frame_mapping
+        Source-to-Source-1 frame mapping on real frame timelines. When set
+        together with ``frame_alignment_audit=True``, the shifter
+        additionally reports whether each event endpoint lands on its
+        expected Source 1 frame. Read-only diagnostic — no bytes are
+        rewritten based on this audit. Without a Source 1 grid pass
+        ``None`` and Tier 2 is skipped.
     frame_alignment_audit
         Enable Tier 2 frame-alignment reporting. Requires
-        ``target_clock`` to be set; otherwise has no effect.
+        ``frame_mapping`` to be set; otherwise has no effect.
     drop_negative
         When ``True`` (default), drop any display event whose start_pts
         would go below zero after the shift. ``False`` clamps to zero
@@ -368,7 +367,7 @@ def apply_constant_shift(
     latest_pts = max(s.pts_ticks for s in segments)
 
     # Events drive both the drop-negative policy and the read-only Tier 2.
-    do_frame_audit = bool(frame_alignment_audit and target_clock is not None)
+    do_frame_audit = bool(frame_alignment_audit and frame_mapping is not None)
     need_events = (delta_ticks < 0 and drop_negative) or do_frame_audit
     events = extract_events(segments, data) if need_events else []
 
@@ -392,12 +391,8 @@ def apply_constant_shift(
     # uniform shift below).
     tier2: Tier2FrameAlignmentResult | None = None
     if do_frame_audit:
-        assert target_clock is not None  # checked by do_frame_audit
-        # Exact expected whole-frame shift for the applied integer-ms delay:
-        # round-half-up of applied_ms * fps in pure integer arithmetic.
-        frame_shift = round(
-            Fraction(applied_ms * target_clock.num, 1000 * target_clock.den)
-        )
+        assert frame_mapping is not None  # checked by do_frame_audit
+        frame_shift = frame_mapping.nominal_shift(applied_ms)
         endpoint_audits: list[EndpointAudit] = []
         starts_total = 0
         starts_on_target = 0
@@ -413,8 +408,7 @@ def apply_constant_shift(
                 event_index=ev_idx,
                 source_pts_ticks=ev.start_pts_ticks,
                 applied_ms=applied_ms,
-                clock=target_clock,
-                frame_shift=frame_shift,
+                mapping=frame_mapping,
             )
             endpoint_audits.append(start_audit)
             starts_total += 1
@@ -431,8 +425,7 @@ def apply_constant_shift(
                     event_index=ev_idx,
                     source_pts_ticks=ev.end_pts_ticks,
                     applied_ms=applied_ms,
-                    clock=target_clock,
-                    frame_shift=frame_shift,
+                    mapping=frame_mapping,
                 )
                 endpoint_audits.append(end_audit)
                 ends_total += 1
@@ -444,9 +437,10 @@ def apply_constant_shift(
                     )
 
         tier2 = Tier2FrameAlignmentResult(
-            target_fps=target_clock.num / target_clock.den,
-            frame_period_ms=target_clock.frame_duration_ms,
+            target_fps=1000.0 / frame_mapping.target.frame_duration_ms,
+            frame_period_ms=frame_mapping.target.frame_duration_ms,
             frame_shift=frame_shift,
+            grid_label=frame_mapping.target.label,
             starts_total=starts_total,
             starts_on_target=starts_on_target,
             ends_total=ends_total,

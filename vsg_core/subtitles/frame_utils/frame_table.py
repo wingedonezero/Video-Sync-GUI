@@ -135,6 +135,35 @@ class FrameTable:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class FrameShift:
+    """An exact whole-frame move between two real frame timelines.
+
+    A subtitle time sitting exactly on source frame ``k`` (the video it was
+    timed on) moves to the real time of target frame ``k + frames`` (Source 1)
+    — landing dead on the frame showing the same picture, whatever either
+    file's start offset or millisecond rounding. Times not on a source frame
+    (mid-frame VobSub, native ASS) and frames past either end take the flat
+    millisecond delay, exactly as without a frame shift.
+
+    Built only by ``sync_utils.build_frame_shift`` after the offset has been
+    verified file-wide on both timelines.
+    """
+
+    source: FrameTable
+    target: FrameTable
+    frames: int
+
+    def shifted_ms(self, time_ms: float, flat_delay_ms: float) -> float:
+        """Exact-snap ``time_ms`` when it is on a source frame, else the flat delay."""
+        k = self.source.frame_of(time_ms)
+        if k < self.source.num_frames and self.source.times_ms[k] == round(time_ms):
+            dest = k + self.frames
+            if 0 <= dest < self.target.num_frames:
+                return self.target.times_ms[dest]
+        return time_ms + flat_delay_ms
+
+
 # ── Timeline check (gaps / start offset) ─────────────────────────────────────
 
 

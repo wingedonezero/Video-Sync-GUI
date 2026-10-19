@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from vsg_core.subtitles import frame_grids as fg
 from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
-from vsg_core.subtitles.frame_utils import frame_table as ft
 from vsg_core.subtitles.frame_utils.frame_audit import (
     run_frame_audit,
     write_audit_report,
@@ -36,10 +36,8 @@ from vsg_core.subtitles.frame_utils.surgical_rounding import (
     surgical_round_event,
     surgical_round_single,
 )
-from vsg_core.subtitles.sync_dispatcher import _resolve_frame_grid
 
 if TYPE_CHECKING:
-    from vsg_core.io.runner import CommandRunner
     from vsg_core.orchestrator.steps.context import Context
     from vsg_core.subtitles.frame_utils.frame_table import FrameGrid
 
@@ -223,9 +221,9 @@ class _Runner:
 def _resolve(
     ctx: SimpleNamespace, target: str, clock: FrameClock | None, runner: _Runner
 ) -> FrameGrid | None:
-    # Minimal stand-ins: the gate only touches sources/frame_tables/notes/temp_dir.
-    return _resolve_frame_grid(
-        cast("Context", ctx), Path(target), clock, cast("CommandRunner", runner)
+    # Minimal stand-in: the gate only touches sources/frame_tables/notes/temp_dir.
+    return fg.resolve_target_grid(
+        cast("Context", ctx), Path(target), clock, runner._log_message
     )
 
 
@@ -234,6 +232,7 @@ def _ctx(n_sources: int) -> SimpleNamespace:
         sources={f"Source {i + 1}": f"/s{i + 1}.mkv" for i in range(n_sources)},
         frame_tables={},
         frame_grid_notes=[],
+        frame_grid_checked=set(),
         temp_dir=None,
     )
 
@@ -247,7 +246,7 @@ def fake_build(monkeypatch: pytest.MonkeyPatch):
         calls.append(path)
         return result["table"]
 
-    monkeypatch.setattr(ft, "build_frame_table", build)
+    monkeypatch.setattr(fg, "build_frame_table", build)
     return SimpleNamespace(calls=calls, result=result)
 
 

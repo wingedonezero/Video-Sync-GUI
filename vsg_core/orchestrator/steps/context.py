@@ -147,6 +147,8 @@ class Context:
     # Findings about Source 1's frame timeline (holes, start offset, formula
     # disagreement), surfaced by the frame-alignment auditor.
     frame_grid_notes: list[FrameGridNote] = field(default_factory=list)
+    # Videos whose timeline has been checked (notes recorded once per job).
+    frame_grid_checked: set[str] = field(default_factory=set)
 
     # Bitmap subtitle (PGS/VobSub) timing audit results from the in-app
     # shifter. Populated by the PGS/VobSub branches of SubtitlesStep.
