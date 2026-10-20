@@ -236,7 +236,7 @@ class BaseAuditor:
         # delay is in the FLAC samples, not in mkvmerge --sync.  mkvmerge only
         # applies Source 1's audio-container delay (stashed in
         # container_delay_ms by _swap_corrected_track).  Mirror
-        # options_builder and audio_trim so the audit matches reality.
+        # options_builder so the audit matches reality.
         if plan_item.is_pre_aligned:
             return float(plan_item.container_delay_ms + global_shift)
 

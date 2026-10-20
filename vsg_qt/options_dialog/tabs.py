@@ -2260,12 +2260,15 @@ class MergeBehaviorTab(QWidget):
             "Prevents mkvmerge from using header removal compression.\nThis is enabled by default as it can sometimes cause issues."
         )
         self.widgets["trim_audio_to_video_duration"] = QCheckBox(
-            "Trim audio tracks that extend past video end"
+            "Stop all tracks when the video ends"
         )
         self.widgets["trim_audio_to_video_duration"].setToolTip(
-            "When audio is longer than video (e.g. streaming OP/ED not on disc),\n"
-            "trim it to match the video duration before muxing.\n"
-            "Uses lossless stream copy — no re-encoding."
+            "Passes mkvmerge's --stop-after-video-ends: muxing stops when the\n"
+            "Source 1 video track ends, and whatever is left of every other\n"
+            "track is dropped (e.g. a streaming OP/ED that is not on the disc).\n"
+            "Applies to ALL audio tracks, including Source 1's, and drops subtitle\n"
+            "lines that start after the cut. Audio ends up to about one video\n"
+            "frame before the video does. No re-encoding."
         )
         form1.addWidget(self.widgets["apply_dialog_norm_gain"])
         form1.addWidget(self.widgets["disable_track_statistics_tags"])

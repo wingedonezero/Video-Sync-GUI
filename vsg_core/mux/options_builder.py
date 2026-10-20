@@ -21,6 +21,10 @@ class MkvmergeOptionsBuilder:
             tokens += ["--chapters", str(plan.chapters_xml)]
         if settings.disable_track_statistics_tags:
             tokens += ["--disable-track-statistics-tags"]
+        if settings.trim_audio_to_video_duration:
+            # Global: mkvmerge stops once the primary (Source 1) video track has
+            # no packets left and discards the rest of EVERY other track.
+            tokens += ["--stop-after-video-ends"]
 
         # Separate final tracks from preserved original tracks
         final_items = [item for item in plan.items if not item.is_preserved]

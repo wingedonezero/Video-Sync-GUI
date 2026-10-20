@@ -2,9 +2,10 @@
 """
 Checks whether audio streams in the final MKV extend past the video track.
 
-Two modes depending on the trim setting:
-- Trim enabled:  reports which tracks were trimmed (informational).
-- Trim disabled: warns if any audio overshoots by more than the threshold.
+Two modes depending on the "stop all tracks when the video ends" setting
+(mkvmerge --stop-after-video-ends):
+- Enabled:  any audio still past the video end is unexpected and reported.
+- Disabled: warns if any audio overshoots by more than the threshold.
 """
 
 from __future__ import annotations
@@ -88,7 +89,7 @@ class AudioDurationAuditor(BaseAuditor):
                     # unexpected; report as warning.
                     self._report(
                         f"{track_label} still extends {overhang_s:.1f}s past "
-                        f"video despite trimming being enabled"
+                        f"video despite --stop-after-video-ends"
                     )
                 elif overhang_s > 0.0:
                     # Any positive overhang when trim is on means the trim was
@@ -112,7 +113,7 @@ class AudioDurationAuditor(BaseAuditor):
                 self._report(
                     f"{track_label} extends {overhang_s:.1f}s past "
                     f"the video end ({audio_end:.1f}s vs {video_end:.1f}s). "
-                    f"Enable 'Trim audio to video duration' to fix this."
+                    f"Enable 'Stop all tracks when the video ends' to fix this."
                 )
             else:
                 self.log(
