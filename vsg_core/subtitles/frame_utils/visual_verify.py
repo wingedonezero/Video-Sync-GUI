@@ -9,7 +9,7 @@ frames correctly.
 
 Key design decisions:
 - Self-contained: opens videos with VapourSynth/FFMS2 directly, no
-  dependency on VideoReader or video_verified.py internals.
+  dependency on video_verified.py internals.
 - Raw frames only: no deinterlacing, no IVTC. Compares what the
   user actually sees when playing interlaced content.
 - Global SSIM: works well for interlaced content. Distance thresholds:

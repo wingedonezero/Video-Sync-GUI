@@ -91,7 +91,12 @@ def source1_frame_table(
     ctx.frame_grid_checked.add(key)
     if table is None:
         fallback = target_clock.label if target_clock else "plain rounding"
-        log(f"[FrameGrid] Source 1 falls back to {fallback}")
+        add_grid_warning(
+            ctx,
+            f"Could not read Source 1's real frame times - rounding fell back to "
+            f"{fallback}",
+            log,
+        )
         return None
 
     notes: list[FrameGridNote] = []
@@ -129,6 +134,14 @@ def source1_frame_table(
         log(f"[FrameGrid] {prefix}{note.message}")
     ctx.frame_grid_notes.extend(notes)
     return table
+
+
+def add_grid_warning(ctx: Context, message: str, log: Log) -> None:
+    """Record a frame-grid fallback for the final audit (once per message)."""
+    if any(n.message == message for n in ctx.frame_grid_notes):
+        return
+    log(f"[FrameGrid] ⚠ {message}")
+    ctx.frame_grid_notes.append(FrameGridNote("warning", message))
 
 
 def matched_frame_offset(

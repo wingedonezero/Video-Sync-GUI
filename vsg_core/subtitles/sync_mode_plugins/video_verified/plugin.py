@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from ....models.settings import AppSettings
     from ....orchestrator.steps.context import Context
     from ...data import OperationResult, SubtitleData
+    from ...frame_utils.frame_clock import FrameClock
     from ...frame_utils.frame_table import FrameGrid
 
 
@@ -63,6 +64,7 @@ class VideoVerifiedSync(SyncPlugin):
         runner=None,
         settings: AppSettings | None = None,
         temp_dir: Path | None = None,
+        frame_clock: FrameClock | None = None,
         frame_grid: FrameGrid | None = None,
         **kwargs,
     ) -> OperationResult:
@@ -87,6 +89,8 @@ class VideoVerifiedSync(SyncPlugin):
             runner: CommandRunner for logging
             settings: AppSettings with video-verified parameters
             temp_dir: Temp directory for index files
+            frame_clock: Source 1's CFR formula (reported backup for the frame
+                snap when real frame times are unreadable)
             frame_grid: Source 1's frame grid (frame audit, save rounding, and
                 the target of exact whole-frame shifts)
 
@@ -165,6 +169,7 @@ class VideoVerifiedSync(SyncPlugin):
             target_video=target_video,
             temp_dir=temp_dir,
             ctx=kwargs.get("ctx"),
+            frame_clock=frame_clock,
             frame_grid=frame_grid,
         )
 
@@ -185,11 +190,12 @@ class VideoVerifiedSync(SyncPlugin):
         target_video: str | None = None,
         temp_dir: Path | None = None,
         ctx: Context | None = None,
+        frame_clock: FrameClock | None = None,
         frame_grid: FrameGrid | None = None,
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
         from ...data import OperationRecord, OperationResult
-        from ...frame_grids import frame_table_for
+        from ...frame_grids import add_grid_warning, frame_table_for
         from ...sync_utils import apply_delay_to_events, build_frame_shift
 
         def log(msg: str):
@@ -210,9 +216,13 @@ class VideoVerifiedSync(SyncPlugin):
                 else None
             ),
             frame_grid,
+            frame_clock,
             details,
             global_shift_ms,
             log,
+            lambda msg: (
+                add_grid_warning(ctx, msg, log) if ctx is not None else log(msg)
+            ),
         )
         if frame_shift is not None:
             log(

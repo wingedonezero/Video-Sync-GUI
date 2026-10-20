@@ -94,8 +94,9 @@ sync-exclusion / report / favorites / font-manager dialogs.
 ### External binaries (invoked via `vsg_core/io` `CommandRunner`)
 
 `mkvmerge`, `mkvextract`, `ffmpeg`, `ffprobe`, and optionally the external
-`videodiff` tool. `VideoTimestamps` (frame/time precision) and VapourSynth are
-Python libraries, not subprocesses.
+`videodiff` tool. VapourSynth (with the ffms2 source filter, whose index also
+supplies each video's real frame timestamps) is a Python library, not a
+subprocess.
 
 ## Environment gotchas
 

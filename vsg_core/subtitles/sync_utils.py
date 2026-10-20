@@ -13,15 +13,18 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from .data import SubtitleData
+    from .frame_utils.frame_clock import FrameClock
     from .frame_utils.frame_table import FrameGrid, FrameShift, FrameTable
 
 
 def build_frame_shift(
     load_source: Callable[[], FrameTable | None],
     target: FrameGrid | None,
+    target_clock: FrameClock | None,
     details: Mapping[str, Any],  # Any: sliding-matcher details dict (JSON-like)
     global_shift_ms: float,
     log: Callable[[str], None],
+    warn: Callable[[str], None],
     *,
     fallback: bool = False,
 ) -> FrameShift | None:
@@ -37,6 +40,12 @@ def build_frame_shift(
     millisecond delay exactly as before. Shared by the cached dispatcher path
     and the inline plugin path. ``load_source`` reads the source video's frame
     timestamps; it is only called once the cheap gates pass.
+
+    If real frame times cannot be read at all, the old CFR-formula snap (with
+    its old rules) is the backup — that should never happen for progressive
+    sources, so it is reported through ``warn`` (final audit warning). When
+    real times DO show the offset is wrong (holes, rate mismatch), there is no
+    fallback: the flat delay is the correct answer there.
     """
     from .frame_grids import matched_frame_offset
     from .frame_utils.frame_table import FrameShift, FrameTable
@@ -46,16 +55,42 @@ def build_frame_shift(
     if global_shift_ms != 0.0:
         return None
     if not isinstance(target, FrameTable):
-        log("[Sync]   No exact frame snap: no real frame timestamps for Source 1")
-        return None
+        return _formula_frame_shift(
+            target_clock, details, log, warn, "Source 1's real frame times unreadable"
+        )
     source = load_source()
     if source is None:
-        log("[Sync]   No exact frame snap: no real frame timestamps for the source")
-        return None
+        return _formula_frame_shift(
+            target_clock, details, log, warn, "the source's real frame times unreadable"
+        )
     frames = matched_frame_offset(source, target, details, log)
     if frames is None:
         return None
     return FrameShift(source=source, target=target, frames=frames)
+
+
+def _formula_frame_shift(
+    clock: FrameClock | None,
+    details: Mapping[str, Any],  # Any: sliding-matcher details dict (JSON-like)
+    log: Callable[[str], None],
+    warn: Callable[[str], None],
+    why: str,
+) -> FrameShift | None:
+    """The pre-real-timestamp snap: Source 1's CFR formula, shared PTS origin only."""
+    from .frame_utils.frame_table import FrameShift
+
+    frames = details.get("frame_offset")
+    if clock is None or not isinstance(frames, int):
+        log(f"[Sync]   No exact frame snap: {why}")
+        return None
+    if details.get("pts_delta_frames", 0) != 0:
+        log(f"[Sync]   No exact frame snap: {why}; files start at different times")
+        return None
+    warn(
+        f"Exact frame snap fell back to the {clock.label} ({why}) - "
+        f"check frame-locked subtitles"
+    )
+    return FrameShift(source=clock, target=clock, frames=frames)
 
 
 def apply_delay_to_events(

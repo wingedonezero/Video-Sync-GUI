@@ -287,5 +287,8 @@ def test_formula_disagreement_is_a_warning(fake_build):
 def test_unreadable_timestamps_fall_back_to_old_behaviour(fake_build):
     fake_build.result["table"] = None
     clock = FrameClock(24000, 1001)
-    assert _resolve(_ctx(2), "/s1.mkv", clock, _Runner()) is clock
+    ctx = _ctx(2)
+    assert _resolve(ctx, "/s1.mkv", clock, _Runner()) is clock
+    [note] = ctx.frame_grid_notes  # never expected for progressive: final-audit warning
+    assert note.severity == "warning" and "fell back to 24000/1001" in note.message
     assert _resolve(_ctx(1), "/x.mkv", None, _Runner()) is None

@@ -45,14 +45,28 @@ def _no_log(_msg: str) -> None:
     pass
 
 
+def _build(
+    load,
+    target,
+    details,
+    global_shift_ms=0.0,
+    *,
+    clock=None,
+    log=_no_log,
+    warn=_no_log,
+    fallback=False,
+):
+    return build_frame_shift(
+        load, target, clock, details, global_shift_ms, log, warn, fallback=fallback
+    )
+
+
 # --- identical grids: same answer as the old formula snap ---------------------
 
 
 def test_identical_grids_snap_like_the_formula():
     table = _grid(FILM, 5000)
-    shift = build_frame_shift(
-        lambda: table, table, _details(24, 0, 24 * 1001 / 24), 0.0, _no_log
-    )
+    shift = _build(lambda: table, table, _details(24, 0, 24 * 1001 / 24))
     assert shift is not None and shift.frames == 24
     for k in (0, 100, 1828, 4000):
         on_frame = table.times_ms[k]
@@ -68,7 +82,7 @@ def test_start_offset_source_snaps_onto_the_real_target_frame():
     # Matcher: index offset +10 after removing the 2-frame PTS-origin difference;
     # wall-clock offset = (10 frames) - 83 ms rounded to whole frames = +8 frames.
     details = _details(10 - 2, 2, 8 * 1001 / 24)
-    shift = build_frame_shift(lambda: source, target, details, 0.0, _no_log)
+    shift = _build(lambda: source, target, details)
     assert shift is not None and shift.frames == 10
     flat = 8 * 1001 / 24
     for k in range(0, 2900, 37):
@@ -99,12 +113,10 @@ def test_gates_that_skip_the_source_read():
         return table
 
     d = _details(3, 0, 3 * 1001 / 24)
-    assert build_frame_shift(load, table, d, 0.0, _no_log, fallback=True) is None
-    assert build_frame_shift(load, table, d, 12.5, _no_log) is None  # global shift
-    assert build_frame_shift(load, FILM, d, 0.0, _no_log) is None  # no real Source 1
-    assert (
-        build_frame_shift(load, table, {"reason": "fallback-x"}, 0.0, _no_log) is None
-    )
+    assert _build(load, table, d, fallback=True) is None
+    assert _build(load, table, d, 12.5) is None  # global shift
+    assert _build(load, FILM, d) is None  # no real Source 1 and no formula backup
+    assert _build(load, table, {"reason": "fallback-x"}) is None
     assert reads == []  # the source video was never indexed for these
 
 
@@ -114,27 +126,32 @@ def test_hole_in_the_source_refuses_the_snap():
     source = FrameTable.from_timestamps(times, origin="test")
     target = _grid(FILM, 3100)
     lines: list[str] = []
-    shift = build_frame_shift(
-        lambda: source, target, _details(4, 0, 4 * 1001 / 24), 0.0, lines.append
+    warnings: list[str] = []
+    shift = _build(
+        lambda: source,
+        target,
+        _details(4, 0, 4 * 1001 / 24),
+        clock=FILM,
+        log=lines.append,
+        warn=warnings.append,
     )
     assert shift is None
     assert any("drift" in line for line in lines)
+    assert warnings == []  # proven wrong: plain delay, no formula fallback
 
 
 def test_rate_mismatch_refuses_the_snap():
     # 24/1 vs 24000/1001: the old fps gate (ratio 1.001 < 1.01) let this through.
     source = _grid(FrameClock(24, 1), 30000)
     target = _grid(FILM, 30000)
-    shift = build_frame_shift(lambda: source, target, _details(0, 0, 0.0), 0.0, _no_log)
+    shift = _build(lambda: source, target, _details(0, 0, 0.0))
     assert shift is None
 
 
 def test_offset_disagreeing_with_measured_wall_clock_is_refused():
     table = _grid(FILM, 2000)
     # Index offset says +3 frames (125 ms) but the matcher measured +1001 ms.
-    shift = build_frame_shift(
-        lambda: table, table, _details(3, 0, 1001.0), 0.0, _no_log
-    )
+    shift = _build(lambda: table, table, _details(3, 0, 1001.0))
     assert shift is None
 
 
@@ -185,3 +202,78 @@ def test_source1_notes_once_even_if_bitmap_step_read_it_first(monkeypatch):
     messages = [n.message for n in ctx.frame_grid_notes]
     assert sum("first video frame is at 83 ms" in m for m in messages) == 1
     assert sum("disagrees" in m for m in messages) == 1
+
+
+# --- frame times finer than whole milliseconds (MP4/M2TS, timestamp maps) -----
+
+
+def _exact_grid(n: int, start_ms: float = 0.0) -> FrameTable:
+    """Unrounded 23.976 frame times, as an MP4 (1/24000 timebase) stores them."""
+    return FrameTable.from_timestamps(
+        [start_ms + i * 1001 / 24 for i in range(n)], origin="test"
+    )
+
+
+def test_on_frame_rule_unchanged_for_whole_ms_frame_times():
+    from vsg_core.subtitles.frame_utils.frame_table import frame_at
+
+    table = _grid(FILM, 3000)
+    for t10 in range(0, 1_200_000, 37):  # 0.1 ms steps
+        t = t10 / 10
+        old = FILM.frame_of(t) if FILM.is_on_frame(t) else None
+        assert frame_at(table, t) == old
+
+
+def test_sub_ms_frame_times_still_snap():
+    source = _exact_grid(3000, start_ms=83.0)
+    target = _exact_grid(3000)
+    shift = _build(lambda: source, target, _details(10 - 2, 2, 8 * 1001 / 24))
+    assert shift is not None and shift.frames == 10
+    for k in range(5, 2900, 41):
+        exact = source.times_ms[k]
+        for stored in (float(int(exact)), float(round(exact))):  # floored or rounded
+            assert shift.shifted_ms(stored, 0.0) == target.times_ms[k + 10]
+    mid = source.times_ms[100] + 20.0
+    assert shift.shifted_ms(mid, 5.0) == mid + 5.0  # mid-frame: flat delay
+
+
+# --- formula backup when real times cannot be read (reported) ------------------
+
+
+def test_unreadable_source_falls_back_to_formula_and_warns():
+    target = _grid(FILM, 3000)
+    warnings: list[str] = []
+    shift = _build(
+        lambda: None,
+        target,
+        {**_details(24, 0, 1001.0), "frame_offset": 24},
+        clock=FILM,
+        warn=warnings.append,
+    )
+    assert shift is not None and shift.frames == 24
+    assert shift.shifted_ms(float(FILM.frame_ms(100)), 1001.0) == FILM.frame_ms(124)
+    assert len(warnings) == 1 and "fell back" in warnings[0]
+
+
+def test_unreadable_source1_falls_back_to_formula_and_warns():
+    warnings: list[str] = []
+    shift = _build(
+        lambda: None,
+        FILM,
+        {**_details(24, 0, 1001.0), "frame_offset": 24},
+        clock=FILM,
+        warn=warnings.append,
+    )
+    assert shift is not None and len(warnings) == 1
+
+
+def test_formula_backup_keeps_the_old_start_offset_rule():
+    warnings: list[str] = []
+    shift = _build(
+        lambda: None,
+        _grid(FILM, 300),
+        {**_details(8, 2, 333.0), "frame_offset": 8},
+        clock=FILM,
+        warn=warnings.append,
+    )
+    assert shift is None and warnings == []  # old code never snapped this either

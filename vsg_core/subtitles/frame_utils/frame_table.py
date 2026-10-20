@@ -21,6 +21,7 @@ frame audit need: "which frame is this time on" and "when does frame N start".
 from __future__ import annotations
 
 import bisect
+import math
 import statistics
 from collections import Counter
 from dataclasses import dataclass
@@ -137,31 +138,64 @@ class FrameTable:
 
 @dataclass(frozen=True, slots=True)
 class FrameShift:
-    """An exact whole-frame move between two real frame timelines.
+    """An exact whole-frame move from the source's frames to Source 1's.
 
     A subtitle time sitting exactly on source frame ``k`` (the video it was
-    timed on) moves to the real time of target frame ``k + frames`` (Source 1)
-    — landing dead on the frame showing the same picture, whatever either
-    file's start offset or millisecond rounding. Times not on a source frame
-    (mid-frame VobSub, native ASS) and frames past either end take the flat
-    millisecond delay, exactly as without a frame shift.
+    timed on) moves to the time of target frame ``k + frames`` (Source 1) —
+    landing dead on the frame showing the same picture, whatever either file's
+    start offset or millisecond rounding. Times not on a source frame
+    (mid-frame VobSub, native ASS) and frames past either end of a real
+    timeline take the flat millisecond delay, exactly as without a frame shift.
 
-    Built only by ``sync_utils.build_frame_shift`` after the offset has been
-    verified file-wide on both timelines.
+    Normally both grids are real timelines (``FrameTable``); the CFR formula
+    (``FrameClock``) is the reported fallback when real times are unreadable.
+    Built only by ``sync_utils.build_frame_shift``.
     """
 
-    source: FrameTable
-    target: FrameTable
+    source: FrameGrid
+    target: FrameGrid
     frames: int
 
     def shifted_ms(self, time_ms: float, flat_delay_ms: float) -> float:
         """Exact-snap ``time_ms`` when it is on a source frame, else the flat delay."""
-        k = self.source.frame_of(time_ms)
-        if k < self.source.num_frames and self.source.times_ms[k] == round(time_ms):
+        k = frame_at(self.source, time_ms)
+        if k is not None:
             dest = k + self.frames
-            if 0 <= dest < self.target.num_frames:
-                return self.target.times_ms[dest]
+            if _in_range(self.target, dest):
+                return float(self.target.frame_ms(dest))
         return time_ms + flat_delay_ms
+
+
+def _in_range(grid: FrameGrid, n: int) -> bool:
+    """Real timelines end; the CFR formula extends forever (as it always did)."""
+    if isinstance(grid, FrameTable):
+        return 0 <= n < grid.num_frames
+    return True
+
+
+def frame_at(grid: FrameGrid, time_ms: float) -> int | None:
+    """The frame ``time_ms`` sits exactly on, or None when it is mid-frame.
+
+    Subtitle times are stored in whole milliseconds. With whole-ms frame times
+    (MKV) a time is on frame k iff it equals that frame's time — the original
+    rule, unchanged. Containers can store finer frame times (MP4/M2TS,
+    timestamp maps); a whole-ms subtitle time then records the frame's time
+    floored or rounded to the millisecond, and is on that frame either way.
+    """
+    k = grid.frame_of(time_ms)
+    if _in_range(grid, k) and grid.frame_ms(k) == round(time_ms):
+        return k
+    whole_ms = round(time_ms)
+    for cand in (k, k - 1):
+        if not _in_range(grid, cand):
+            continue
+        frame_time = grid.frame_ms(cand)
+        if frame_time != math.floor(frame_time) and whole_ms in (
+            math.floor(frame_time),
+            math.floor(frame_time + 0.5),
+        ):
+            return cand
+    return None
 
 
 # ── Timeline check (gaps / start offset) ─────────────────────────────────────

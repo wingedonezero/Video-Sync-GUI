@@ -20,7 +20,11 @@ if TYPE_CHECKING:
     from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
     from vsg_core.subtitles.frame_utils.frame_table import FrameGrid
 
-from vsg_core.subtitles.frame_grids import frame_table_for, resolve_target_grid
+from vsg_core.subtitles.frame_grids import (
+    add_grid_warning,
+    frame_table_for,
+    resolve_target_grid,
+)
 from vsg_core.subtitles.sync_modes import get_sync_plugin
 
 
@@ -110,6 +114,7 @@ def apply_sync_mode(
             target_video=target_video,
             item=item,
             source_video=source_video,
+            target_clock=target_clock,
             frame_grid=frame_grid,
             global_shift_ms=global_shift_ms,
         )
@@ -151,6 +156,7 @@ def apply_sync_mode(
             track_label=_build_track_label(item),
             debug_paths=ctx.debug_paths,
             ctx=ctx,
+            frame_clock=target_clock,
             frame_grid=frame_grid,
         )
 
@@ -201,6 +207,7 @@ def _apply_cached_video_verified(
     target_video: Path | None,
     item,
     source_video: str | None = None,
+    target_clock: FrameClock | None = None,
     frame_grid: FrameGrid | None = None,
     global_shift_ms: float = 0.0,
 ) -> OperationResult:
@@ -230,9 +237,11 @@ def _apply_cached_video_verified(
     frame_shift = build_frame_shift(
         lambda: frame_table_for(ctx, source_video, log) if source_video else None,
         frame_grid,
+        target_clock,
         cached.get("details") or {},
         global_shift_ms,
         log,
+        lambda msg: add_grid_warning(ctx, f"{source_key}: {msg}", log),
         fallback=bool(cached.get("fallback")),
     )
     if frame_shift is not None:
