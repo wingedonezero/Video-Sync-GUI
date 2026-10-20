@@ -263,12 +263,12 @@ def _shift_pgs_track(item, ctx, runner) -> None:
     _lookup_source1_properties(ctx, runner)
     video_duration_ms = _lookup_video_duration_ms(ctx)
 
-    frame_mapping = (
-        _lookup_frame_mapping(ctx, item, runner)
-        if getattr(ctx.settings, "bitmap_frame_alignment_audit", True)
-        else None
+    # The frame mapping drives the uniform surgical delay (always, when Source 1
+    # has a frame grid); the setting only controls the read-only Tier 2 report.
+    frame_mapping = _lookup_frame_mapping(ctx, item, runner, kind)
+    frame_audit_enabled = frame_mapping is not None and bool(
+        getattr(ctx.settings, "bitmap_frame_alignment_audit", True)
     )
-    frame_audit_enabled = frame_mapping is not None
 
     runner._log_message(
         f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind}), "
@@ -276,7 +276,7 @@ def _shift_pgs_track(item, ctx, runner) -> None:
         + (
             f"(Source 1 grid: {frame_mapping.target.label})"
             if frame_mapping is not None
-            else "(no Source 1 frame grid)"
+            else "(no Source 1 frame grid - plain rounding)"
         )
     )
 
@@ -394,12 +394,12 @@ def _shift_vobsub_track(item, ctx, runner) -> None:
     _lookup_source1_properties(ctx, runner)
     video_duration_ms = _lookup_video_duration_ms(ctx)
 
-    frame_mapping = (
-        _lookup_frame_mapping(ctx, item, runner)
-        if getattr(ctx.settings, "bitmap_frame_alignment_audit", True)
-        else None
+    # The frame mapping drives the uniform surgical delay (always, when Source 1
+    # has a frame grid); the setting only controls the read-only Tier 2 report.
+    frame_mapping = _lookup_frame_mapping(ctx, item, runner, kind)
+    frame_audit_enabled = frame_mapping is not None and bool(
+        getattr(ctx.settings, "bitmap_frame_alignment_audit", True)
     )
-    frame_audit_enabled = frame_mapping is not None
 
     runner._log_message(
         f"[BitmapShifter] {track_label}: delay = {delay_ms:+.3f} ms ({kind}), "
@@ -407,13 +407,13 @@ def _shift_vobsub_track(item, ctx, runner) -> None:
         + (
             f"(Source 1 grid: {frame_mapping.target.label})"
             if frame_mapping is not None
-            else "(no Source 1 frame grid)"
+            else "(no Source 1 frame grid - plain rounding)"
         )
     )
 
     try:
         idx_text = idx_path.read_text(encoding="latin-1")
-        sub_data = sub_path.read_bytes() if frame_audit_enabled else None
+        sub_data = sub_path.read_bytes() if frame_mapping is not None else None
         new_idx_text, shift_res = apply_constant_shift(
             idx_text,
             sub_data,
@@ -624,8 +624,12 @@ def _lookup_video_duration_ms(ctx) -> float | None:
     return None
 
 
-def _lookup_frame_mapping(ctx, item, runner):
-    """Source-to-Source-1 frame mapping for the Tier 2 bitmap audit, or None.
+def _lookup_frame_mapping(ctx, item, runner, kind: str):
+    """Where a bitmap track's events belong on Source 1's frames, or None.
+
+    Drives the uniform surgical delay and the Tier 2 audit. ``kind`` is the
+    delay source from ``_resolve_bitmap_delay`` ("vv-frame" = a whole-frame
+    frame-matched delay).
 
     Source 1's grid follows the text-subtitle rule (real timestamps for
     progressive targets in any job, and for MPEG-2 / interlaced / VFR targets
@@ -658,8 +662,12 @@ def _lookup_frame_mapping(ctx, item, runner):
         # Real timestamps unreadable: the old same-grid formula audit.
         if clock is None:
             return None
-        return FrameMapping(source=clock, target=clock, fps=fps)
-    mapping = FrameMapping(source=target, target=target, fps=fps)
+        return FrameMapping(
+            source=clock, target=clock, fps=fps, whole_frame_delay=kind == "vv-frame"
+        )
+    mapping = FrameMapping(
+        source=target, target=target, fps=fps, whole_frame_delay=kind == "vv-frame"
+    )
 
     # A frame match verified on both real timelines gives the exact offset.
     tr = item.track

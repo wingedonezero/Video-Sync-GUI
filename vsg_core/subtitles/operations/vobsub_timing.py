@@ -44,6 +44,9 @@ from typing import TYPE_CHECKING
 from .bitmap_audit import (
     EndpointAudit,
     Tier2FrameAlignmentResult,
+    UniformDelayChoice,
+    choose_uniform_delay,
+    describe_delay_choice,
     frame_of,
     pick_integer_ms_in_frame,
 )
@@ -100,6 +103,8 @@ class VobSubShiftResult:
     earliest_timestamp_ms: int  # pre-shift, 0 if no entries
     latest_timestamp_ms: int  # pre-shift, 0 if no entries
     tier2: Tier2FrameAlignmentResult | None = None
+    # How the whole-ms delay was chosen (None = plain rounding, no frame grid).
+    delay_choice: UniformDelayChoice | None = None
     # End-time inference tags per entry index: "spu" / "next_idx" / "default".
     end_time_sources: dict[int, str] = field(default_factory=dict)
 
@@ -376,9 +381,26 @@ def apply_constant_shift(
             tier2=None,
         )
 
-    applied_ms = int(round(delay_ms))
     earliest_ts = min(e.timestamp_ms for e in entries)
     latest_ts = max(e.timestamp_ms for e in entries)
+
+    # One whole-ms delay for the whole track. With a Source 1 frame grid it is
+    # chosen surgically — rounded down or up so every entry's start and end
+    # land on their intended frame; without one, plain rounding.
+    end_times: dict[int, int] = {}
+    end_sources: dict[int, str] = {}
+    if frame_mapping is not None:
+        end_times, end_sources = infer_end_times(entries, sub_data)
+    delay_choice: UniformDelayChoice | None = None
+    if frame_mapping is not None:
+        endpoints = [float(e.timestamp_ms) for e in entries] + [
+            float(v) for v in end_times.values()
+        ]
+        delay_choice = choose_uniform_delay(endpoints, delay_ms, frame_mapping)
+        applied_ms = delay_choice.applied_ms
+        _log(describe_delay_choice("VobSubTiming", delay_choice))
+    else:
+        applied_ms = int(round(delay_ms))
 
     # Identify which entries to drop (would-be-negative).
     dropped_indices: set[int] = set()
@@ -395,13 +417,10 @@ def apply_constant_shift(
     # Tier 2 audit (read-only) — runs against pre-shift entries +
     # inferred end times, with shifted PTSes computed on the fly.
     tier2: Tier2FrameAlignmentResult | None = None
-    end_times: dict[int, int] = {}
-    end_sources: dict[int, str] = {}
     do_frame_audit = bool(frame_alignment_audit and frame_mapping is not None)
     if do_frame_audit:
-        end_times, end_sources = infer_end_times(entries, sub_data)
         assert frame_mapping is not None  # checked by do_frame_audit
-        frame_shift = frame_mapping.nominal_shift(applied_ms)
+        frame_shift = frame_mapping.nominal_shift(delay_ms)
         tgt_grid = frame_mapping.target
 
         endpoint_audits: list[EndpointAudit] = []
@@ -418,7 +437,7 @@ def apply_constant_shift(
             # Start endpoint
             shifted_start_ms = ent.timestamp_ms + applied_ms
             f_src = frame_mapping.source_frame(float(ent.timestamp_ms))
-            f_target = frame_mapping.expected_target_frame(f_src, applied_ms)
+            f_target = frame_mapping.intended_frame(float(ent.timestamp_ms), delay_ms)
             f_actual = frame_of(float(shifted_start_ms), tgt_grid)
             on_target = f_actual == f_target
             would_corr = 0
@@ -453,7 +472,7 @@ def apply_constant_shift(
                 continue
             shifted_end_ms = src_end_ms + applied_ms
             f_src_e = frame_mapping.source_frame(float(src_end_ms))
-            f_target_e = frame_mapping.expected_target_frame(f_src_e, applied_ms)
+            f_target_e = frame_mapping.intended_frame(float(src_end_ms), delay_ms)
             f_actual_e = frame_of(float(shifted_end_ms), tgt_grid)
             on_target_e = f_actual_e == f_target_e
             would_corr_e = 0
@@ -547,6 +566,7 @@ def apply_constant_shift(
         earliest_timestamp_ms=earliest_ts,
         latest_timestamp_ms=latest_ts,
         tier2=tier2,
+        delay_choice=delay_choice,
         end_time_sources=end_sources,
     )
 

@@ -158,28 +158,39 @@ def test_offset_disagreeing_with_measured_wall_clock_is_refused():
 # --- bitmap audit mapping ------------------------------------------------------
 
 
-def test_mapping_matches_the_old_formula_audit_on_aligned_grids():
-    """Old Tier 2: F_target = F_src + round(applied_ms * fps). Same on one grid."""
+def test_whole_frame_mapping_matches_the_old_formula_audit_on_aligned_grids():
+    """Whole-frame delays keep the old Tier 2 intent: F_src + round(delay * fps)."""
     table = _grid(FILM, 5000)
-    mapping = FrameMapping(source=table, target=table, fps=Fraction(24000, 1001))
+    mapping = FrameMapping(
+        source=table, target=table, fps=Fraction(24000, 1001), whole_frame_delay=True
+    )
     for applied in range(-90000, 90001, 7):  # includes near-half-frame delays
         expected_shift = round(Fraction(applied * 24000, 1000 * 1001))
         assert mapping.nominal_shift(applied) == expected_shift
         for ms in (8342.0, 51479.0, 125125.0):
-            f = mapping.source_frame(ms)
-            assert f == FILM.frame_of(ms)
-            assert mapping.expected_target_frame(f, applied) == f + expected_shift
+            assert mapping.source_frame(ms) == FILM.frame_of(ms)
+            assert (
+                mapping.intended_frame(ms, applied)
+                == FILM.frame_of(ms) + expected_shift
+            )
+
+
+def test_correlation_mapping_intends_the_exact_delay_frame():
+    table = _grid(FILM, 5000)
+    mapping = FrameMapping(source=table, target=table, fps=Fraction(24000, 1001))
+    for ms in (8342.0, 51479.0):
+        for delay in (-54.667, 120.4, 1001.0, 333.333):
+            assert mapping.intended_frame(ms, delay) == table.frame_of(ms + delay)
 
 
 def test_mapping_with_offset_start_uses_the_real_times():
     source = _grid(FILM, 3000, start_ms=83.0)
     target = _grid(FILM, 3000)
     matched = FrameMapping(source=source, target=target, frame_offset=10)
-    applied = round(8 * 1001 / 24)  # the delay the shifter writes
     for k in (0, 500, 2500):
-        f = matched.source_frame(source.times_ms[k])
-        assert f == k  # read on the source's own timeline
-        assert matched.expected_target_frame(f, applied) == k + 10
+        t = source.times_ms[k]
+        assert matched.source_frame(t) == k  # read on the source's own timeline
+        assert matched.intended_frame(t, 8 * 1001 / 24) == k + 10
 
 
 # --- notes are recorded once, whichever step reads Source 1 first --------------
