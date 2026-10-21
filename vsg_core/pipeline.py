@@ -23,6 +23,7 @@ from .pipeline_components import (
     SyncPlanner,
     ToolValidator,
 )
+from .system.ffmpeg_tools import describe_ffmpeg_tools
 
 
 class JobPipeline:
@@ -108,6 +109,8 @@ class JobPipeline:
             )
 
         log_to_all(f"=== Starting Job: {Path(source1_file).name} ===")
+        for line in describe_ffmpeg_tools():
+            log_to_all(f"[Tools] {line}")
         self.progress(0.0)
 
         # --- 4. Validate Merge Requirements ---

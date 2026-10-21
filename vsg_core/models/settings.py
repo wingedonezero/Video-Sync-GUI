@@ -88,6 +88,9 @@ class AppSettings(BaseModel):
     temp_root: str = _PATH_SENTINEL
     logs_folder: str = _PATH_SENTINEL
     videodiff_path: str = ""
+    # Folder holding ffmpeg + ffprobe to use instead of the system ones (put
+    # first on PATH by vsg_core.system.ffmpeg_tools). Empty = system tools.
+    ffmpeg_dir: str = ""
     fonts_directory: str = ""
     last_ref_path: str = ""
     last_sec_path: str = ""
