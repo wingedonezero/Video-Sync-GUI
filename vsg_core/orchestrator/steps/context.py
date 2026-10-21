@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
     from vsg_core.audit import AuditTrail
     from vsg_core.correction.stepping import AudioSegment
+    from vsg_core.models.audio_processing import AudioProcessingResult
     from vsg_core.models.context_types import (
         ChapterSourceOutcome,
         DriftFlagsEntry,
@@ -118,11 +119,15 @@ class Context:
     # Store sync stability issues (correlation variance) for reporting
     sync_stability_issues: list[SyncStabilityIssue] = field(default_factory=list)
 
-    # FLAC conversion outcomes (ConversionStep), as "label: detail" strings
+    # FLAC conversion outcomes (AudioProcessingStep), as "label: detail" strings
     # for the final report. Failures keep the original track in the mux.
     flac_conversions: list[str] = field(default_factory=list)
     flac_conversion_skips: list[str] = field(default_factory=list)
     flac_conversion_failures: list[str] = field(default_factory=list)
+
+    # AudioProcessingStep: one outcome per audio track (route, bake, checks),
+    # for the log summary and the final audit.
+    audio_processing_results: list[AudioProcessingResult] = field(default_factory=list)
 
     # Cache video-verified subtitle sync results per source
     # Format: {"Source 2": {"original_delay_ms": 100.0, "corrected_delay_ms": 102.5, ...}}

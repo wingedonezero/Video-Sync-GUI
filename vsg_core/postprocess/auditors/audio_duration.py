@@ -2,10 +2,11 @@
 """
 Checks whether audio streams in the final MKV extend past the video track.
 
-Two modes depending on the "stop all tracks when the video ends" setting
-(mkvmerge --stop-after-video-ends):
-- Enabled:  any audio still past the video end is unexpected and reported.
-- Disabled: warns if any audio overshoots by more than the threshold.
+With "trim converted audio to the video end" on, AudioProcessingStep cuts
+every FLAC-converted track that is not from Source 1 and runs past the video
+end, to the sample. The tracks it cut must end at the video end (up to the
+container's whole-ms timestamps). Every other track is untouched and is
+warned about only when it overshoots by more than the threshold.
 """
 
 from __future__ import annotations
@@ -13,13 +14,20 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from vsg_core.orchestrator.steps.audio_processing_step import item_label
+
 from .base import BaseAuditor
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Threshold for flagging overhang when trimming is disabled.
+# Threshold for flagging overhang on tracks that were not trimmed.
 _WARN_THRESHOLD_S = 0.6
+# A trimmed track ends within a sample of the video end; the two end times
+# compared here are read back from whole-ms container timestamps.
+_TRIMMED_MAX_DELTA_S = 0.002
+# How far past the seek point to read; the seek lands 15 s before the end.
+_READ_WINDOW_S = 60
 
 
 class AudioDurationAuditor(BaseAuditor):
@@ -69,6 +77,10 @@ class AudioDurationAuditor(BaseAuditor):
             if item.track.type == "audio"
         ]
 
+        end_trimmed = {
+            r.label for r in self.ctx.audio_processing_results if r.samples_trimmed_end
+        }
+
         for i, _audio_stream in enumerate(audio_streams):
             audio_end = self._get_stream_end(final_mkv_path, f"a:{i}", seek_s)
             if audio_end is None:
@@ -82,38 +94,39 @@ class AudioDurationAuditor(BaseAuditor):
 
             overhang_s = audio_end - video_end
 
-            if trim_enabled:
-                # When trimming is on, report what happened for the batch report
-                if overhang_s > _WARN_THRESHOLD_S:
-                    # Trim was enabled but audio still overshoots — something
-                    # unexpected; report as warning.
+            trimmed = (
+                i < len(plan_audio_items)
+                and plan_audio_items[i].delay_baked
+                and item_label(plan_audio_items[i]) in end_trimmed
+            )
+            if trimmed:
+                if abs(overhang_s) > _TRIMMED_MAX_DELTA_S:
                     self._report(
-                        f"{track_label} still extends {overhang_s:.1f}s past "
-                        f"video despite --stop-after-video-ends"
-                    )
-                elif overhang_s > 0.0:
-                    # Any positive overhang when trim is on means the trim was
-                    # applied.  Surface in the batch report so the user sees it.
-                    self.log(
-                        f"  {track_label}: trimmed to {audio_end:.3f}s — "
-                        f"{overhang_s:+.3f}s past video (within tolerance)"
-                    )
-                    self._track_issue(
-                        f"{track_label} was trimmed to match video duration "
-                        f"(delta {overhang_s:+.3f}s)",
-                        "warning",
+                        f"{track_label} was trimmed to the video end but ends "
+                        f"{overhang_s * 1000:+.1f} ms from it ({audio_end:.3f}s vs "
+                        f"{video_end:.3f}s)"
                     )
                 else:
                     self.log(
-                        f"  {track_label} ends at {audio_end:.3f}s — OK "
-                        f"(delta {overhang_s:+.3f}s)"
+                        f"  {track_label}: trimmed to the video end — ends at "
+                        f"{audio_end:.3f}s (delta {overhang_s * 1000:+.1f} ms)"
                     )
             elif overhang_s > _WARN_THRESHOLD_S:
-                # When trimming is off, warn about significant overhang
+                item = plan_audio_items[i] if i < len(plan_audio_items) else None
+                if not trim_enabled:
+                    hint = (
+                        "Enable 'Trim converted (FLAC) audio to the video end' "
+                        "to trim tracks converted to FLAC."
+                    )
+                elif item is not None and item.track.source == "Source 1":
+                    hint = "Source 1 audio is never trimmed."
+                elif item is not None and item.delay_baked:
+                    hint = "Converted but not trimmed; see the audio processing log."
+                else:
+                    hint = "Only tracks converted to FLAC are trimmed."
                 self._report(
                     f"{track_label} extends {overhang_s:.1f}s past "
-                    f"the video end ({audio_end:.1f}s vs {video_end:.1f}s). "
-                    f"Enable 'Stop all tracks when the video ends' to fix this."
+                    f"the video end ({audio_end:.1f}s vs {video_end:.1f}s). {hint}"
                 )
             else:
                 self.log(
@@ -144,7 +157,9 @@ class AudioDurationAuditor(BaseAuditor):
             "-show_entries",
             "packet=pts_time,duration_time",
             "-read_intervals",
-            str(int(seek_s)),
+            # Explicit end: ffprobe 7.1 returns no packets for an open-ended
+            # interval ("START") when its stderr is a pipe, as under the runner.
+            f"{int(seek_s)}%+{_READ_WINDOW_S}",
             str(mkv_path),
         ]
         try:

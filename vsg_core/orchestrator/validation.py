@@ -79,16 +79,18 @@ class StepValidator:
                 )
 
     @staticmethod
-    def validate_conversion(ctx: Context) -> None:
+    def validate_audio_processing(ctx: Context) -> None:
         """
-        Validates FLAC conversion results.
+        Validates AudioProcessingStep results.
         Raises PipelineValidationError if validation fails.
 
-        Every flagged audio track must be exactly one of: converted (with a
-        real FLAC file and its original kept on disk), or recorded as a
-        skip/failure so the outcome surfaces in the final report.
+        Every audio track must have exactly one recorded outcome. Every track
+        flagged for FLAC must be exactly one of: converted (with a real FLAC
+        file and its original kept on disk), or recorded as a skip/failure so
+        the outcome surfaces in the final report. A track whose delay is baked
+        must be a converted FLAC.
         """
-        from vsg_core.orchestrator.steps.conversion_step import item_label
+        from vsg_core.orchestrator.steps.audio_processing_step import item_label
 
         errors = []
         recorded = [
@@ -132,9 +134,25 @@ class StepValidator:
                         f"converted nor recorded as skipped/failed"
                     )
 
+        audio = [
+            item
+            for item in (ctx.extracted_items or [])
+            if item.track.type == "audio" and not item.is_preserved
+        ]
+        if ctx.and_merge and len(ctx.audio_processing_results) != len(audio):
+            errors.append(
+                f"{len(audio)} audio tracks but {len(ctx.audio_processing_results)} "
+                f"audio processing outcomes"
+            )
+        for item in audio:
+            if item.delay_baked and not item.flac_converted:
+                errors.append(
+                    f"{item_label(item)}: delay baked but not a converted FLAC"
+                )
+
         if errors:
             raise PipelineValidationError(
-                "FLAC conversion validation failed:\n"
+                "Audio processing validation failed:\n"
                 + "\n".join(f"  - {e}" for e in errors)
             )
 

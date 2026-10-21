@@ -2260,15 +2260,14 @@ class MergeBehaviorTab(QWidget):
             "Prevents mkvmerge from using header removal compression.\nThis is enabled by default as it can sometimes cause issues."
         )
         self.widgets["trim_audio_to_video_duration"] = QCheckBox(
-            "Stop all tracks when the video ends"
+            "Trim converted (FLAC) audio to the video end"
         )
         self.widgets["trim_audio_to_video_duration"].setToolTip(
-            "Passes mkvmerge's --stop-after-video-ends: muxing stops when the\n"
-            "Source 1 video track ends, and whatever is left of every other\n"
-            "track is dropped (e.g. a streaming OP/ED that is not on the disc).\n"
-            "Applies to ALL audio tracks, including Source 1's, and drops subtitle\n"
-            "lines that start after the cut. Audio ends up to about one video\n"
-            "frame before the video does. No re-encoding."
+            "Audio tracks converted to FLAC are cut to the exact sample where the\n"
+            "Source 1 video ends (e.g. a streaming OP/ED that is not on the disc).\n"
+            "The cut is lossless and recorded in the track's VSG_SAMPLES_TRIMMED_END\n"
+            "tag. Source 1's own audio, lossy tracks, tracks not converted to FLAC,\n"
+            "video and subtitles are never trimmed."
         )
         form1.addWidget(self.widgets["apply_dialog_norm_gain"])
         form1.addWidget(self.widgets["disable_track_statistics_tags"])

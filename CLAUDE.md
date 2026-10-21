@@ -43,9 +43,9 @@ the UI thread). The worker runs the core pipeline:
 
 ```
 analyze (compute SEC/TER delays) → global shift (remove negative offsets)
-→ extract tracks → optional lossless FLAC conversion → optional audio
-correction → subtitle transforms → chapters + attachments → mux (mkvmerge)
-→ post-process/validate
+→ extract tracks → audio processing (corrections; lossless → FLAC with the
+delay baked in to the sample, mkvmerge --sync 0) → subtitle transforms
+→ chapters + attachments → mux (mkvmerge) → post-process/validate
 ```
 
 `CommandRunner` (`vsg_core/io/`) is the single choke point that shells out to
@@ -63,6 +63,7 @@ external tools with streamed log/progress callbacks.
 ### `vsg_core/` (backend)
 
 - `analysis/` — audio cross-correlation + VideoDiff delay analysis, stream probing, source separation
+- `audio_processing/` — sample-exact FLAC finisher: edit plan (start cut / silence / end cap) → one ffmpeg encode → verified output
 - `audit/` — append-only JSON audit trail of timing values at each pipeline step
 - `chapters/` — extract / rename / shift chapters, snap to keyframes
 - `correction/` — audio timing corrections: linear, PAL (24↔25 fps), stepping (silence-gated segments)

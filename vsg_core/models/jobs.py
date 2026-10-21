@@ -49,7 +49,7 @@ class PlanItem:
     sync_to: str | None = None
     is_preserved: bool = False
     is_corrected: bool = False
-    # Lossless FLAC conversion (ConversionStep). ``convert_to_flac`` is the
+    # Lossless FLAC conversion (AudioProcessingStep). ``convert_to_flac`` is the
     # user's request from the manual layout; ``flac_converted`` is set only
     # after a verified conversion, with ``original_extracted_path`` keeping
     # the pre-conversion extraction for auditing.
@@ -62,6 +62,9 @@ class PlanItem:
     # container delay) instead of the correlation-based source delay, because
     # the correlation shift is already baked into the FLAC samples.
     is_pre_aligned: bool = False
+    # Set by AudioProcessingStep when the track's whole delay is baked into the
+    # FLAC samples (start cut / digital silence): mkvmerge must apply no delay.
+    delay_baked: bool = False
     correction_source: str | None = None
     perform_ocr: bool = False
     container_delay_ms: int = 0

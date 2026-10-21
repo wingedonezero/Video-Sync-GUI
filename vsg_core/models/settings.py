@@ -129,8 +129,8 @@ class AppSettings(BaseModel):
     apply_dialog_norm_gain: bool = False
     disable_track_statistics_tags: bool = False
     disable_header_compression: bool = True
-    # Adds mkvmerge's global --stop-after-video-ends to the mux (every
-    # non-video track is cut where the Source 1 video ends).
+    # AudioProcessingStep cuts FLAC-converted audio (never Source 1's) to the
+    # sample where the Source 1 video ends. Other tracks are left as they are.
     trim_audio_to_video_duration: bool = False
 
     # =========================================================================
