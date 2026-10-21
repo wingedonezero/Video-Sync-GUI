@@ -139,56 +139,20 @@ class AudioCorrectionStep:
                 )
 
     def _validate_stepping_correction(self, ctx: Context, runner: CommandRunner):
-        """Validate that stepping correction was applied successfully."""
-        for analysis_key in ctx.segment_flags:
+        """Stepping only prepares EDLs here; AudioProcessingStep applies them.
+        A source without one (uniform delay, QA failure) keeps its analysis
+        delay, and its tracks take the normal FLAC / untouched route."""
+        for analysis_key, flag_info in ctx.segment_flags.items():
             source_key = analysis_key.split("_")[0]
-
-            audio_tracks_from_source = [
-                item
-                for item in (ctx.extracted_items or [])
-                if (
-                    item.track.source == source_key
-                    and item.track.type == "audio"
-                    and not item.is_preserved
-                )
-            ]
-
-            if not audio_tracks_from_source:
-                runner._log_message(
-                    f"[Validation] Stepping correction skipped for {source_key}: "
-                    f"No audio tracks from this source in layout."
-                )
+            if flag_info.get("subs_only", False):
                 continue
-
-            corrected_items = [
-                item for item in audio_tracks_from_source if item.is_corrected
-            ]
-
-            # SAFEGUARD #2: If no corrected items, check if stepping was actually found
-            # The corrector may determine there's no stepping after detailed analysis
-            if not corrected_items:
-                # Check if any item has a note about "no stepping found"
-                # In this case, the corrector decided no correction was needed
+            if source_key in ctx.stepping_corrections:
                 runner._log_message(
-                    f"[Validation] No corrected tracks found for {source_key}. "
-                    f"This is expected if the corrector determined no stepping exists after detailed analysis."
+                    f"[Validation] Stepping EDL for {source_key} verified; "
+                    f"applied to its audio in Audio Processing."
                 )
+            else:
                 runner._log_message(
-                    "[Validation] The globally-shifted delay from initial analysis will be used."
-                )
-                # SAFEGUARD #3: Mark that this is intentional - stepping was a false positive
-                # Validation passes - this is not an error condition
-                continue
-
-            # If there ARE corrected items, validate them normally
-            for item in corrected_items:
-                if not item.extracted_path or not item.extracted_path.exists():
-                    raise RuntimeError(
-                        f"Stepping correction failed for {source_key}: "
-                        f"Corrected file was not created at {item.extracted_path}"
-                    )
-
-                runner._log_message(
-                    f"[Validation] Stepping correction verified for {source_key}: "
-                    f"{item.extracted_path.name}"
+                    f"[Validation] No stepping correction for {source_key}; "
+                    f"its audio keeps the analysis delay."
                 )

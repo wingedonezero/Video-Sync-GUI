@@ -8,21 +8,22 @@ Decomposes stepped delay correction into focused modules:
 - data_io: Dense analysis data serialization (JSON in temp folder)
 - edl_builder: Build transition zones from dense cluster data
 - boundary_refiner: Silence detection (RMS + VAD), video snap
-- audio_assembly: FFmpeg segment extraction, drift correction, concat
+- edit_plan: EDL -> sample-exact edits (shared by QA and the audio finisher)
+- audio_assembly: Track probe/decode for analysis, mono QA track
 - qa_check: Post-correction quality verification
-- run: Entry point (run_stepping_correction, apply_plan_to_file)
+- run: Entry point (run_stepping_correction, swap_in_corrected_track)
 """
 
 from __future__ import annotations
 
 from .run import (
-    apply_plan_to_file,
     run_stepping_correction,
+    swap_in_corrected_track,
 )
 from .types import AudioSegment
 
 __all__ = [
     "AudioSegment",
-    "apply_plan_to_file",
     "run_stepping_correction",
+    "swap_in_corrected_track",
 ]

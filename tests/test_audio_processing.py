@@ -27,9 +27,11 @@ from vsg_core.audio_processing import (
     Take,
     bake_delay,
     delay_tags,
+    edit_tags,
     end_cap_samples,
     expected_output_samples,
     finish,
+    format_edit_plan,
     ms_to_ns,
     ns_to_samples,
     plan_for_delay,
@@ -43,6 +45,7 @@ from vsg_core.audio_processing.encoder import (
     is_native_layout,
 )
 from vsg_core.audio_processing.verify import (
+    ExpectedOutput,
     _decode_cmd,
     _FrameReader,
     canonical_bytes,
@@ -188,11 +191,41 @@ class TestEncoderCommand:
         assert "-bits_per_raw_sample" not in cmd
 
     def test_unsupported_bit_depth_rejected(self) -> None:
-        fmt = SourceFormat("pcm_s32le", 48000, 2, "stereo", 32)
+        fmt = SourceFormat("pcm_u8", 48000, 2, "stereo", 8, "u8")
         with pytest.raises(ValueError):
             build_encode_command(
                 Path("i.wav"), 0, fmt, EditPlan(ops=(Take(0),)), {}, Path("o.flac")
             )
+
+    @pytest.mark.parametrize(
+        ("bits", "sample_fmt", "out_bits", "requantized"),
+        [
+            (16, "s16", 16, False),
+            (24, "s32", 24, False),
+            (20, "s32", 20, False),
+            (0, "fltp", 24, True),  # lossy decoders
+            (32, "flt", 24, True),  # float PCM
+            (32, "s32", 24, True),  # 32-bit integer PCM
+        ],
+    )
+    def test_output_depth(
+        self, bits: int, sample_fmt: str, out_bits: int, requantized: bool
+    ) -> None:
+        fmt = SourceFormat("x", 48000, 2, "stereo", bits, sample_fmt)
+        assert (fmt.out_bits, fmt.requantized) == (out_bits, requantized)
+
+    def test_edit_plan_tag(self) -> None:
+        plan = EditPlan(
+            ops=(Silence(520), Take(0, 48000), Silence(10), Take(48100)),
+            max_output_samples=96000,
+        )
+        assert format_edit_plan(plan) == "S520 T0-48000 S10 T48100- C96000"
+        tags = edit_tags(-1.5, plan, "A_AC3")(ExpectedOutput(100000, 96000, ""))
+        assert tags["VSG_SILENCE_SAMPLES_ADDED"] == "530"
+        assert tags["VSG_SAMPLES_TRIMMED_START"] == "0"
+        assert tags["VSG_EDIT_PLAN"] == "S520 T0-48000 S10 T48100- C96000"
+        uncapped = 520 + 48000 + 10 + (100000 - 48100)
+        assert tags["VSG_SAMPLES_TRIMMED_END"] == str(uncapped - 96000)
 
     def test_every_decode_is_strict(self) -> None:
         encode = build_encode_command(
@@ -384,6 +417,40 @@ class TestEndToEnd:
         ]
         with pytest.raises(RuntimeError, match=r"exit code 3: root cause$"):
             list(_Runner().stream_binary(cmd, {}))
+
+    @pytest.mark.parametrize("codec", ["aac", "ac3", "eac3"])
+    def test_lossy_source_is_stored_as_24_bit_exactly(
+        self, tmp_path: Path, codec: str
+    ) -> None:
+        src = tmp_path / f"src.{codec}"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "aevalsrc=0.3*sin(440*2*PI*t)|0.2*sin(660*2*PI*t):s=48000:c=stereo:d=2",
+                "-c:a",
+                codec,
+                str(src),
+            ],
+            check=True,
+        )
+        bake = bake_delay(ms_to_ns(-10.834789), 48000)
+        plan = plan_for_delay(bake)
+        out = tmp_path / "o.flac"
+        res = finish(
+            src, 0, plan, out, delay_tags(-10.834789, bake, plan, codec), _Runner(), {}
+        )
+        assert res.ok, res.check
+        assert res.fmt.requantized and res.fmt.out_bits == 24
+        assert read_streaminfo(out).bits == 24
+        # Independently of the verifier: the FLAC holds the s32 decode with its
+        # low 8 bits truncated, from the cut on.
+        decoded = _decode(src).reshape(-1, 2)[bake.trimmed_start :]
+        assert np.array_equal(_decode(out).reshape(-1, 2), decoded & np.int32(-256))
 
     def test_tags_survive_and_hash_matches_flac_md5(self, tmp_path: Path) -> None:
         src = tmp_path / "src.wav"

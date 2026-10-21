@@ -76,8 +76,25 @@ class SourceFormat:
     sample_rate: int
     channels: int
     channel_layout: str | None  # None = the stream does not name one
-    bits: int  # declared bits per sample (16, 20, 24)
+    bits: int  # declared bits per sample (16, 20, 24); 0 when not declared
+    sample_fmt: str = ""  # decoder sample format, e.g. "s32", "fltp"
+
+    @property
+    def is_float(self) -> bool:
+        return self.sample_fmt.startswith(("flt", "dbl"))
+
+    @property
+    def requantized(self) -> bool:
+        """The FLAC cannot hold the decoded samples exactly: floating-point
+        decodes (lossy codecs, float PCM) and integer audio deeper than 24
+        bits are stored as 24-bit, dropping the bits below that."""
+        return self.is_float or self.bits > 24
+
+    @property
+    def out_bits(self) -> int:
+        """Bit depth of the FLAC: the source's own for integer audio, else 24."""
+        return 24 if self.requantized else self.bits
 
     @property
     def flac_sample_fmt(self) -> str:
-        return "s16" if self.bits <= 16 else "s32"
+        return "s16" if self.out_bits <= 16 else "s32"

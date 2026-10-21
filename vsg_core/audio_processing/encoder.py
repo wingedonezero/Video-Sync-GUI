@@ -83,7 +83,7 @@ def probe_source_format(
             "-select_streams",
             f"a:{stream_index}",
             "-show_entries",
-            "stream=codec_name,sample_rate,channels,channel_layout,"
+            "stream=codec_name,sample_fmt,sample_rate,channels,channel_layout,"
             "bits_per_raw_sample,bits_per_sample",
             "-of",
             "json",
@@ -114,6 +114,7 @@ def probe_source_format(
         channels=int(st["channels"]),
         channel_layout=layout,
         bits=bits,
+        sample_fmt=str(st.get("sample_fmt") or ""),
     )
 
 
@@ -153,8 +154,8 @@ def build_encode_command(
     tags: dict[str, str],
     out: Path,
 ) -> list[str]:
-    if fmt.bits not in SUPPORTED_BITS:
-        raise ValueError(f"unsupported bit depth {fmt.bits}")
+    if fmt.out_bits not in SUPPORTED_BITS:
+        raise ValueError(f"unsupported bit depth {fmt.out_bits}")
     cmd = [
         "ffmpeg",
         "-y",
@@ -172,8 +173,10 @@ def build_encode_command(
         "-sample_fmt",
         fmt.flac_sample_fmt,
     ]
-    if fmt.bits != 16:
-        cmd += ["-bits_per_raw_sample", str(fmt.bits)]
+    if fmt.out_bits != 16:
+        # For s32 input the encoder keeps the top out_bits bits (truncation,
+        # measured); scan_expected applies the same cut to requantized sources.
+        cmd += ["-bits_per_raw_sample", str(fmt.out_bits)]
     # Drop the source's tags; the file describes itself with ours only.
     cmd += ["-map_metadata", "-1", "-fflags", "+bitexact"]
     for key, value in tags.items():

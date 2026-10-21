@@ -113,6 +113,10 @@ class Context:
     # Store EDLs (Edit Decision Lists) for stepping correction by source
     stepping_edls: dict[str, list[AudioSegment]] = field(default_factory=dict)
 
+    # EDLs whose QA check passed and whose source has audio to correct:
+    # AudioProcessingStep applies each to every audio track of that source.
+    stepping_corrections: dict[str, list[AudioSegment]] = field(default_factory=dict)
+
     # Store stepping quality issues for reporting
     stepping_quality_issues: list[SteppingQualityIssue] = field(default_factory=list)
 

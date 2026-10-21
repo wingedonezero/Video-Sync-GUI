@@ -1,6 +1,7 @@
-# Plan: Audio Processing step (draft for review — nothing built yet)
+# Plan: Audio Processing step (in progress — steps 1–3 built, see §11)
 
-Date: 2026-10-21. Branch: `claude/audio-delay-negative-sync-679d32`.
+Date: 2026-10-21. Steps 1–2 merged to `main` (9a701efa); strict decoding (5d3108fe) and
+step 3 on `claude/video-sync-audio-processing-88a59f`.
 Research behind it: `~/Desktop/Makemkv/Tests/audio_negative_sync/` (harness, codec
 research, `flac_tests/`).
 
@@ -174,14 +175,28 @@ No full-track arrays are needed for the final output. Arrays stay in analysis on
 - Analysis, edit list, QA check and the subtitle use of `stepping_edls` are **unchanged**.
 - Final per-track output no longer assembles in memory: the EDL is converted to an **edit plan**
   (§5) and executed by the finisher in one streaming pass. No per-segment FLACs, no concat
-  re-encode, no full-track RAM (a 130-min 7.1 track would be ~12 GB as int32). Drift-corrected
-  segments carry their stretch filter inside their take. The in-memory arrays remain for analysis,
-  silence/boundary detection and the mono QA check.
-  - encodes at the source bit depth, with the source layout from ffprobe/mkvmerge (no count-based
-    guess).
+  re-encode, no full-track RAM (a 130-min 7.1 track would be ~12 GB as int32). The in-memory
+  arrays remain for analysis, silence/boundary detection and the mono QA check.
+  - encodes at the source bit depth, with the decoder's layout (no count-based guess).
   - applies the end trim when the option is on.
-- `_swap_corrected_track` sets `delay_baked=True` (replaces `is_pre_aligned`). Source 1's audio
-  container offset is baked too, so mkvmerge gets 0.
+- `swap_in_corrected_track` sets `delay_baked=True` (replaces `is_pre_aligned`). Source 1's audio
+  container offset and the whole-ms global shift are baked too, so mkvmerge gets 0.
+
+**As built (step 3, 2026-10-21):**
+- `correction/stepping/edit_plan.py` turns the EDL into finisher ops; the mono QA track and the
+  real encode both use it. Parity with the old assembler is tested on random EDLs.
+- Starting delay = first segment + Source 1 audio container offset + whole-ms global shift,
+  always applied to the nearest sample. (Old: a positive start ≤ 10 ms was skipped, and the
+  global shift never reached stepping tracks.)
+- Between segments the old rule is kept: increases > 10 ms insert silence, any decrease cuts,
+  increases ≤ 10 ms are ignored and logged ("note and monitor").
+- Lossy (float-decoded) tracks → 24-bit FLAC, verified against the decode truncated to 24 bits
+  (measured: that is what ffmpeg's FLAC encoder does). Object audio keeps only its bed (logged).
+- Per-segment drift correction was dead code (`drift_rate_ms_s` never set since `c05dcb61`) and
+  is removed; stepping plans hold only takes and silence, verified exactly.
+- New tag `VSG_EDIT_PLAN` on every finished FLAC (e.g. `T448-96000 S24000 T96000-192000 T204000-`).
+- A stepping source with no verified EDL (no transitions, QA failure) no longer fails the job:
+  its tracks take route B/C, and a QA failure is reported as a high-severity stepping issue.
 
 ## 8. PAL / linear integration (route A)
 
@@ -221,9 +236,9 @@ No full-track arrays are needed for the final output. Arrays stay in analysis on
 
 ## 11. Order of work (one commit each, each tested before the next)
 
-1. **Finisher core:** `samples.py` + `encoder.py` + `verify.py`, unit tests (math edge cases, tag
+1. *(done)* **Finisher core:** `samples.py` + `encoder.py` + `verify.py`, unit tests (math edge cases, tag
    building) + real-sample tests in `Tests/`.
-2. **Step with routes B + C:**
+2. *(done)* **Step with routes B + C:**
    - replaces `ConversionStep`;
    - mux `delay_baked` → 0, remove `--stop-after-video-ends`;
    - auditor + validator + trim option wording.
@@ -231,7 +246,7 @@ No full-track arrays are needed for the final output. Arrays stay in analysis on
    At this point FLAC conversion is exact. Stepping/PAL/linear still run through the old
    `AudioCorrectionStep`, temporarily called from inside the new step.
 3. **Stepping onto the finisher:** route A, the bit-depth/layout/compression/single-encode fixes,
-   end trim, `delay_baked`.
+   end trim, `delay_baked`. *(built, see §7 "As built")*
 4. **PAL/linear onto the finisher,** new switch, all flagged sources processed.
 5. **Cleanup:** dead code, `CLAUDE.md` job flow, `docs/README.md`.
 

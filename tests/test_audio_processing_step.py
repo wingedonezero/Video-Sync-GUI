@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from vsg_core.audio_processing.verify import read_streaminfo
+from vsg_core.correction.stepping import AudioSegment
+from vsg_core.correction.stepping.edit_plan import edl_to_edits, render_edits
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models.jobs import Delays, MergePlan, PlanItem
 from vsg_core.models.media import StreamProps, Track
@@ -26,6 +29,7 @@ from vsg_core.orchestrator.steps.audio_processing_step import (
     source1_audio_offset_ms,
 )
 from vsg_core.orchestrator.steps.context import Context
+from vsg_core.orchestrator.validation import StepValidator
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -332,3 +336,88 @@ class TestStepEndToEnd:
         res = ctx.audio_processing_results[0]
         assert res.ok and res.delay_raw_ms == pytest.approx(-0.109)
         assert (res.samples_trimmed_start, res.silence_samples_added) == (5, 0)
+
+
+def _stepping_edl() -> list[AudioSegment]:
+    # start -10.834789 ms, +500 ms step at 2 s (silence), -250 ms at 4 s (cut)
+    return [
+        AudioSegment(0.0, 0.0, -11, -10.834789),
+        AudioSegment(2.0, 2.0, 489, 489.165211),
+        AudioSegment(4.0, 4.0, 239, 239.165211),
+    ]
+
+
+@needs_ffmpeg
+class TestSteppingRoute:
+    def _run(
+        self, tmp_path: Path, path: Path, codec_id: str
+    ) -> tuple[Context, PlanItem]:
+        item = _item("Source 2", 1, codec_id, path, convert=False)
+        ctx = _ctx(tmp_path, [item], raw_delay_ms=-10.834789)
+        ctx.source1_audio_container_delay_ms = 1.5
+        ctx.stepping_corrections["Source 2"] = _stepping_edl()
+        ctx = AudioProcessingStep().run(
+            ctx, CommandRunner(AppSettings(), lambda _m: None)
+        )
+        StepValidator.validate_audio_processing(ctx)
+        return ctx, item
+
+    def test_whole_edl_is_baked_exactly_at_source_depth(self, tmp_path: Path) -> None:
+        pcm = tmp_path / "pcm.wav"
+        _synth(pcm, "pcm_s16le", 2, seconds=6.0)
+        ctx, item = self._run(tmp_path, pcm, "A_PCM/INT/LIT")
+
+        res = ctx.audio_processing_results[0]
+        assert (res.route, res.ok) == ("corrected", True)
+        assert item.delay_baked and item.is_corrected
+        assert item.extracted_path is not None and item.extracted_path != pcm
+        edits = edl_to_edits(_stepping_edl(), 48000, 1.5, lambda _m: None)
+        expected = render_edits(_decode(pcm), 2, edits.ops).reshape(-1, 2)
+        assert np.array_equal(_decode(item.extracted_path).reshape(-1, 2), expected)
+        assert read_streaminfo(item.extracted_path).bits == 16  # was 24 before
+
+        # The original is kept as a preserved track; mux bakes nothing twice.
+        preserved = [i for i in ctx.extracted_items or [] if i.is_preserved]
+        assert [p.extracted_path for p in preserved] == [pcm]
+        tokens = MkvmergeOptionsBuilder().build(
+            MergePlan(items=[item], delays=ctx.delays or Delays()), AppSettings()
+        )
+        assert tokens[tokens.index("--sync") + 1] == "0:+0"
+        tags = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format_tags",
+                "-of",
+                "default=nw=1",
+                str(item.extracted_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "TAG:VSG_EDIT_PLAN=T448-96000 S24000 T96000-192000 T204000-" in tags
+
+    def test_lossy_track_becomes_24_bit(self, tmp_path: Path) -> None:
+        ac3 = tmp_path / "a.ac3"
+        _synth(ac3, "ac3", 2, seconds=6.0)
+        ctx, item = self._run(tmp_path, ac3, "A_AC3")
+        assert ctx.audio_processing_results[0].ok
+        assert item.extracted_path is not None
+        assert read_streaminfo(item.extracted_path).bits == 24
+
+    def test_failure_keeps_the_original_and_reports(self, tmp_path: Path) -> None:
+        flac_src = tmp_path / "src.flac"
+        _synth(flac_src, "flac", 2, seconds=6.0)
+        data = bytearray(flac_src.read_bytes())
+        data[len(data) * 3 // 5] ^= 0x10
+        flac_src.write_bytes(data)
+        ctx, item = self._run(tmp_path, flac_src, "A_FLAC")
+
+        res = ctx.audio_processing_results[0]
+        assert (res.route, res.ok) == ("corrected", False)
+        assert item.extracted_path == flac_src and not item.delay_baked
+        assert ctx.flac_conversion_failures[0].startswith("Source 2 audio track 1: ")
+        assert ctx.stepping_quality_issues[0]["issue_type"] == "correction_not_applied"

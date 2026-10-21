@@ -3,9 +3,13 @@
 Audio Processing step: every change to audio before the mux happens here.
 
 Order:
-1. Pending corrections (stepping / PAL / linear) run first, as before. Their
-   tracks leave this step as FLAC produced by the corrector (``corrected``).
-2. Every other audio track gets exactly one route:
+1. Pending corrections run first. Stepping only verifies its EDL there; PAL /
+   linear still produce their FLAC themselves (``corrected``).
+2. Every audio track gets exactly one route:
+   - ``corrected`` (stepping): every audio track of a source with a verified
+     EDL. One verified finisher encode applies the whole EDL (start delay,
+     silence inserts, cuts) to the samples plus the end trim; mkvmerge then
+     applies no delay. Lossy tracks are decoded and stored as 24-bit FLAC.
    - ``flac``: a lossless track the user asked to convert, or a track that is
      already FLAC and needs a change. One verified FLAC encode bakes the
      whole delay into the samples (start cut, or digital silence for a
@@ -16,7 +20,7 @@ Order:
      as extracted with mkvmerge ``--sync`` exactly as before.
 
 A FLAC request is never lost: if a correction was pending but produced
-nothing, the track still takes the FLAC route here. Any failure keeps the
+nothing (no EDL, QA failure), the track still takes the FLAC route here. Any failure keeps the
 original track (untouched) and is reported, including a strict decode that
 hits a damaged or lossy frame (see ``STRICT_DECODE_ARGS``).
 """
@@ -27,24 +31,30 @@ import json
 from typing import TYPE_CHECKING
 
 from vsg_core.audio_processing import (
+    EditPlan,
     FinishError,
     bake_delay,
     delay_tags,
+    edit_tags,
     end_cap_samples,
     finish,
+    format_edit_plan,
     ms_to_ns,
     plan_for_delay,
 )
 from vsg_core.audio_processing.encoder import STRICT_DECODE_ARGS, SUPPORTED_BITS
+from vsg_core.correction.stepping import swap_in_corrected_track
+from vsg_core.correction.stepping.edit_plan import edl_to_edits
 from vsg_core.extraction.tracks import get_stream_info_with_delays
-from vsg_core.models.audio_processing import AudioProcessingResult
+from vsg_core.models.audio_processing import AudioProcessingResult, AudioRouteStr
 from vsg_core.models.media import StreamProps, Track
 from vsg_core.orchestrator.steps.audio_correction_step import AudioCorrectionStep
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vsg_core.audio_processing import DelayBake, EditPlan
+    from vsg_core.audio_processing import DelayBake, FinishResult
+    from vsg_core.correction.stepping import AudioSegment
     from vsg_core.io.runner import CommandRunner
     from vsg_core.models.jobs import PlanItem
     from vsg_core.orchestrator.steps.context import Context
@@ -148,6 +158,24 @@ def output_video_end_ms(
     return frame_times_ms[-1] - frame_times_ms[0] + last_interval + video_delay_ms
 
 
+def _format_line(res: FinishResult) -> str:
+    """Log line for the FLAC's format, noting non-native layouts and requantizing."""
+    fmt = res.fmt
+    layout = fmt.channel_layout or f"unnamed {fmt.channels}-channel (FLAC default)"
+    line = f"  format: {fmt.sample_rate} Hz, {fmt.out_bits}-bit, {layout}"
+    if fmt.requantized:
+        line += (
+            f" (decoded {fmt.sample_fmt or 'floating-point'} audio stored as "
+            f"{fmt.out_bits}-bit)"
+        )
+    if not res.native_layout:
+        line += (
+            " — NOT a FLAC-native layout: stored with a channel-mask tag; "
+            "players that ignore it would assume the default order"
+        )
+    return line
+
+
 class AudioProcessingStep:
     """Corrections, FLAC conversion, delay baking and end trim for all audio."""
 
@@ -208,8 +236,14 @@ class AudioProcessingStep:
         label = item_label(item)
         codec_id = item.track.props.codec_id or ""
 
+        edl = ctx.stepping_corrections.get(item.track.source)
+        if edl is not None and not item.is_corrected:
+            return self._stepping(ctx, item, runner, edl)
+
         if item.is_corrected:
-            detail = "corrected by stepping/drift correction (FLAC from the corrector)"
+            detail = (
+                "corrected by PAL/linear drift correction (FLAC from the corrector)"
+            )
             if item.convert_to_flac:
                 ctx.flac_conversion_skips.append(f"{label}: {detail}")
             log(f"[AudioProcessing] {label} ({codec_id}) -> corrected: {detail}")
@@ -230,14 +264,7 @@ class AudioProcessingStep:
         delay_ms = self._baked_delay_ms(ctx, item, runner)
         rate = int(stream["sample_rate"])
         bake = bake_delay(ms_to_ns(delay_ms), rate)
-        cap = None
-        if (
-            ctx.settings.trim_audio_to_video_duration
-            and item.track.source != "Source 1"
-        ):
-            video_end_ms = self._output_video_end_ms(ctx, runner)
-            if video_end_ms is not None:
-                cap = end_cap_samples(ms_to_ns(video_end_ms), rate)
+        cap = self._end_cap(ctx, item, runner, rate)
         plan = plan_for_delay(bake, cap)
 
         if is_flac and not item.convert_to_flac and bake.samples == 0 and cap is None:
@@ -294,7 +321,6 @@ class AudioProcessingStep:
                 ctx, runner, item, delay_ms, mkvmerge_ms, [str(e)], "not processed"
             )
         fmt = res.fmt
-        layout = fmt.channel_layout or f"unnamed {fmt.channels}-channel (FLAC default)"
         trimmed_end = int(res.tags.get("VSG_SAMPLES_TRIMMED_END", "0"))
 
         log(
@@ -315,15 +341,7 @@ class AudioProcessingStep:
                 f"  end:    trimmed {trimmed_end} samples "
                 f"({trimmed_end * 1000 / fmt.sample_rate:.3f} ms) at the video end"
             )
-        log(
-            f"  format: {fmt.sample_rate} Hz, {fmt.bits}-bit, {layout}"
-            + (
-                ""
-                if res.native_layout
-                else " — NOT a FLAC-native layout: stored with a "
-                "channel-mask tag; players that ignore it would assume the default order"
-            )
-        )
+        log(_format_line(res))
 
         if not res.ok:
             problems = list(res.check.problems) if res.check else ["FLAC encode failed"]
@@ -369,7 +387,7 @@ class AudioProcessingStep:
                     "mkvmerge_delay_ms": mkvmerge_ms,
                     "tags": res.tags,
                     "sample_rate": fmt.sample_rate,
-                    "bits": fmt.bits,
+                    "bits": fmt.out_bits,
                     "channel_layout": fmt.channel_layout,
                 },
             )
@@ -400,6 +418,7 @@ class AudioProcessingStep:
         mkvmerge_ms: int,
         problems: list[str],
         what: str,
+        route: AudioRouteStr = "flac",
     ) -> AudioProcessingResult:
         """Keep the original track (it is muxed untouched) and report why."""
         label = item_label(item)
@@ -409,7 +428,7 @@ class AudioProcessingStep:
         ctx.flac_conversion_failures.append(f"{label}: {'; '.join(problems)}")
         return AudioProcessingResult(
             label,
-            "flac",
+            route,
             item.track.props.codec_id or "",
             False,
             f"{what}, original kept",
@@ -417,6 +436,171 @@ class AudioProcessingStep:
             mkvmerge_delay_ms=mkvmerge_ms,
             problems=tuple(problems),
         )
+
+    # ------------------------------------------------------------------
+    # stepping route
+    # ------------------------------------------------------------------
+
+    def _stepping(
+        self,
+        ctx: Context,
+        item: PlanItem,
+        runner: CommandRunner,
+        edl: list[AudioSegment],
+    ) -> AudioProcessingResult:
+        """Apply a verified stepping EDL to this track in one finisher encode."""
+        log = runner._log_message
+        label = item_label(item)
+        codec_id = item.track.props.codec_id or ""
+        src = item.extracted_path
+        assert src is not None
+        # The EDL is on Source 1's audio-content timeline; that audio sits at
+        # its container offset from the video, and the video is moved by the
+        # whole-ms global shift.
+        offset_ms = ctx.source1_audio_container_delay_ms + (
+            ctx.delays.global_shift_ms if ctx.delays else 0
+        )
+        mkvmerge_ms = round(ctx.source1_audio_container_delay_ms)
+
+        def failed(problems: list[str], what: str) -> AudioProcessingResult:
+            ctx.stepping_quality_issues.append(
+                {
+                    "source": item.track.source,
+                    "issue_type": "correction_not_applied",
+                    "severity": "high",
+                    "message": (
+                        f"Stepping correction failed for {label} "
+                        f"({'; '.join(problems)}); the original track is muxed "
+                        f"with the first segment's delay"
+                    ),
+                    "details": {},
+                }
+            )
+            return self._flac_failed(
+                ctx,
+                runner,
+                item,
+                offset_ms + edl[0].delay_raw,
+                mkvmerge_ms,
+                problems,
+                what,
+                route="corrected",
+            )
+
+        log(
+            f"[AudioProcessing] {label} ({codec_id}, {src.name}) -> corrected: "
+            f"stepping EDL ({len(edl)} segments), one verified encode"
+        )
+        stream = self._probe_stream(src, runner, ctx.tool_paths)
+        if stream is None:
+            return failed(
+                ["ffprobe could not read the extracted track"], "not processed"
+            )
+        channels = int(stream.get("channels") or 0)
+        if channels > _FLAC_MAX_CHANNELS:
+            return failed(
+                [f"{channels} channels exceed FLAC's limit of {_FLAC_MAX_CHANNELS}"],
+                "not processed",
+            )
+        profile = str(stream.get("profile") or "")
+        if "atmos" in profile.lower() or "DTS:X" in profile.upper():
+            log(
+                f"  note:   object audio ({profile}): only its {channels}-channel bed "
+                f"is kept (stepping edits decoded audio)"
+            )
+        rate = int(stream["sample_rate"])
+
+        try:
+            edits = edl_to_edits(edl, rate, offset_ms, log)
+            plan = EditPlan(edits.ops, self._end_cap(ctx, item, runner, rate))
+        except ValueError as e:
+            return failed([str(e)], "not processed")
+        out = ctx.temp_dir / f"corrected_{src.stem}.flac"
+        try:
+            res = finish(
+                src,
+                0,
+                plan,
+                out,
+                edit_tags(edits.start_delay_ms, plan, codec_id),
+                runner,
+                ctx.tool_paths,
+            )
+        except FinishError as e:
+            return failed([str(e)], "not processed")
+
+        trimmed_end = int(res.tags.get("VSG_SAMPLES_TRIMMED_END", "0"))
+        log(
+            f"  delay:  start {edits.start_delay_ms:+.6f} ms "
+            f"(mkvmerge used to get {mkvmerge_ms:+d} ms for this track)"
+        )
+        log(f"  edits:  {format_edit_plan(plan)}")
+        if edits.ignored_steps:
+            log(
+                "  note:   ignored step(s) <= 10 ms: "
+                + ", ".join(
+                    f"+{s.step_ms:.3f} ms @ {s.at_s:.3f}s" for s in edits.ignored_steps
+                )
+            )
+        if plan.max_output_samples is not None:
+            log(
+                f"  end:    trimmed {trimmed_end} samples "
+                f"({trimmed_end * 1000 / rate:.3f} ms) at the video end"
+            )
+        log(_format_line(res))
+        if not res.ok:
+            problems = list(res.check.problems) if res.check else ["FLAC encode failed"]
+            return failed(problems, "verification failed")
+        log(
+            f"  verify: {res.expected.output_samples} samples identical to the edited "
+            f"source; STREAMINFO total + MD5 OK; mkvmerge gets --sync 0"
+        )
+
+        swap_in_corrected_track(ctx, item, out, ctx.settings, log)
+        if ctx.audit:
+            ctx.audit.append_event(
+                "milestone",
+                f"Audio processing (stepping, delay baked): {label}",
+                {
+                    "original_codec": codec_id,
+                    "original_file": str(src),
+                    "flac_file": str(out),
+                    "start_delay_ms": edits.start_delay_ms,
+                    "tags": res.tags,
+                    "sample_rate": rate,
+                    "bits": res.fmt.out_bits,
+                    "channel_layout": res.fmt.channel_layout,
+                },
+            )
+        return AudioProcessingResult(
+            label,
+            "corrected",
+            codec_id,
+            True,
+            "stepping corrected, delay baked",
+            delay_raw_ms=edits.start_delay_ms,
+            mkvmerge_delay_ms=mkvmerge_ms,
+            samples_trimmed_start=max(-edits.start_samples, 0),
+            silence_samples_added=plan.silence_samples,
+            samples_trimmed_end=trimmed_end,
+            output_samples=res.expected.output_samples,
+            sample_rate=rate,
+            channel_layout=res.fmt.channel_layout or "",
+            native_layout=res.native_layout,
+        )
+
+    def _end_cap(
+        self, ctx: Context, item: PlanItem, runner: CommandRunner, rate: int
+    ) -> int | None:
+        """Output samples before the video end, when the end trim applies."""
+        if not ctx.settings.trim_audio_to_video_duration:
+            return None
+        if item.track.source == "Source 1":
+            return None
+        video_end_ms = self._output_video_end_ms(ctx, runner)
+        if video_end_ms is None:
+            return None
+        return end_cap_samples(ms_to_ns(video_end_ms), rate)
 
     # ------------------------------------------------------------------
     # delays and the video end

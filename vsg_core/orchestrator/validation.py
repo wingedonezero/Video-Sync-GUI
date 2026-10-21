@@ -144,11 +144,31 @@ class StepValidator:
                 f"{len(audio)} audio tracks but {len(ctx.audio_processing_results)} "
                 f"audio processing outcomes"
             )
+        outcomes = {r.label: r for r in ctx.audio_processing_results}
         for item in audio:
-            if item.delay_baked and not item.flac_converted:
-                errors.append(
-                    f"{item_label(item)}: delay baked but not a converted FLAC"
-                )
+            label = item_label(item)
+            if item.delay_baked and not (item.flac_converted or item.is_corrected):
+                errors.append(f"{label}: delay baked but not a converted FLAC")
+            if item.track.source in ctx.stepping_corrections:
+                outcome = outcomes.get(label)
+                if outcome is None or outcome.route != "corrected":
+                    errors.append(f"{label}: stepping EDL ready but not applied")
+                elif not outcome.ok and not any(
+                    entry.startswith(f"{label}:")
+                    for entry in ctx.flac_conversion_failures
+                ):
+                    errors.append(
+                        f"{label}: stepping correction failed without a report"
+                    )
+                elif outcome.ok and not (
+                    item.delay_baked
+                    and item.extracted_path
+                    and item.extracted_path.exists()
+                ):
+                    errors.append(
+                        f"{label}: stepping-corrected FLAC missing at "
+                        f"{item.extracted_path}"
+                    )
 
         if errors:
             raise PipelineValidationError(
@@ -222,45 +242,19 @@ class StepValidator:
                             f"Linear drift corrected file missing for {source_key}"
                         )
 
+        # Stepping: AudioCorrectionStep only prepares EDLs (a source without
+        # one keeps its analysis delay); validate_audio_processing checks the
+        # applied corrections.
         for analysis_key, flag_info in ctx.segment_flags.items():
             source_key = analysis_key.split("_")[0]
-
-            # Skip audio validation for subs-only stepping (no audio to correct)
-            if flag_info.get("subs_only", False):
-                # For subs-only, just verify EDL was stored
-                if source_key not in ctx.stepping_edls:
-                    errors.append(
-                        f"Stepping correction (subs-only) failed for {source_key}: "
-                        f"No EDL stored for subtitle adjustment"
-                    )
-                continue
-
-            corrected_items = [
-                item
-                for item in (ctx.extracted_items or [])
-                if (
-                    item.track.source == source_key
-                    and item.track.type == "audio"
-                    and item.is_corrected
-                    and not item.is_preserved
-                )
-            ]
-            if not corrected_items:
+            if (
+                flag_info.get("subs_only", False)
+                and source_key not in ctx.stepping_edls
+            ):
                 errors.append(
-                    f"Stepping correction failed for {source_key}: "
-                    f"No corrected track found in extraction list"
+                    f"Stepping correction (subs-only) failed for {source_key}: "
+                    f"No EDL stored for subtitle adjustment"
                 )
-            else:
-                for item in corrected_items:
-                    if item.track.props.codec_id != "FLAC":
-                        errors.append(
-                            f"Stepping corrected track for {source_key} is not FLAC: "
-                            f"{item.track.props.codec_id}"
-                        )
-                    if not item.extracted_path or not item.extracted_path.exists():
-                        errors.append(
-                            f"Stepping corrected file missing for {source_key}"
-                        )
 
         if errors:
             raise PipelineValidationError(
