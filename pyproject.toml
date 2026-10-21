@@ -40,9 +40,6 @@ dependencies = [
     # Image Processing
     "Pillow",
 
-    # Frame/Video Timing
-    "VideoTimestamps",
-
     # Frame Matching & Scene Detection
     "imagehash",
     "opencv-python",

@@ -1,0 +1,497 @@
+# vsg_core/orchestrator/steps/audio_processing_step.py
+"""
+Audio Processing step: every change to audio before the mux happens here.
+
+Order:
+1. Pending corrections (stepping / PAL / linear) run first, as before. Their
+   tracks leave this step as FLAC produced by the corrector (``corrected``).
+2. Every other audio track gets exactly one route:
+   - ``flac``: a lossless track the user asked to convert, or a track that is
+     already FLAC and needs a change. One verified FLAC encode bakes the
+     whole delay into the samples (start cut, or digital silence for a
+     positive delay) and, when "trim converted audio to the video end" is on,
+     cuts the end at the video end (never Source 1). mkvmerge then applies no
+     delay to it.
+   - ``untouched``: everything else (lossy, object audio, not requested); muxed
+     as extracted with mkvmerge ``--sync`` exactly as before.
+
+A FLAC request is never lost: if a correction was pending but produced
+nothing, the track still takes the FLAC route here. Any failure keeps the
+original track (untouched) and is reported.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+from vsg_core.audio_processing import (
+    bake_delay,
+    delay_tags,
+    end_cap_samples,
+    finish,
+    ms_to_ns,
+    plan_for_delay,
+)
+from vsg_core.audio_processing.encoder import SUPPORTED_BITS
+from vsg_core.extraction.tracks import get_stream_info_with_delays
+from vsg_core.models.audio_processing import AudioProcessingResult
+from vsg_core.models.media import StreamProps, Track
+from vsg_core.orchestrator.steps.audio_correction_step import AudioCorrectionStep
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vsg_core.audio_processing import DelayBake, EditPlan
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.models.jobs import PlanItem
+    from vsg_core.orchestrator.steps.context import Context
+
+# mkvmerge codec IDs whose decode is bit-exact. A_MS/ACM tracks are extracted
+# to WAV by ExtractStep, so they are plain PCM by the time they get here.
+_LOSSLESS_CODEC_PREFIXES = ("A_PCM", "A_MS/ACM", "A_TRUEHD", "A_MLP", "A_DTS", "A_FLAC")
+_FLAC_MAX_CHANNELS = 8
+
+
+def item_label(item: PlanItem) -> str:
+    """Stable identifier used in logs, skip/failure records, and validation."""
+    return f"{item.track.source} audio track {item.track.id}"
+
+
+def stream_bits(stream: dict) -> int | None:
+    """Effective bit depth of an ffprobe stream (raw bits win over container)."""
+    for key in ("bits_per_raw_sample", "bits_per_sample"):
+        try:
+            bits = int(stream.get(key) or 0)
+        except (TypeError, ValueError):
+            bits = 0
+        if bits > 0:
+            return bits
+    return None
+
+
+def eligibility_skip_reason(codec_id: str, stream: dict | None) -> str | None:
+    """Why a track cannot take the FLAC route, or None if it can.
+
+    ``stream`` is the ffprobe stream dict of the *extracted* file; its
+    ``profile`` string is the authority for object-based extensions
+    (mirrors AudioObjectBasedAuditor's detection).
+    """
+    cid = (codec_id or "").upper()
+    if not any(prefix in cid for prefix in _LOSSLESS_CODEC_PREFIXES):
+        return f"codec {codec_id or 'unknown'} is not lossless"
+    if stream is None:
+        return "ffprobe could not read the extracted track"
+
+    profile = str(stream.get("profile") or "")
+    if "atmos" in profile.lower():
+        return f"object-based audio ({profile})"
+    try:
+        channels = int(stream.get("channels") or 0)
+    except (TypeError, ValueError):
+        channels = 0
+    if channels > _FLAC_MAX_CHANNELS:
+        return f"{channels} channels exceed FLAC's limit of {_FLAC_MAX_CHANNELS}"
+
+    if "A_DTS" in cid:
+        profile_upper = profile.upper()
+        if "DTS:X" in profile_upper:
+            return f"object-based audio ({profile})"
+        if not profile_upper.startswith("DTS-HD MA"):
+            return f"DTS profile '{profile or 'unknown'}' is not lossless (DTS-HD MA required)"
+
+    codec_name = str(stream.get("codec_name") or "")
+    if "A_PCM" in cid or "A_MS/ACM" in cid:
+        if not codec_name.startswith("pcm_"):
+            return f"expected PCM data, found '{codec_name or 'unknown'}'"
+        if codec_name.startswith(("pcm_f", "pcm_lxf")):
+            return f"floating-point PCM ({codec_name}) cannot be stored in FLAC"
+
+    bits = stream_bits(stream)
+    if bits not in SUPPORTED_BITS:
+        return f"{bits or 'unknown'}-bit audio is not supported (16/20/24-bit only)"
+    return None
+
+
+def source1_audio_offset_ms(mkvmerge_info: dict, audio_track_id: int) -> float:
+    """Source 1 audio start relative to its video, exact to the ns, from the
+    ``minimum_timestamp`` values of ``mkvmerge -J`` (0 when absent)."""
+    tracks = mkvmerge_info.get("tracks", [])
+
+    def min_ts(track: dict) -> int:
+        return int((track.get("properties") or {}).get("minimum_timestamp") or 0)
+
+    video = next((t for t in tracks if t.get("type") == "video"), None)
+    audio = next(
+        (
+            t
+            for t in tracks
+            if t.get("type") == "audio" and t.get("id") == audio_track_id
+        ),
+        None,
+    )
+    if audio is None:
+        return 0.0
+    return (min_ts(audio) - (min_ts(video) if video else 0)) / 1_000_000
+
+
+def output_video_end_ms(
+    frame_times_ms: tuple[float, ...], video_delay_ms: float
+) -> float:
+    """Where Source 1's video ends in the output: it is muxed from a raw stream,
+    so it starts at 0 (+ its own delay) whatever its first timestamp was."""
+    if len(frame_times_ms) < 2:
+        raise ValueError("need at least two video frames")
+    last_interval = frame_times_ms[-1] - frame_times_ms[-2]
+    return frame_times_ms[-1] - frame_times_ms[0] + last_interval + video_delay_ms
+
+
+class AudioProcessingStep:
+    """Corrections, FLAC conversion, delay baking and end trim for all audio."""
+
+    def __init__(self) -> None:
+        # Per-job caches, filled on first use.
+        self._source1_info: dict | None = None
+        self._video_end_ms: float | None = None
+        self._video_end_checked = False
+
+    def run(self, ctx: Context, runner: CommandRunner) -> Context:
+        if not ctx.and_merge:
+            return ctx
+        log = runner._log_message
+
+        if ctx.settings.stepping_enabled and (
+            ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags
+        ):
+            # Local import: validation imports the steps package (cycle).
+            from vsg_core.orchestrator.validation import StepValidator
+
+            log("--- Advanced Audio Correction ---")
+            ctx = AudioCorrectionStep().run(ctx, runner)
+            StepValidator.validate_correction(ctx)
+
+        audio_items = [
+            item
+            for item in (ctx.extracted_items or [])
+            if item.track.type == "audio" and not item.is_preserved
+        ]
+        if not audio_items:
+            return ctx
+
+        for item in audio_items:
+            result = self._process(ctx, item, runner)
+            ctx.audio_processing_results.append(result)
+
+        flac = [r for r in ctx.audio_processing_results if r.route == "flac" and r.ok]
+        log(
+            f"[AudioProcessing] Done: {len(flac)} track(s) baked into FLAC, "
+            f"{sum(r.route == 'untouched' for r in ctx.audio_processing_results)} untouched, "
+            f"{sum(r.route == 'corrected' for r in ctx.audio_processing_results)} corrected."
+        )
+        return ctx
+
+    # ------------------------------------------------------------------
+    # routing
+    # ------------------------------------------------------------------
+
+    def _process(
+        self, ctx: Context, item: PlanItem, runner: CommandRunner
+    ) -> AudioProcessingResult:
+        log = runner._log_message
+        label = item_label(item)
+        codec_id = item.track.props.codec_id or ""
+
+        if item.is_corrected:
+            detail = "corrected by stepping/drift correction (FLAC from the corrector)"
+            if item.convert_to_flac:
+                ctx.flac_conversion_skips.append(f"{label}: {detail}")
+            log(f"[AudioProcessing] {label} ({codec_id}) -> corrected: {detail}")
+            return AudioProcessingResult(label, "corrected", codec_id, True, detail)
+
+        is_flac = "A_FLAC" in codec_id.upper()
+        if not (item.convert_to_flac or is_flac):
+            return self._untouched(ctx, item, runner, "FLAC conversion not requested")
+
+        stream = self._probe_stream(item.extracted_path, runner, ctx.tool_paths)
+        reason = eligibility_skip_reason(codec_id, stream)
+        if reason is not None:
+            if item.convert_to_flac:
+                ctx.flac_conversion_skips.append(f"{label}: {reason}")
+            return self._untouched(ctx, item, runner, reason)
+
+        assert stream is not None
+        delay_ms = self._baked_delay_ms(ctx, item, runner)
+        rate = int(stream["sample_rate"])
+        bake = bake_delay(ms_to_ns(delay_ms), rate)
+        cap = None
+        if (
+            ctx.settings.trim_audio_to_video_duration
+            and item.track.source != "Source 1"
+        ):
+            video_end_ms = self._output_video_end_ms(ctx, runner)
+            if video_end_ms is not None:
+                cap = end_cap_samples(ms_to_ns(video_end_ms), rate)
+        plan = plan_for_delay(bake, cap)
+
+        if is_flac and not item.convert_to_flac and bake.samples == 0 and cap is None:
+            return self._untouched(ctx, item, runner, "already FLAC, nothing to change")
+
+        return self._to_flac(ctx, item, runner, delay_ms, bake, plan)
+
+    def _untouched(
+        self, ctx: Context, item: PlanItem, runner: CommandRunner, reason: str
+    ) -> AudioProcessingResult:
+        label = item_label(item)
+        codec_id = item.track.props.codec_id or ""
+        runner._log_message(
+            f"[AudioProcessing] {label} ({codec_id}) -> untouched: {reason}"
+        )
+        return AudioProcessingResult(label, "untouched", codec_id, True, reason)
+
+    # ------------------------------------------------------------------
+    # FLAC route
+    # ------------------------------------------------------------------
+
+    def _to_flac(
+        self,
+        ctx: Context,
+        item: PlanItem,
+        runner: CommandRunner,
+        delay_ms: float,
+        bake: DelayBake,
+        plan: EditPlan,
+    ) -> AudioProcessingResult:
+        log = runner._log_message
+        label = item_label(item)
+        codec_id = item.track.props.codec_id or ""
+        src = item.extracted_path
+        assert src is not None
+        out = ctx.temp_dir / f"{src.stem}_processed.flac"
+        mkvmerge_ms = self._mkvmerge_delay_ms(ctx, item)
+
+        log(
+            f"[AudioProcessing] {label} ({codec_id}, {src.name}) -> FLAC with the delay baked in"
+        )
+        res = finish(
+            src,
+            0,
+            plan,
+            out,
+            delay_tags(delay_ms, bake, plan, codec_id),
+            runner,
+            ctx.tool_paths,
+        )
+        fmt = res.fmt
+        layout = fmt.channel_layout or f"unnamed {fmt.channels}-channel (FLAC default)"
+        trimmed_end = int(res.tags.get("VSG_SAMPLES_TRIMMED_END", "0"))
+
+        log(
+            f"  delay:  raw {delay_ms:+.6f} ms (mkvmerge would have used {mkvmerge_ms:+d} ms)"
+        )
+        if bake.samples > 0:
+            start = f"added {bake.silence_added} samples of digital silence"
+        elif bake.samples < 0:
+            start = f"cut {bake.trimmed_start} samples"
+        else:
+            start = "no change"
+        log(
+            f"  start:  {start} ({abs(bake.samples) * 1000 / fmt.sample_rate:.6f} ms), "
+            f"residual {bake.residual_ns / 1e6:+.6f} ms"
+        )
+        if plan.max_output_samples is not None:
+            log(
+                f"  end:    trimmed {trimmed_end} samples "
+                f"({trimmed_end * 1000 / fmt.sample_rate:.3f} ms) at the video end"
+            )
+        log(
+            f"  format: {fmt.sample_rate} Hz, {fmt.bits}-bit, {layout}"
+            + (
+                ""
+                if res.native_layout
+                else " — NOT a FLAC-native layout: stored with a "
+                "channel-mask tag; players that ignore it would assume the default order"
+            )
+        )
+
+        if not res.ok:
+            problems = list(res.check.problems) if res.check else ["FLAC encode failed"]
+            log(
+                f"[ERROR] [AudioProcessing] {label}: {'; '.join(problems)}. Keeping the original track."
+            )
+            ctx.flac_conversion_failures.append(f"{label}: {'; '.join(problems)}")
+            return AudioProcessingResult(
+                label,
+                "flac",
+                codec_id,
+                False,
+                "verification failed, original kept",
+                delay_raw_ms=delay_ms,
+                mkvmerge_delay_ms=mkvmerge_ms,
+                problems=tuple(problems),
+            )
+
+        log(
+            f"  verify: {res.expected.output_samples} samples identical to the source plan; "
+            f"STREAMINFO total + MD5 OK; mkvmerge gets --sync 0"
+        )
+
+        # Swap the item to the FLAC; keep the original path for auditing.
+        item.original_extracted_path = src
+        item.extracted_path = out
+        item.flac_converted = True
+        item.delay_baked = True
+        original_props = item.track.props
+        item.track = Track(
+            source=item.track.source,
+            id=item.track.id,
+            type=item.track.type,
+            props=StreamProps(
+                codec_id="A_FLAC", lang=original_props.lang, name=original_props.name
+            ),
+        )
+        ctx.flac_conversions.append(label)
+        if ctx.audit:
+            ctx.audit.append_event(
+                "milestone",
+                f"Audio processing (FLAC, delay baked): {label}",
+                {
+                    "original_codec": codec_id,
+                    "original_file": str(src),
+                    "flac_file": str(out),
+                    "delay_raw_ms": delay_ms,
+                    "mkvmerge_delay_ms": mkvmerge_ms,
+                    "tags": res.tags,
+                    "sample_rate": fmt.sample_rate,
+                    "bits": fmt.bits,
+                    "channel_layout": fmt.channel_layout,
+                },
+            )
+        return AudioProcessingResult(
+            label,
+            "flac",
+            codec_id,
+            True,
+            "converted, delay baked",
+            delay_raw_ms=delay_ms,
+            mkvmerge_delay_ms=mkvmerge_ms,
+            samples_trimmed_start=bake.trimmed_start,
+            silence_samples_added=bake.silence_added,
+            samples_trimmed_end=trimmed_end,
+            residual_ns=bake.residual_ns,
+            output_samples=res.expected.output_samples,
+            sample_rate=fmt.sample_rate,
+            channel_layout=fmt.channel_layout or "",
+            native_layout=res.native_layout,
+        )
+
+    # ------------------------------------------------------------------
+    # delays and the video end
+    # ------------------------------------------------------------------
+
+    def _baked_delay_ms(
+        self, ctx: Context, item: PlanItem, runner: CommandRunner
+    ) -> float:
+        """The track's delay as mkvmerge would apply it, but unrounded."""
+        delays = ctx.delays
+        global_shift = delays.global_shift_ms if delays else 0
+        if item.track.source == "Source 1":
+            if self._source1_info is None:
+                src1 = ctx.sources.get("Source 1")
+                self._source1_info = (
+                    get_stream_info_with_delays(str(src1), runner, ctx.tool_paths)
+                    if src1
+                    else None
+                ) or {}
+            # Source 1 video only gets the (whole-ms) global shift, so its audio
+            # follows the video's real position: exact offset + that shift.
+            return (
+                source1_audio_offset_ms(self._source1_info, item.track.id)
+                + global_shift
+            )
+        sync_key = (
+            item.sync_to if item.track.source == "External" else item.track.source
+        )
+        if not delays or sync_key is None:
+            return 0.0
+        if sync_key in delays.raw_source_delays_ms:
+            # The raw delay carries the raw (fractional) global shift, but the
+            # video is moved by the whole-ms shift: swap one for the other.
+            return (
+                delays.raw_source_delays_ms[sync_key]
+                - delays.raw_global_shift_ms
+                + global_shift
+            )
+        return float(delays.source_delays_ms.get(sync_key, 0))
+
+    def _mkvmerge_delay_ms(self, ctx: Context, item: PlanItem) -> int:
+        """What --sync would have been (whole ms), for the log."""
+        delays = ctx.delays
+        global_shift = delays.global_shift_ms if delays else 0
+        if item.track.source == "Source 1":
+            return round(item.container_delay_ms) + global_shift
+        sync_key = (
+            item.sync_to if item.track.source == "External" else item.track.source
+        )
+        return int(delays.source_delays_ms.get(sync_key or "", 0)) if delays else 0
+
+    def _output_video_end_ms(self, ctx: Context, runner: CommandRunner) -> float | None:
+        if self._video_end_checked:
+            return self._video_end_ms
+        self._video_end_checked = True
+        from vsg_core.subtitles.frame_grids import frame_table_for
+
+        log = runner._log_message
+        src1 = ctx.sources.get("Source 1")
+        table = frame_table_for(ctx, str(src1), log) if src1 else None
+        if table is None:
+            log(
+                "[WARNING] [AudioProcessing] Could not read Source 1's real frame "
+                "timestamps — converted tracks are NOT trimmed to the video end."
+            )
+            return None
+        video_delay = ctx.delays.global_shift_ms if ctx.delays else 0
+        self._video_end_ms = output_video_end_ms(table.times_ms, video_delay)
+        log(
+            f"[AudioProcessing] Video end for trimming: {self._video_end_ms:.3f} ms "
+            f"({table.num_frames} frames, from {table.origin}; container timestamps are whole ms)"
+        )
+        return self._video_end_ms
+
+    # ------------------------------------------------------------------
+
+    def _probe_stream(
+        self,
+        path: Path | None,
+        runner: CommandRunner,
+        tool_paths: dict[str, str | None],
+    ) -> dict | None:
+        """First audio stream of ``path`` per ffprobe, or None."""
+        if path is None or not path.exists():
+            return None
+        # Raw TrueHD/DTS elementary streams need a generous probe window for
+        # reliable profile (Atmos/DTS:X/MA) detection.
+        out = runner.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-analyzeduration",
+                "10M",
+                "-probesize",
+                "50M",
+                "-print_format",
+                "json",
+                "-show_streams",
+                "-select_streams",
+                "a:0",
+                str(path),
+            ],
+            tool_paths,
+        )
+        if not out or not isinstance(out, str):
+            return None
+        try:
+            streams = json.loads(out).get("streams") or []
+        except json.JSONDecodeError:
+            return None
+        return streams[0] if streams else None

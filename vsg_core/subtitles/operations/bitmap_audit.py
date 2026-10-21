@@ -11,14 +11,15 @@ Tier model:
 * **Tier 1 (always)** — sanity checks that apply regardless of where
   the delay came from: dropped events, zero/negative/excessive
   durations, monotonicity, video-duration overflow.
-* **Tier 2 (when an exact frame grid is known)** — frame-alignment check
+* **Tier 2 (when Source 1 has a frame grid)** — frame-alignment check
   using the same model as text-sub ``frame_audit``: for each event
-  endpoint, compute the source frame ``F_src = clock.frame_of(source_pts)``
-  on the exact integer container grid (:class:`FrameClock`), the expected
-  output frame ``F_target = F_src + frame_shift``, and the actual output
-  frame ``F_actual = clock.frame_of(shifted_pts)``. An event is "correct"
-  iff ``F_actual == F_target``. VFR / MPEG-2 / interlaced targets have no
-  such grid — callers pass no clock and Tier 2 is skipped.
+  endpoint, find its source frame ``F_src`` on the real frame timeline of
+  the video the bitmaps were timed on, the expected output frame
+  ``F_target`` on Source 1 (``F_src + R`` for a verified frame match, else
+  the Source 1 frame nearest to the source frame's time plus the delay),
+  and the actual output frame ``F_actual`` the shifted time renders on. An
+  event is "correct" iff ``F_actual == F_target``. Without a Source 1 grid
+  (multi-source jobs onto MPEG-2 / interlaced / VFR) Tier 2 is skipped.
 
 **Audit-only model** — the shifter applies only the uniform shift
 (matches mkvmerge ``--sync`` byte-for-byte). When ``F_actual`` does
@@ -32,11 +33,15 @@ would have produced.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
+    from collections.abc import Sequence
+
+    from vsg_core.subtitles.frame_utils.frame_table import FrameGrid
 
 # Per-event sanity bounds (ms). Bitmap subs longer than 60 s or shorter
 # than 100 ms are suspicious but legal; we flag them rather than
@@ -130,7 +135,7 @@ class Tier2FrameAlignmentResult:
 
     target_fps: float
     frame_period_ms: float
-    frame_shift: int  # round(delay_ms / period); the intended frame translation
+    frame_shift: int  # intended frame translation (matched offset, or delay in frames)
     starts_total: int
     starts_on_target: int  # F_actual == F_target
     ends_total: int  # closed events only
@@ -140,6 +145,7 @@ class Tier2FrameAlignmentResult:
     max_start_drift_ms: int  # largest minimum nudge that would re-align a start
     max_end_drift_ms: int
     endpoints: tuple[EndpointAudit, ...] = field(default_factory=tuple)
+    grid_label: str = ""  # Source 1 frame grid the audit was judged on
 
     @property
     def all_starts_on_target(self) -> bool:
@@ -222,21 +228,150 @@ def tier1_sanity(
 # ----------------------------------------------------------------------
 
 
-def frame_of(ts_ms: float, clock: FrameClock) -> int:
+@dataclass(frozen=True, slots=True)
+class FrameMapping:
+    """Where each bitmap event belongs on Source 1's frames.
+
+    ``target`` is Source 1's frame grid; ``source`` is the grid of the video
+    the bitmaps were timed on (Source 1 itself for its own tracks). The
+    intended Source 1 frame of an event time depends on where the delay came
+    from:
+
+    * verified frame match (``frame_offset`` R): source frame k -> k + R
+    * whole-frame delay that could not be verified (``whole_frame_delay``):
+      the time's Source 1 frame moved by the delay in whole frames (exact
+      frame-rate fraction ``fps`` when known)
+    * correlation delay: the frame the EXACT shifted time lands on — the same
+      target text-subtitle surgical rounding protects
+    """
+
+    source: FrameGrid
+    target: FrameGrid
+    frame_offset: int | None = None
+    fps: Fraction | None = None  # exact target rate (e.g. 24000/1001) if known
+    whole_frame_delay: bool = False
+
+    @property
+    def frame_based(self) -> bool:
+        """True when the delay means "N whole frames" (prefer rounding down)."""
+        return self.frame_offset is not None or self.whole_frame_delay
+
+    def source_frame(self, source_ms: float) -> int:
+        grid = self.source if self.frame_offset is not None else self.target
+        return grid.frame_of(source_ms)
+
+    def intended_frame(self, source_ms: float, delay_ms: float) -> int:
+        if self.frame_offset is not None:
+            return self.source.frame_of(source_ms) + self.frame_offset
+        if self.whole_frame_delay:
+            return self.target.frame_of(source_ms) + self.nominal_shift(delay_ms)
+        return self.target.frame_of(source_ms + round(delay_ms, 6))
+
+    def nominal_shift(self, delay_ms: float) -> int:
+        """The delay in whole frames (the matched offset when there is one)."""
+        if self.frame_offset is not None:
+            return self.frame_offset
+        exact = Fraction(round(delay_ms, 6))
+        if self.fps is not None:
+            return round(exact * self.fps / 1000)
+        return round(float(exact) / self.target.frame_duration_ms)
+
+    def in_target(self, frame: int) -> bool:
+        """Real timelines end; frames past either end can't be judged."""
+        n = getattr(self.target, "num_frames", None)
+        return frame >= 0 and (n is None or frame < n)
+
+
+@dataclass(frozen=True, slots=True)
+class UniformDelayChoice:
+    """The whole-ms delay picked for a bitmap track (uniform surgical rounding)."""
+
+    requested_ms: float
+    applied_ms: int
+    plain_round_ms: int  # what round(delay) — mkvmerge --sync — would write
+    method: Literal["exact", "floor", "ceil"]
+    on_target: int  # endpoints on their intended frame with applied_ms
+    plain_on_target: int  # ... with plain_round_ms
+    total: int  # endpoints that could be judged
+
+    @property
+    def changed(self) -> bool:
+        return self.applied_ms != self.plain_round_ms
+
+
+def choose_uniform_delay(
+    endpoints_ms: Sequence[float], delay_ms: float, mapping: FrameMapping
+) -> UniformDelayChoice:
+    """Surgical rounding for a whole bitmap track.
+
+    A bitmap track moves by ONE whole-millisecond delay (every segment of every
+    event shifts together, so palette updates stay in lockstep). This picks the
+    whole ms — the delay rounded down or up — that keeps the most event starts
+    and ends on their intended Source 1 frame. On a tie (usually both or one
+    of them is 100%) the proven rule decides: round down for whole-frame
+    delays, round up for correlation delays. The delay is taken at microsecond
+    precision first, so float noise (1386.9999999) cannot move a millisecond.
+    """
+    d = round(delay_ms, 6)
+    lo, hi = math.floor(d), math.ceil(d)
+    plain = int(round(delay_ms))
+    wanted = [
+        (t, f)
+        for t in endpoints_ms
+        if mapping.in_target(f := mapping.intended_frame(t, delay_ms))
+    ]
+
+    def on_target(applied: int) -> int:
+        return sum(mapping.target.frame_of(t + applied) == f for t, f in wanted)
+
+    if lo == hi:
+        ok = on_target(lo)
+        return UniformDelayChoice(
+            d, lo, plain, "exact", ok, on_target(plain), len(wanted)
+        )
+    ok_lo, ok_hi = on_target(lo), on_target(hi)
+    if ok_lo != ok_hi:
+        pick_lo = ok_lo > ok_hi
+    else:
+        pick_lo = mapping.frame_based
+    applied = lo if pick_lo else hi
+    return UniformDelayChoice(
+        requested_ms=d,
+        applied_ms=applied,
+        plain_round_ms=plain,
+        method="floor" if pick_lo else "ceil",
+        on_target=ok_lo if pick_lo else ok_hi,
+        plain_on_target=ok_lo if plain == lo else ok_hi,
+        total=len(wanted),
+    )
+
+
+def describe_delay_choice(tag: str, choice: UniformDelayChoice) -> str:
+    """One log line: requested vs applied whole-ms delay and frame accuracy."""
+    line = (
+        f"[{tag}] uniform surgical delay: requested {choice.requested_ms:+.3f} ms -> "
+        f"{choice.applied_ms:+d} ms ({choice.method}); "
+        f"{choice.on_target}/{choice.total} event starts/ends on their intended frame"
+    )
+    if choice.changed:
+        line += (
+            f" (plain rounding {choice.plain_round_ms:+d} ms would put "
+            f"{choice.plain_on_target}/{choice.total})"
+        )
+    return line
+
+
+def frame_of(ts_ms: float, clock: FrameGrid) -> int:
     """Return the video frame ``ts_ms`` renders against.
 
-    Delegates to :meth:`FrameClock.frame_of` — the exact integer container
-    grid, "first real frame at or after the timestamp" (player display
-    semantics). The previous float-grid form (``floor(ts / (1000/fps))``)
-    was 1ms wrong at ~4% of NTSC frames, the exact defect FrameClock was
-    built to eliminate.
+    "First real frame at or after the timestamp" (player display semantics),
+    judged on the grid's real container times — never a float
+    ``floor(ts / (1000/fps))`` model, which is 1 ms wrong at ~4% of NTSC frames.
     """
     return clock.frame_of(ts_ms)
 
 
-def integer_ms_window_for_frame(
-    target_frame: int, clock: FrameClock
-) -> tuple[int, int]:
+def integer_ms_window_for_frame(target_frame: int, clock: FrameGrid) -> tuple[int, int]:
     """Return ``(lo_ms, hi_ms)`` — the inclusive integer-ms range
     whose values all satisfy ``frame_of(ms, clock) == target_frame``.
 
@@ -244,13 +379,13 @@ def integer_ms_window_for_frame(
     ``(frame_ms(n-1), frame_ms(n)]``, so the integer window is
     ``[frame_ms(n-1) + 1, frame_ms(n)]``.
     """
-    hi = clock.frame_ms(target_frame)
-    lo = clock.frame_ms(target_frame - 1) + 1 if target_frame > 0 else 0
+    hi = math.floor(clock.frame_ms(target_frame))
+    lo = math.floor(clock.frame_ms(target_frame - 1)) + 1 if target_frame > 0 else 0
     return lo, hi
 
 
 def pick_integer_ms_in_frame(
-    desired_ms: float, target_frame: int, clock: FrameClock
+    desired_ms: float, target_frame: int, clock: FrameGrid
 ) -> int | None:
     """Pick the integer ms inside ``target_frame``'s window closest to ``desired_ms``.
 

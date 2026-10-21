@@ -23,6 +23,7 @@ from .pipeline_components import (
     SyncPlanner,
     ToolValidator,
 )
+from .system.ffmpeg_tools import describe_ffmpeg_tools
 
 
 class JobPipeline:
@@ -108,6 +109,8 @@ class JobPipeline:
             )
 
         log_to_all(f"=== Starting Job: {Path(source1_file).name} ===")
+        for line in describe_ffmpeg_tools():
+            log_to_all(f"[Tools] {line}")
         self.progress(0.0)
 
         # --- 4. Validate Merge Requirements ---
@@ -227,14 +230,6 @@ class JobPipeline:
             # --- 15. Cleanup ---
             if ctx_temp_dir and ctx_temp_dir.exists():
                 shutil.rmtree(ctx_temp_dir, ignore_errors=True)
-
-            # Clear VFR cache after each job to release VideoTimestamps instances
-            try:
-                from vsg_core.subtitles.frame_utils import clear_vfr_cache
-
-                clear_vfr_cache()
-            except ImportError:
-                pass  # Module might not be loaded
 
             log_to_all("=== Job Finished ===")
             LogManager.cleanup_log(logger, handler)

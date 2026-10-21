@@ -227,6 +227,10 @@ class BaseAuditor:
         tr = plan_item.track
         global_shift = self.ctx.delays.global_shift_ms if self.ctx.delays else 0
 
+        # Delay baked into the FLAC samples: mkvmerge applied none.
+        if plan_item.delay_baked:
+            return 0.0
+
         # Source 1 tracks use their original container delays PLUS the global shift
         # BUT: Only for audio/video, never for subtitles
         if tr.source == "Source 1" and tr.type != "subtitles":
@@ -236,7 +240,7 @@ class BaseAuditor:
         # delay is in the FLAC samples, not in mkvmerge --sync.  mkvmerge only
         # applies Source 1's audio-container delay (stashed in
         # container_delay_ms by _swap_corrected_track).  Mirror
-        # options_builder and audio_trim so the audit matches reality.
+        # options_builder so the audit matches reality.
         if plan_item.is_pre_aligned:
             return float(plan_item.container_delay_ms + global_shift)
 

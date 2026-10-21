@@ -112,7 +112,7 @@ class BitmapTimingAuditor(BaseAuditor):
                     "     Tier 2 (frame audit): skipped (shifter returned no result)"
                 )
             else:
-                self.log("     Tier 2 (frame audit): skipped (target fps unavailable)")
+                self.log("     Tier 2 (frame audit): skipped (no Source 1 frame grid)")
             return
 
         self.log(
@@ -120,6 +120,7 @@ class BitmapTimingAuditor(BaseAuditor):
             f"target {t2.target_fps:.3f} fps, "
             f"frame period {t2.frame_period_ms:.3f} ms, "
             f"frame_shift {t2.frame_shift:+d} frame(s)"
+            + (f", grid: {t2.grid_label}" if t2.grid_label else "")
         )
         starts_pct = (
             100.0 * t2.starts_on_target / t2.starts_total if t2.starts_total else 0.0

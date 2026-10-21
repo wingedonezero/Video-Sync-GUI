@@ -1,8 +1,11 @@
 # vsg_qt/options_dialog/tabs.py
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -23,10 +26,9 @@ from vsg_core.analysis.source_separation import (
     get_installed_models,
     get_installed_models_json_path,
 )
+from vsg_core.system.ffmpeg_tools import missing_binaries, system_path, tool_version
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vsg_core.font_manager import FontInfo
 
 
@@ -94,6 +96,23 @@ class StorageTab(QWidget):
         self.widgets["videodiff_path"].setToolTip(
             "Optional. The full path to the 'videodiff' executable if it's not in your system's PATH."
         )
+        self.widgets["ffmpeg_dir"] = _dir_input()
+        self.widgets["ffmpeg_dir"].setToolTip(
+            "Optional. A folder holding both 'ffmpeg' and 'ffprobe' (e.g. a static\n"
+            "build) to run instead of the system ones. Leave empty for the system\n"
+            "tools. Only the command-line tools change; PyAV and VapourSynth keep\n"
+            "the system FFmpeg libraries. Applies to the next job; every job log\n"
+            "names the build it used."
+        )
+        self._ffmpeg_status = QLabel()
+        self._ffmpeg_status.setWordWrap(True)
+        self._ffmpeg_status.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        ffmpeg_edit = self.widgets["ffmpeg_dir"].findChild(QLineEdit)
+        assert ffmpeg_edit is not None
+        ffmpeg_edit.textChanged.connect(self._update_ffmpeg_status)
+        self._update_ffmpeg_status("")
         self.widgets["ocr_custom_wordlist_path"] = _file_input()
         self.widgets["ocr_custom_wordlist_path"].setToolTip(
             "Path to custom wordlist file for OCR. Contains words to not flag as unknown (anime names, romaji, etc.). One word per line."
@@ -102,6 +121,8 @@ class StorageTab(QWidget):
         f.addRow("Temporary Directory:", self.widgets["temp_root"])
         f.addRow("Reports Directory:", self.widgets["logs_folder"])
         f.addRow("VideoDiff Path (optional):", self.widgets["videodiff_path"])
+        f.addRow("FFmpeg Folder (optional):", self.widgets["ffmpeg_dir"])
+        f.addRow("", self._ffmpeg_status)
         f.addRow("OCR Custom Wordlist:", self.widgets["ocr_custom_wordlist_path"])
         main_layout.addWidget(paths_group)
 
@@ -118,6 +139,31 @@ class StorageTab(QWidget):
         main_layout.addWidget(maint_group)
 
         main_layout.addStretch()
+
+    def _update_ffmpeg_status(self, text: str) -> None:
+        """Show which ffmpeg/ffprobe a job would run with the folder as typed."""
+        folder = text.strip()
+        if folder:
+            path = Path(folder).expanduser()
+            missing = missing_binaries(path)
+            if missing:
+                self._ffmpeg_status.setText(
+                    f"⚠ No executable {' or '.join(missing)} in this folder — "
+                    "jobs will use the system ffmpeg/ffprobe."
+                )
+                return
+            ffmpeg = str(path / "ffmpeg")
+            source = "this folder"
+        else:
+            found = shutil.which("ffmpeg", path=system_path())
+            if found is None:
+                self._ffmpeg_status.setText("⚠ No ffmpeg found on the system PATH.")
+                return
+            ffmpeg = found
+            source = "system"
+        self._ffmpeg_status.setText(
+            f"Using {source}: {ffmpeg} — {tool_version(ffmpeg)}"
+        )
 
 
 class OCRTab(QWidget):
@@ -2260,12 +2306,14 @@ class MergeBehaviorTab(QWidget):
             "Prevents mkvmerge from using header removal compression.\nThis is enabled by default as it can sometimes cause issues."
         )
         self.widgets["trim_audio_to_video_duration"] = QCheckBox(
-            "Trim audio tracks that extend past video end"
+            "Trim converted (FLAC) audio to the video end"
         )
         self.widgets["trim_audio_to_video_duration"].setToolTip(
-            "When audio is longer than video (e.g. streaming OP/ED not on disc),\n"
-            "trim it to match the video duration before muxing.\n"
-            "Uses lossless stream copy — no re-encoding."
+            "Audio tracks converted to FLAC are cut to the exact sample where the\n"
+            "Source 1 video ends (e.g. a streaming OP/ED that is not on the disc).\n"
+            "The cut is lossless and recorded in the track's VSG_SAMPLES_TRIMMED_END\n"
+            "tag. Source 1's own audio, lossy tracks, tracks not converted to FLAC,\n"
+            "video and subtitles are never trimmed."
         )
         form1.addWidget(self.widgets["apply_dialog_norm_gain"])
         form1.addWidget(self.widgets["disable_track_statistics_tags"])

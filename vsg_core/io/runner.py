@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-from collections.abc import Callable
+import tempfile
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from vsg_core.models import AppSettings
 
 # Import GPU environment support
@@ -41,6 +43,43 @@ class CommandRunner:
         ts = datetime.now().strftime("%H:%M:%S")
         line = f"[{ts}] {message}"
         self.log(line)
+
+    def stream_binary(
+        self,
+        cmd: list[str],
+        tool_paths: dict,
+        chunk_bytes: int = 1 << 22,
+    ) -> Iterator[bytes]:
+        """Run ``cmd`` and yield its stdout in chunks, without holding it all.
+
+        For outputs too large to capture (a whole decoded audio track). stderr
+        goes to a temp file so a chatty tool can never block the pipe. Raises
+        RuntimeError (after logging the stderr tail) if the command fails.
+        """
+        resolved = tool_paths.get(cmd[0]) or cmd[0]
+        full_cmd = [resolved, *list(map(str, cmd[1:]))]
+        self._log_message("$ " + " ".join(shlex.quote(str(c)) for c in full_cmd))
+        with tempfile.TemporaryFile() as err:
+            proc = subprocess.Popen(
+                full_cmd,
+                stdout=subprocess.PIPE,
+                stderr=err,
+                env=get_subprocess_environment(),
+            )
+            assert proc.stdout is not None
+            try:
+                while chunk := proc.stdout.read(chunk_bytes):
+                    yield chunk
+            finally:
+                proc.stdout.close()
+                rc = proc.wait()
+            if rc != 0:
+                err.seek(0)
+                tail = err.read()[-2000:].decode("utf-8", errors="replace").strip()
+                self._log_message(f"[!] Command failed with exit code {rc}")
+                if tail:
+                    self._log_message(f"[stderr/tail]\n{tail}")
+                raise RuntimeError(f"{cmd[0]} failed with exit code {rc}")
 
     def run(
         self,

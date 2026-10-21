@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QMessageBox
 from vsg_core.job_discovery import discover_jobs
 from vsg_core.job_layouts import JobLayoutManager
 from vsg_core.reporting import DebugOutputManager, ReportWriter
+from vsg_core.system.ffmpeg_tools import apply_ffmpeg_dir
 from vsg_qt.job_queue_dialog import JobQueueDialog
 from vsg_qt.options_dialog import OptionsDialog
 from vsg_qt.report_dialogs import BatchCompletionDialog
@@ -35,12 +36,30 @@ class MainController:
         self.report_writer: ReportWriter | None = None
         self.debug_manager: DebugOutputManager | None = None
         self._job_counter: int = 0
+        # While a batch runs, the FFmpeg folder must not change under it.
+        self._batch_running = False
+        # The log widget doesn't exist yet: apply_config_to_ui reports this.
+        self._startup_ffmpeg_problem = apply_ffmpeg_dir(
+            self.config.settings.ffmpeg_dir
+        ).problem
 
     def open_options_dialog(self) -> None:
         dialog = OptionsDialog(self.config, self.v)
         if dialog.exec():
             self.config.save()
             self.append_log("Settings saved.")
+            if self._batch_running:
+                self.append_log(
+                    "[Tools] FFmpeg folder changes apply after the current batch."
+                )
+            else:
+                self.apply_ffmpeg_dir()
+
+    def apply_ffmpeg_dir(self) -> None:
+        """Point PATH at the configured FFmpeg folder (or the system tools)."""
+        result = apply_ffmpeg_dir(self.config.settings.ffmpeg_dir)
+        if result.problem:
+            self.append_log(f"[WARNING] [Tools] {result.problem}")
 
     def apply_config_to_ui(self) -> None:
         v = self.v
@@ -48,6 +67,9 @@ class MainController:
         v.sec_input.setText(self.config.get("last_sec_path", ""))
         v.ter_input.setText(self.config.get("last_ter_path", ""))
         v.archive_logs_check.setChecked(self.config.get("archive_logs", True))
+        if self._startup_ffmpeg_problem:
+            self.append_log(f"[WARNING] [Tools] {self._startup_ffmpeg_problem}")
+            self._startup_ffmpeg_problem = None
 
     def save_ui_to_config(self) -> None:
         v = self.v
@@ -193,6 +215,8 @@ class MainController:
         # Concurrent access to the shared object (even read-only) can cause segfaults
         # in PySide6/shiboken6 when the GIL is released during C++ calls.
         worker_settings = self.config.settings.model_copy(deep=True)
+        self.apply_ffmpeg_dir()
+        self._batch_running = True
         self.worker = JobWorker(
             worker_settings, jobs, and_merge, output_dir, self.debug_manager
         )
@@ -220,6 +244,8 @@ class MainController:
             self.report_writer.add_job(result, self._job_counter)
 
     def batch_finished(self, all_results: list) -> None:
+        self._batch_running = False
+        self.apply_ffmpeg_dir()  # picks up a folder changed during the batch
         self.update_status(f"All {len(all_results)} jobs finished.")
         self.v.progress_bar.setValue(100)
 

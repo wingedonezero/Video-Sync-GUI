@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
 
-    from .frame_utils.frame_clock import FrameClock
+    from .frame_utils.frame_table import FrameGrid
     from .frame_utils.surgical_rounding import SurgicalBatchStats
 
 # =============================================================================
@@ -931,7 +931,7 @@ class SubtitleData:
         self,
         path: Path | str,
         rounding: str = "floor",
-        clock: FrameClock | None = None,
+        clock: FrameGrid | None = None,
     ) -> SurgicalBatchStats | None:
         """
         Save as ASS file.
@@ -946,7 +946,7 @@ class SubtitleData:
         Args:
             path: Output path
             rounding: Rounding mode ("floor", "round", "ceil")
-            clock: Exact CFR frame grid (None = standard rounding only)
+            clock: Target frame grid (None = standard rounding only)
 
         Returns:
             SurgicalBatchStats if surgical rounding was applied, None otherwise
@@ -959,7 +959,7 @@ class SubtitleData:
         self,
         path: Path | str,
         rounding: str = "round",
-        clock: FrameClock | None = None,
+        clock: FrameGrid | None = None,
     ) -> SurgicalBatchStats | None:
         """
         Save as SRT file.
@@ -976,7 +976,7 @@ class SubtitleData:
         self,
         path: Path | str,
         rounding: str | None = None,
-        clock: FrameClock | None = None,
+        clock: FrameGrid | None = None,
     ) -> SurgicalBatchStats | None:
         """
         Save to file, format determined by extension.
@@ -984,7 +984,7 @@ class SubtitleData:
         Args:
             path: Output path
             rounding: Rounding mode ("floor", "round", "ceil")
-            clock: Exact CFR frame grid (None = standard rounding only)
+            clock: Target frame grid (None = standard rounding only)
 
         Returns:
             SurgicalBatchStats if surgical rounding was applied, None otherwise

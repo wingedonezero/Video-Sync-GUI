@@ -14,10 +14,9 @@ from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps import (
     AnalysisStep,
     AttachmentsStep,
-    AudioCorrectionStep,
+    AudioProcessingStep,
     ChaptersStep,
     Context,
-    ConversionStep,
     ExtractStep,
     MuxStep,
     SubtitlesStep,
@@ -145,38 +144,18 @@ class Orchestrator:
             log(f"[FATAL] Extraction phase failed: {e}")
             raise RuntimeError(f"Extraction phase failed: {e}") from e
 
-        if any(
-            item.track.type == "audio" and item.convert_to_flac
-            for item in (ctx.extracted_items or [])
-        ):
-            log("--- Audio FLAC Conversion Phase ---")
-            progress(0.45)
-            try:
-                ctx = ConversionStep().run(ctx, runner)
-                StepValidator.validate_conversion(ctx)
-                log("[Validation] Audio FLAC conversion phase validated successfully.")
-            except PipelineValidationError as e:
-                log(f"[FATAL] Audio FLAC conversion validation failed: {e}")
-                raise
-            except Exception as e:
-                log(f"[FATAL] Audio FLAC conversion phase failed: {e}")
-                raise RuntimeError(f"Audio FLAC conversion phase failed: {e}") from e
-
-        if ctx.settings.stepping_enabled and (
-            ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags
-        ):
-            log("--- Advanced Audio Correction Phase ---")
-            progress(0.50)
-            try:
-                ctx = AudioCorrectionStep().run(ctx, runner)
-                StepValidator.validate_correction(ctx)
-                log("[Validation] Audio correction phase validated successfully.")
-            except PipelineValidationError as e:
-                log(f"[FATAL] Audio correction validation failed: {e}")
-                raise
-            except Exception as e:
-                log(f"[FATAL] Audio correction phase failed: {e}")
-                raise RuntimeError(f"Audio correction phase failed: {e}") from e
+        log("--- Audio Processing Phase ---")
+        progress(0.45)
+        try:
+            ctx = AudioProcessingStep().run(ctx, runner)
+            StepValidator.validate_audio_processing(ctx)
+            log("[Validation] Audio processing phase validated successfully.")
+        except PipelineValidationError as e:
+            log(f"[FATAL] Audio processing validation failed: {e}")
+            raise
+        except Exception as e:
+            log(f"[FATAL] Audio processing phase failed: {e}")
+            raise RuntimeError(f"Audio processing phase failed: {e}") from e
 
         log("--- Subtitle Processing Phase ---")
         try:
@@ -204,17 +183,6 @@ class Orchestrator:
             log("[Validation] Attachments phase completed.")
         except Exception as e:
             log(f"[WARNING] Attachments phase had issues (non-fatal): {e}")
-
-        if ctx.settings.trim_audio_to_video_duration:
-            log("--- Audio Duration Trim Phase ---")
-            from vsg_core.orchestrator.steps.audio_trim import (
-                trim_audio_to_video,
-            )
-
-            try:
-                ctx = trim_audio_to_video(ctx, runner, log)
-            except Exception as e:
-                log(f"[WARNING] Audio trim phase had issues (non-fatal): {e}")
 
         log("--- Merge Planning Phase ---")
         progress(0.75)

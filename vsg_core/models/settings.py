@@ -88,6 +88,9 @@ class AppSettings(BaseModel):
     temp_root: str = _PATH_SENTINEL
     logs_folder: str = _PATH_SENTINEL
     videodiff_path: str = ""
+    # Folder holding ffmpeg + ffprobe to use instead of the system ones (put
+    # first on PATH by vsg_core.system.ffmpeg_tools). Empty = system tools.
+    ffmpeg_dir: str = ""
     fonts_directory: str = ""
     last_ref_path: str = ""
     last_sec_path: str = ""
@@ -129,6 +132,8 @@ class AppSettings(BaseModel):
     apply_dialog_norm_gain: bool = False
     disable_track_statistics_tags: bool = False
     disable_header_compression: bool = True
+    # AudioProcessingStep cuts FLAC-converted audio (never Source 1's) to the
+    # sample where the Source 1 video ends. Other tracks are left as they are.
     trim_audio_to_video_duration: bool = False
 
     # =========================================================================

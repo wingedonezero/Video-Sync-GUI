@@ -18,7 +18,13 @@ if TYPE_CHECKING:
     from vsg_core.orchestrator.steps.context import Context
     from vsg_core.subtitles.data import OperationResult, SubtitleData
     from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
+    from vsg_core.subtitles.frame_utils.frame_table import FrameGrid
 
+from vsg_core.subtitles.frame_grids import (
+    add_grid_warning,
+    frame_table_for,
+    resolve_target_grid,
+)
 from vsg_core.subtitles.sync_modes import get_sync_plugin
 
 
@@ -80,10 +86,16 @@ def apply_sync_mode(
         except Exception as e:
             runner._log_message(f"[Sync] WARNING: Could not detect FPS: {e}")
 
-    # Exact CFR frame clock for the target. None for VFR / MPEG-2 / interlaced,
-    # in which case rounding falls back to plain floor (no surgical, no audit) —
-    # the same effective behaviour those paths already have.
+    # CFR formula for the target: None for VFR / MPEG-2 / interlaced. It now only
+    # decides eligibility (progressive) and serves as a fallback grid when the
+    # real timestamps cannot be read.
     target_clock = _detect_target_clock(ctx, target_video, runner)
+
+    # Source 1's frame grid (real frame timestamps) for save-time rounding, the
+    # frame audit, and the target side of exact whole-frame shifts.
+    frame_grid = resolve_target_grid(
+        ctx, target_video, target_clock, runner._log_message
+    )
 
     runner._log_message(f"[Sync] Mode: {sync_mode}")
     runner._log_message(
@@ -101,7 +113,9 @@ def apply_sync_mode(
             target_fps=target_fps,
             target_video=target_video,
             item=item,
+            source_video=source_video,
             target_clock=target_clock,
+            frame_grid=frame_grid,
             global_shift_ms=global_shift_ms,
         )
 
@@ -117,7 +131,7 @@ def apply_sync_mode(
             target_video=target_video,
             item=item,
             ctx=ctx,
-            target_clock=target_clock,
+            frame_grid=frame_grid,
         )
 
     # NORMAL PATH: Use sync plugin
@@ -143,6 +157,7 @@ def apply_sync_mode(
             debug_paths=ctx.debug_paths,
             ctx=ctx,
             frame_clock=target_clock,
+            frame_grid=frame_grid,
         )
 
         if result.success:
@@ -191,7 +206,9 @@ def _apply_cached_video_verified(
     target_fps: float | None,
     target_video: Path | None,
     item,
+    source_video: str | None = None,
     target_clock: FrameClock | None = None,
+    frame_grid: FrameGrid | None = None,
     global_shift_ms: float = 0.0,
 ) -> OperationResult:
     """
@@ -214,18 +231,23 @@ def _apply_cached_video_verified(
         )
     runner._log_message(f"[Sync]   Delay: {cached['corrected_delay_ms']:+.1f}ms")
 
-    # Build an exact whole-frame shift when this is a real CFR frame match with
+    # Build an exact whole-frame shift when this is a verified frame match with
     # no sub-frame component; otherwise events take the flat delay (unchanged).
+    log = runner._log_message
     frame_shift = build_frame_shift(
+        lambda: frame_table_for(ctx, source_video, log) if source_video else None,
+        frame_grid,
         target_clock,
         cached.get("details") or {},
         global_shift_ms,
+        log,
+        lambda msg: add_grid_warning(ctx, f"{source_key}: {msg}", log),
         fallback=bool(cached.get("fallback")),
     )
     if frame_shift is not None:
-        runner._log_message(
-            f"[Sync]   Exact frame snap: {frame_shift.frames:+d} frames "
-            f"@ {frame_shift.clock.num}/{frame_shift.clock.den}"
+        log(
+            f"[Sync]   Exact frame snap: {source_key} frame k -> Source 1 frame "
+            f"k{frame_shift.frames:+d} (real timestamps, verified file-wide)"
         )
 
     # Apply the delay directly to subtitle events (like time-based mode)
@@ -241,17 +263,17 @@ def _apply_cached_video_verified(
     job_name = _build_audit_job_name(target_video, item)
     _run_frame_audit_if_enabled(
         subtitle_data=subtitle_data,
-        clock=target_clock,
+        clock=frame_grid,
         offset_ms=cached["corrected_delay_ms"],
         job_name=job_name,
         ctx=ctx,
         runner=runner,
     )
 
-    # Carry the exact frame clock in details for surgical rounding at save time
+    # Carry the frame grid in details for surgical rounding at save time
     details = dict(cached["details"]) if cached.get("details") else {}
     details["target_fps"] = target_fps
-    details["frame_clock"] = target_clock
+    details["frame_grid"] = frame_grid
 
     return OperationResult(
         success=True,
@@ -274,7 +296,7 @@ def _apply_video_verified_reference(
     target_video: Path | None,
     item,
     ctx: Context,
-    target_clock: FrameClock | None = None,
+    frame_grid: FrameGrid | None = None,
 ) -> OperationResult:
     """
     Apply video-verified for Source 1 (reference video).
@@ -282,7 +304,8 @@ def _apply_video_verified_reference(
     Source 1 is the reference, so no frame matching is needed.
     Just apply the delay directly (which is just global_shift for Source 1).
     The delay is a global shift (often sub-frame), not a whole-frame offset, so
-    events take the flat delay; the clock is only used for save-time rounding.
+    events take the flat delay; the frame grid is only used for save-time
+    rounding and the frame audit.
     """
     from vsg_core.subtitles.data import OperationResult
     from vsg_core.subtitles.sync_utils import apply_delay_to_events
@@ -301,7 +324,7 @@ def _apply_video_verified_reference(
     job_name = _build_audit_job_name(target_video, item)
     _run_frame_audit_if_enabled(
         subtitle_data=subtitle_data,
-        clock=target_clock,
+        clock=frame_grid,
         offset_ms=total_delay_ms,
         job_name=job_name,
         ctx=ctx,
@@ -313,13 +336,13 @@ def _apply_video_verified_reference(
         operation="sync",
         events_affected=events_synced,
         summary=f"Video-verified (Source 1 reference): {total_delay_ms:+.1f}ms applied to {events_synced} events",
-        details={"target_fps": target_fps, "frame_clock": target_clock},
+        details={"target_fps": target_fps, "frame_grid": frame_grid},
     )
 
 
 def _run_frame_audit_if_enabled(
     subtitle_data: SubtitleData,
-    clock: FrameClock | None,
+    clock: FrameGrid | None,
     offset_ms: float,
     job_name: str,
     ctx: Context,
@@ -328,9 +351,10 @@ def _run_frame_audit_if_enabled(
     """
     Run frame alignment audit for video-verified sync.
 
-    Runs only when the target has a trustworthy exact CFR grid (``clock`` is
-    not None). VFR / MPEG-2 targets have no frame grid to audit against, so the
-    audit is skipped there — matching the plain-rounding save path. The summary
+    Runs only when the target has a frame grid (``clock`` is not None): its
+    real frame timestamps, or the CFR formula if those could not be read.
+    Without a grid the audit is skipped — matching the plain-rounding save
+    path (multi-source jobs onto an MPEG-2/interlaced/VFR Source 1). The summary
     is always logged; the detailed per-line report file is only written when the
     debug setting (video_verified_frame_audit) is enabled.
 
@@ -339,7 +363,8 @@ def _run_frame_audit_if_enabled(
     """
     if clock is None:
         runner._log_message(
-            "[FrameAudit] Skipped: no exact CFR frame grid for target (VFR/MPEG-2)"
+            "[FrameAudit] Skipped: no frame grid for target "
+            "(multi-source job onto VFR/MPEG-2/interlaced Source 1)"
         )
         return
 

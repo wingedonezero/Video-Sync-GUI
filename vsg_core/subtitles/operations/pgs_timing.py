@@ -42,20 +42,21 @@ PCS payload bytes used for event classification:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from fractions import Fraction
 from typing import TYPE_CHECKING
 
 from .bitmap_audit import (
     EndpointAudit,
+    FrameMapping,
     Tier2FrameAlignmentResult,
+    UniformDelayChoice,
+    choose_uniform_delay,
+    describe_delay_choice,
     frame_of,
     pick_integer_ms_in_frame,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from vsg_core.subtitles.frame_utils.frame_clock import FrameClock
 
 # Segment types
 SEG_PDS = 0x14
@@ -116,6 +117,8 @@ class PgsShiftResult:
     # Tier 2 outcome, populated only when frame_align=True and a usable fps
     # was supplied. ``None`` means the alignment audit was skipped.
     tier2: Tier2FrameAlignmentResult | None = None
+    # How the whole-ms delay was chosen (None = plain rounding, no frame grid).
+    delay_choice: UniformDelayChoice | None = None
 
 
 def walk_segments(data: bytes | bytearray) -> tuple[list[PgsSegment], int]:
@@ -253,8 +256,8 @@ def _endpoint_audit(
     event_index: int,
     source_pts_ticks: int,
     applied_ms: int,
-    clock: FrameClock,
-    frame_shift: int,
+    requested_ms: float,
+    mapping: FrameMapping,
 ) -> EndpointAudit:
     """Compute the read-only audit record for one event endpoint.
 
@@ -269,12 +272,14 @@ def _endpoint_audit(
     # shifted_ms is always integer-valued when source PTS is at a 90-tick
     # boundary (the common case for BD-authored PGS), but we store it as
     # float to be safe for sub-ms sources.
-    f_src = frame_of(source_ms, clock)
-    f_target = f_src + frame_shift
-    f_actual = frame_of(shifted_ms_float, clock)
+    f_src = mapping.source_frame(source_ms)
+    f_target = mapping.intended_frame(source_ms, requested_ms)
+    f_actual = frame_of(shifted_ms_float, mapping.target)
     would_be_correction_ms = 0
     if f_actual != f_target:
-        new_int_ms = pick_integer_ms_in_frame(shifted_ms_float, f_target, clock)
+        new_int_ms = pick_integer_ms_in_frame(
+            shifted_ms_float, f_target, mapping.target
+        )
         if new_int_ms is not None:
             would_be_correction_ms = new_int_ms - int(round(shifted_ms_float))
     return EndpointAudit(
@@ -294,7 +299,7 @@ def apply_constant_shift(
     data: bytes | bytearray,
     delay_ms: float,
     *,
-    target_clock: FrameClock | None = None,
+    frame_mapping: FrameMapping | None = None,
     frame_alignment_audit: bool = False,
     drop_negative: bool = True,
     log: Callable[[str], None] | None = None,
@@ -315,16 +320,16 @@ def apply_constant_shift(
         Requested shift in milliseconds (float accepted; rounded to int
         ms to match mkvmerge's --sync precision and Matroska's default
         1 ms timestamp scale).
-    target_clock
-        Exact CFR frame grid of the target video. When set together with
-        ``frame_alignment_audit=True``, the shifter additionally
-        reports whether each event endpoint lands on its expected video
-        frame (``F_src + frame_shift``). Read-only diagnostic — no
-        bytes are rewritten based on this audit. VFR / MPEG-2 targets
-        have no exact grid — pass ``None`` and Tier 2 is skipped.
+    frame_mapping
+        Source-to-Source-1 frame mapping on real frame timelines. When set
+        together with ``frame_alignment_audit=True``, the shifter
+        additionally reports whether each event endpoint lands on its
+        expected Source 1 frame. Read-only diagnostic — no bytes are
+        rewritten based on this audit. Without a Source 1 grid pass
+        ``None`` and Tier 2 is skipped.
     frame_alignment_audit
         Enable Tier 2 frame-alignment reporting. Requires
-        ``target_clock`` to be set; otherwise has no effect.
+        ``frame_mapping`` to be set; otherwise has no effect.
     drop_negative
         When ``True`` (default), drop any display event whose start_pts
         would go below zero after the shift. ``False`` clamps to zero
@@ -361,16 +366,30 @@ def apply_constant_shift(
             tier2=None,
         )
 
-    applied_ms = int(round(delay_ms))
-    delta_ticks = applied_ms * TICKS_PER_MS
-
     earliest_pts = min(s.pts_ticks for s in segments)
     latest_pts = max(s.pts_ticks for s in segments)
 
-    # Events drive both the drop-negative policy and the read-only Tier 2.
-    do_frame_audit = bool(frame_alignment_audit and target_clock is not None)
-    need_events = (delta_ticks < 0 and drop_negative) or do_frame_audit
+    # Events drive the uniform surgical delay, the drop-negative policy and
+    # the read-only Tier 2.
+    do_frame_audit = bool(frame_alignment_audit and frame_mapping is not None)
+    need_events = frame_mapping is not None or (drop_negative and delay_ms < 0.5)
     events = extract_events(segments, data) if need_events else []
+
+    # One whole-ms delay for the whole track (palette updates stay in lockstep).
+    # With a Source 1 frame grid it is chosen surgically — rounded down or up so
+    # every event lands on its intended frame; without one, plain rounding.
+    delay_choice: UniformDelayChoice | None = None
+    if frame_mapping is not None:
+        endpoints = [ev.start_pts_ticks / TICKS_PER_MS for ev in events] + [
+            ev.end_pts_ticks / TICKS_PER_MS
+            for ev in events
+            if ev.end_pts_ticks is not None
+        ]
+        delay_choice = choose_uniform_delay(endpoints, delay_ms, frame_mapping)
+        applied_ms = delay_choice.applied_ms
+    else:
+        applied_ms = int(round(delay_ms))
+    delta_ticks = applied_ms * TICKS_PER_MS
 
     # Identify segment indices to drop (events whose start_pts goes negative).
     dropped_segments: set[int] = set()
@@ -392,12 +411,8 @@ def apply_constant_shift(
     # uniform shift below).
     tier2: Tier2FrameAlignmentResult | None = None
     if do_frame_audit:
-        assert target_clock is not None  # checked by do_frame_audit
-        # Exact expected whole-frame shift for the applied integer-ms delay:
-        # round-half-up of applied_ms * fps in pure integer arithmetic.
-        frame_shift = round(
-            Fraction(applied_ms * target_clock.num, 1000 * target_clock.den)
-        )
+        assert frame_mapping is not None  # checked by do_frame_audit
+        frame_shift = frame_mapping.nominal_shift(delay_ms)
         endpoint_audits: list[EndpointAudit] = []
         starts_total = 0
         starts_on_target = 0
@@ -413,8 +428,8 @@ def apply_constant_shift(
                 event_index=ev_idx,
                 source_pts_ticks=ev.start_pts_ticks,
                 applied_ms=applied_ms,
-                clock=target_clock,
-                frame_shift=frame_shift,
+                requested_ms=delay_ms,
+                mapping=frame_mapping,
             )
             endpoint_audits.append(start_audit)
             starts_total += 1
@@ -431,8 +446,8 @@ def apply_constant_shift(
                     event_index=ev_idx,
                     source_pts_ticks=ev.end_pts_ticks,
                     applied_ms=applied_ms,
-                    clock=target_clock,
-                    frame_shift=frame_shift,
+                    requested_ms=delay_ms,
+                    mapping=frame_mapping,
                 )
                 endpoint_audits.append(end_audit)
                 ends_total += 1
@@ -444,9 +459,10 @@ def apply_constant_shift(
                     )
 
         tier2 = Tier2FrameAlignmentResult(
-            target_fps=target_clock.num / target_clock.den,
-            frame_period_ms=target_clock.frame_duration_ms,
+            target_fps=1000.0 / frame_mapping.target.frame_duration_ms,
+            frame_period_ms=frame_mapping.target.frame_duration_ms,
             frame_shift=frame_shift,
+            grid_label=frame_mapping.target.label,
             starts_total=starts_total,
             starts_on_target=starts_on_target,
             ends_total=ends_total,
@@ -490,8 +506,11 @@ def apply_constant_shift(
         earliest_pts_ms=earliest_pts / TICKS_PER_MS,
         latest_pts_ms=latest_pts / TICKS_PER_MS,
         tier2=tier2,
+        delay_choice=delay_choice,
     )
 
+    if delay_choice is not None:
+        _log(describe_delay_choice("PGSTiming", delay_choice))
     _log(
         f"[PGSTiming] shifted {shifted}/{len(segments)} segments by "
         f"{applied_ms:+d} ms (requested {delay_ms:+.3f} ms), "

@@ -35,10 +35,11 @@ LANGUAGE_CODES = [
 
 
 # mkvmerge codec IDs eligible for lossless FLAC conversion. Mirrors
-# vsg_core.orchestrator.steps.conversion_step; the pipeline re-checks at run
-# time (including object-audio detection via ffprobe), so this gate is purely
-# cosmetic.
-FLAC_ELIGIBLE_CODEC_PREFIXES = ("A_PCM", "A_MS/ACM", "A_TRUEHD", "A_DTS")
+# vsg_core.orchestrator.steps.audio_processing_step; the pipeline re-checks at
+# run time (object audio, bit depth, float PCM via ffprobe), so this gate is
+# purely cosmetic. Tracks that are already FLAC need no checkbox: the pipeline
+# re-encodes them automatically whenever their delay or trim changes them.
+FLAC_ELIGIBLE_CODEC_PREFIXES = ("A_PCM", "A_MS/ACM", "A_TRUEHD", "A_MLP", "A_DTS")
 
 
 class TrackSettingsLogic:

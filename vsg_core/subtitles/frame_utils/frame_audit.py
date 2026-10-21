@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..data import SubtitleData
-    from .frame_clock import FrameClock
+    from .frame_table import FrameGrid
     from .surgical_rounding import SurgicalBatchStats
 
 
@@ -74,9 +74,8 @@ class FrameAuditResult:
     """Complete audit result for a sync job."""
 
     job_name: str
-    fps: float
-    fps_num: int
-    fps_den: int
+    fps: float  # nominal, for display only
+    grid_label: str  # which frame grid was audited against (FrameGrid.label)
     frame_duration_ms: float
     rounding_mode: str
     offset_applied_ms: float
@@ -90,6 +89,10 @@ class FrameAuditResult:
     # informationally instead of counting them as issues; native ASS/SRT
     # deltas keep counting because there they are rare and meaningful.
     ocr_origin: bool = False
+
+    # The grid the audit judged frames against; the report reuses it so its
+    # before/after lines match the audit exactly (never rebuilt from a rate).
+    grid: FrameGrid | None = None
 
     # Non-comment events actually evaluated (comments are skipped, so this is
     # the correct denominator for the on-frame percentages).
@@ -164,7 +167,7 @@ def _round_to_centisecond(ms: float, mode: str) -> int:
         return int(math.floor(value)) * 10
 
 
-def _find_minimal_fix(exact_ms: float, clock: FrameClock) -> int:
+def _find_minimal_fix(exact_ms: float, clock: FrameGrid) -> int:
     """Minimal centisecond adjustment to keep this value on its frame.
 
     The surgical rounder is the source of truth: floor by default, ceil (or a
@@ -193,7 +196,7 @@ def _format_timestamp(ms: float) -> str:
 
 def run_frame_audit(
     subtitle_data: SubtitleData,
-    clock: FrameClock,
+    clock: FrameGrid,
     rounding_mode: str,
     offset_ms: float,
     job_name: str,
@@ -207,7 +210,7 @@ def run_frame_audit(
 
     Args:
         subtitle_data: SubtitleData with sync already applied
-        clock: Exact CFR frame grid for the target video
+        clock: Frame grid of the target video (real timestamps or CFR formula)
         rounding_mode: Rounding mode that will be used at save ("floor", "round", "ceil")
         offset_ms: The sync offset that was applied (for reporting)
         job_name: Job identifier for the report
@@ -216,25 +219,26 @@ def run_frame_audit(
     Returns:
         FrameAuditResult with complete analysis
     """
-    fps = clock.num / clock.den
     frame_duration_ms = clock.frame_duration_ms
+    fps = 1000.0 / frame_duration_ms
 
     result = FrameAuditResult(
         job_name=job_name,
         fps=fps,
-        fps_num=clock.num,
-        fps_den=clock.den,
+        grid_label=clock.label,
         frame_duration_ms=frame_duration_ms,
         rounding_mode=rounding_mode,
         offset_applied_ms=offset_ms,
         total_events=len(subtitle_data.events),
         audit_timestamp=datetime.now(),
         ocr_origin=getattr(subtitle_data, "ocr_metadata", None) is not None,
+        grid=clock,
     )
 
     if log:
         log(f"[FrameAudit] Starting audit: {len(subtitle_data.events)} events")
         log(f"[FrameAudit] FPS: {fps:.3f}, Frame duration: {frame_duration_ms:.3f}ms")
+        log(f"[FrameAudit] Frame grid: {clock.label}")
         log(f"[FrameAudit] Rounding mode: {rounding_mode}")
 
     for idx, event in enumerate(subtitle_data.events):
@@ -397,6 +401,7 @@ def write_audit_report(
     lines.append(
         f"Target FPS: {result.fps:.3f} (frame duration: {result.frame_duration_ms:.3f}ms)"
     )
+    lines.append(f"Frame grid: {result.grid_label}")
     lines.append(f"Rounding mode: {result.rounding_mode}")
     comment_count = result.total_events - result.audited_events
     if comment_count > 0:
@@ -514,11 +519,13 @@ def write_audit_report(
             result.issues, key=lambda i: (i.issue_type, i.line_index)
         )
 
-        # Pre-compute surgical fixes for before/after display
-        from .frame_clock import FrameClock
+        # Pre-compute surgical fixes for before/after display, on the same grid
+        # the audit used (issues only come from run_frame_audit, which sets it).
         from .surgical_rounding import surgical_round_event
 
-        clock = FrameClock(result.fps_num, result.fps_den)
+        clock = result.grid
+        if clock is None:
+            raise ValueError("frame audit result has issues but no frame grid")
         for issue in sorted_issues:
             lines.append(
                 f"[{issue.issue_type}] Line {issue.line_index} @ {issue.timestamp_display}"

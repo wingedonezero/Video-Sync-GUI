@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
     from vsg_core.audit import AuditTrail
     from vsg_core.correction.stepping import AudioSegment
+    from vsg_core.models.audio_processing import AudioProcessingResult
     from vsg_core.models.context_types import (
         ChapterSourceOutcome,
         DriftFlagsEntry,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
     from vsg_core.reporting import DebugOutputPaths
     from vsg_core.subtitles.frame_utils.frame_audit import FrameAuditResult
+    from vsg_core.subtitles.frame_utils.frame_table import FrameGridNote, FrameTable
     from vsg_core.subtitles.operations.bitmap_audit import BitmapAuditResult
     from vsg_core.subtitles.operations.duration_audit import (
         SubtitleDurationAuditResult,
@@ -117,11 +119,15 @@ class Context:
     # Store sync stability issues (correlation variance) for reporting
     sync_stability_issues: list[SyncStabilityIssue] = field(default_factory=list)
 
-    # FLAC conversion outcomes (ConversionStep), as "label: detail" strings
+    # FLAC conversion outcomes (AudioProcessingStep), as "label: detail" strings
     # for the final report. Failures keep the original track in the mux.
     flac_conversions: list[str] = field(default_factory=list)
     flac_conversion_skips: list[str] = field(default_factory=list)
     flac_conversion_failures: list[str] = field(default_factory=list)
+
+    # AudioProcessingStep: one outcome per audio track (route, bake, checks),
+    # for the log summary and the final audit.
+    audio_processing_results: list[AudioProcessingResult] = field(default_factory=list)
 
     # Cache video-verified subtitle sync results per source
     # Format: {"Source 2": {"original_delay_ms": 100.0, "corrected_delay_ms": 102.5, ...}}
@@ -136,6 +142,18 @@ class Context:
     # Frame audit results from video-verified sync (for final auditor)
     # Format: {"Source2_t3": FrameAuditResult, ...}
     frame_audit_results: dict[str, FrameAuditResult] = field(default_factory=dict)
+
+    # Real frame timestamps of the subtitle target video (Source 1), read once
+    # per job from the ffms2 index and shared by every text-subtitle track for
+    # save-time rounding and the frame audit. None = tried and unavailable.
+    # Format: {"/path/to/source1.mkv": FrameTable | None}
+    frame_tables: dict[str, FrameTable | None] = field(default_factory=dict)
+
+    # Findings about Source 1's frame timeline (holes, start offset, formula
+    # disagreement), surfaced by the frame-alignment auditor.
+    frame_grid_notes: list[FrameGridNote] = field(default_factory=list)
+    # Videos whose timeline has been checked (notes recorded once per job).
+    frame_grid_checked: set[str] = field(default_factory=set)
 
     # Bitmap subtitle (PGS/VobSub) timing audit results from the in-app
     # shifter. Populated by the PGS/VobSub branches of SubtitlesStep.

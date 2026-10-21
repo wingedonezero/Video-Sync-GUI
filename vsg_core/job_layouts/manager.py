@@ -197,13 +197,5 @@ class JobLayoutManager:
         return self.persistence.delete_layout(job_id)
 
     def cleanup_all(self):
-        """Deletes all temporary layout files and releases cached video resources."""
+        """Deletes all temporary layout files."""
         self.persistence.cleanup_all()
-
-        # Clear VFR cache to release VideoTimestamps instances and prevent nanobind leaks
-        try:
-            from vsg_core.subtitles.frame_utils import clear_vfr_cache
-
-            clear_vfr_cache()
-        except ImportError:
-            pass  # Module might not be loaded

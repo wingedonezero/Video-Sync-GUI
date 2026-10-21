@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ....orchestrator.steps.context import Context
     from ...data import OperationResult, SubtitleData
     from ...frame_utils.frame_clock import FrameClock
+    from ...frame_utils.frame_table import FrameGrid
 
 
 @register_sync_plugin
@@ -64,6 +65,7 @@ class VideoVerifiedSync(SyncPlugin):
         settings: AppSettings | None = None,
         temp_dir: Path | None = None,
         frame_clock: FrameClock | None = None,
+        frame_grid: FrameGrid | None = None,
         **kwargs,
     ) -> OperationResult:
         """
@@ -87,6 +89,10 @@ class VideoVerifiedSync(SyncPlugin):
             runner: CommandRunner for logging
             settings: AppSettings with video-verified parameters
             temp_dir: Temp directory for index files
+            frame_clock: Source 1's CFR formula (reported backup for the frame
+                snap when real frame times are unreadable)
+            frame_grid: Source 1's frame grid (frame audit, save rounding, and
+                the target of exact whole-frame shifts)
 
         Returns:
             OperationResult with statistics
@@ -164,6 +170,7 @@ class VideoVerifiedSync(SyncPlugin):
             temp_dir=temp_dir,
             ctx=kwargs.get("ctx"),
             frame_clock=frame_clock,
+            frame_grid=frame_grid,
         )
 
     def _apply_offset(
@@ -184,9 +191,11 @@ class VideoVerifiedSync(SyncPlugin):
         temp_dir: Path | None = None,
         ctx: Context | None = None,
         frame_clock: FrameClock | None = None,
+        frame_grid: FrameGrid | None = None,
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
         from ...data import OperationRecord, OperationResult
+        from ...frame_grids import add_grid_warning, frame_table_for
         from ...sync_utils import apply_delay_to_events, build_frame_shift
 
         def log(msg: str):
@@ -197,9 +206,29 @@ class VideoVerifiedSync(SyncPlugin):
             f"[VideoVerified] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
         )
 
-        # Exact whole-frame snap for frame-locked subs on a shared CFR grid;
-        # flat delay otherwise (mid-frame, sub-frame global shift, VFR target).
-        frame_shift = build_frame_shift(frame_clock, details, global_shift_ms)
+        # Exact whole-frame snap for frame-locked subs, verified on both real
+        # frame timelines; flat delay otherwise (mid-frame, sub-frame global
+        # shift, holes, different rates, no frame match).
+        frame_shift = build_frame_shift(
+            lambda: (
+                frame_table_for(ctx, source_video, log)
+                if ctx is not None and source_video
+                else None
+            ),
+            frame_grid,
+            frame_clock,
+            details,
+            global_shift_ms,
+            log,
+            lambda msg: (
+                add_grid_warning(ctx, msg, log) if ctx is not None else log(msg)
+            ),
+        )
+        if frame_shift is not None:
+            log(
+                f"[VideoVerified] Exact frame snap: source frame k -> Source 1 "
+                f"frame k{frame_shift.frames:+d} (real timestamps, verified file-wide)"
+            )
         events_synced = apply_delay_to_events(
             subtitle_data, final_offset_ms, frame_shift=frame_shift
         )
@@ -207,11 +236,11 @@ class VideoVerifiedSync(SyncPlugin):
         # Extract debug_paths from ctx if available
         debug_paths = ctx.debug_paths if ctx else None
 
-        # Run frame alignment audit (only with an exact CFR grid for the target)
-        if settings and frame_clock is not None:
+        # Run frame alignment audit (only with a frame grid for the target)
+        if settings and frame_grid is not None:
             self._run_frame_audit(
                 subtitle_data=subtitle_data,
-                clock=frame_clock,
+                clock=frame_grid,
                 offset_ms=final_offset_ms,
                 job_name=job_name,
                 settings=settings,
@@ -279,14 +308,14 @@ class VideoVerifiedSync(SyncPlugin):
                 "selection_reason": selection_reason,
                 "target_fps": target_fps,
                 **details,
-                "frame_clock": frame_clock,
+                "frame_grid": frame_grid,
             },
         )
 
     def _run_frame_audit(
         self,
         subtitle_data: SubtitleData,
-        clock: FrameClock,
+        clock: FrameGrid,
         offset_ms: float,
         job_name: str,
         settings: AppSettings,

@@ -84,7 +84,9 @@ class MkvmergeOptionsBuilder:
             frame_adj = item.frame_adjusted
 
             # Determine reason for delay value
-            if tr.source == "Source 1" and tr.type == "video":
+            if item.delay_baked:
+                reason = "delay_baked=True (delay embedded in the FLAC samples)"
+            elif tr.source == "Source 1" and tr.type == "video":
                 reason = "global_shift_only (video defines timeline)"
             elif tr.source == "Source 1" and tr.type == "audio":
                 reason = f"container_delay({round(item.container_delay_ms)}ms) + global_shift({plan.delays.global_shift_ms}ms)"
@@ -206,6 +208,11 @@ class MkvmergeOptionsBuilder:
         - Use the delay from the track they're synced to (sync_to field)
         """
         tr = item.track
+
+        # Delay already baked into the FLAC samples by AudioProcessingStep
+        # (start cut / digital silence): mkvmerge must not shift it again.
+        if item.delay_baked:
+            return 0
 
         # Source 1 AUDIO: Preserve individual container delays + add global shift
         if tr.source == "Source 1" and tr.type == "audio":

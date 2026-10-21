@@ -68,29 +68,7 @@ class FrameClock:
         """Nominal frame period — for logging/reporting only, never grid math."""
         return 1000.0 * self.den / self.num
 
-
-@dataclass(frozen=True, slots=True)
-class FrameShift:
-    """A pure whole-frame shift on an exact grid.
-
-    A subtitle that sits exactly on frame ``k`` is moved to
-    ``clock.frame_ms(k + frames)`` — landing exactly on the target frame with
-    zero float slop. Values that are not on a frame (mid-frame VobSub, native
-    ASS, or anything carrying a sub-frame component) are not snapped; they take
-    the flat millisecond delay instead.
-
-    The caller constructs a ``FrameShift`` only when the move is genuinely a
-    whole-frame offset on a shared CFR-from-0 grid (frame-matched source, no
-    sub-frame global shift, same PTS origin). Otherwise it passes ``None`` and
-    every event takes the flat delay, exactly as before.
-    """
-
-    clock: FrameClock
-    frames: int
-
-    def shifted_ms(self, time_ms: float, flat_delay_ms: float) -> float:
-        """Exact-snap ``time_ms`` when it is on a frame, else apply the flat delay."""
-        if self.clock.is_on_frame(time_ms):
-            k = self.clock.frame_of(time_ms)
-            return float(self.clock.frame_ms(k + self.frames))
-        return time_ms + flat_delay_ms
+    @property
+    def label(self) -> str:
+        """Short description for logs and reports (see ``FrameGrid``)."""
+        return f"{self.num}/{self.den} CFR formula"

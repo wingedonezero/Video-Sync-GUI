@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from vsg_core.subtitles.frame_utils.frame_clock import FrameClock  # noqa: E402
+from vsg_core.subtitles.operations.bitmap_audit import FrameMapping  # noqa: E402
 from vsg_core.subtitles.operations.vobsub_timing import (  # noqa: E402
     _DELAY_LINE_RE,
     _ms_to_idx_timestamp,
@@ -131,7 +132,7 @@ def test_audit_runs_on_29_97_fps() -> None:
         text,
         sub,
         -5.674,
-        target_clock=CLOCK_NTSC_VIDEO,
+        frame_mapping=FrameMapping(source=CLOCK_NTSC_VIDEO, target=CLOCK_NTSC_VIDEO),
         frame_alignment_audit=True,
     )
     assert res.tier2 is not None
@@ -166,7 +167,7 @@ def test_audit_off_byte_equivalent_to_audit_on() -> None:
         text,
         FIXTURE_SUB.read_bytes(),
         -6.0,
-        target_clock=CLOCK_NTSC_VIDEO,
+        frame_mapping=FrameMapping(source=CLOCK_NTSC_VIDEO, target=CLOCK_NTSC_VIDEO),
         frame_alignment_audit=True,
     )
     assert out_noaudit == out_audited
