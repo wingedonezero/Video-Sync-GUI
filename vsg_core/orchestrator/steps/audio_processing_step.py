@@ -17,7 +17,8 @@ Order:
 
 A FLAC request is never lost: if a correction was pending but produced
 nothing, the track still takes the FLAC route here. Any failure keeps the
-original track (untouched) and is reported.
+original track (untouched) and is reported, including a strict decode that
+hits a damaged or lossy frame (see ``STRICT_DECODE_ARGS``).
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import json
 from typing import TYPE_CHECKING
 
 from vsg_core.audio_processing import (
+    FinishError,
     bake_delay,
     delay_tags,
     end_cap_samples,
@@ -33,7 +35,7 @@ from vsg_core.audio_processing import (
     ms_to_ns,
     plan_for_delay,
 )
-from vsg_core.audio_processing.encoder import SUPPORTED_BITS
+from vsg_core.audio_processing.encoder import STRICT_DECODE_ARGS, SUPPORTED_BITS
 from vsg_core.extraction.tracks import get_stream_info_with_delays
 from vsg_core.models.audio_processing import AudioProcessingResult
 from vsg_core.models.media import StreamProps, Track
@@ -178,6 +180,11 @@ class AudioProcessingStep:
         if not audio_items:
             return ctx
 
+        log(
+            "[AudioProcessing] FLAC conversions decode strictly "
+            f"({' '.join(STRICT_DECODE_ARGS)}): a damaged or lossy frame fails "
+            "that track and its original is kept."
+        )
         for item in audio_items:
             result = self._process(ctx, item, runner)
             ctx.audio_processing_results.append(result)
@@ -272,15 +279,20 @@ class AudioProcessingStep:
         log(
             f"[AudioProcessing] {label} ({codec_id}, {src.name}) -> FLAC with the delay baked in"
         )
-        res = finish(
-            src,
-            0,
-            plan,
-            out,
-            delay_tags(delay_ms, bake, plan, codec_id),
-            runner,
-            ctx.tool_paths,
-        )
+        try:
+            res = finish(
+                src,
+                0,
+                plan,
+                out,
+                delay_tags(delay_ms, bake, plan, codec_id),
+                runner,
+                ctx.tool_paths,
+            )
+        except FinishError as e:
+            return self._flac_failed(
+                ctx, runner, item, delay_ms, mkvmerge_ms, [str(e)], "not processed"
+            )
         fmt = res.fmt
         layout = fmt.channel_layout or f"unnamed {fmt.channels}-channel (FLAC default)"
         trimmed_end = int(res.tags.get("VSG_SAMPLES_TRIMMED_END", "0"))
@@ -315,19 +327,14 @@ class AudioProcessingStep:
 
         if not res.ok:
             problems = list(res.check.problems) if res.check else ["FLAC encode failed"]
-            log(
-                f"[ERROR] [AudioProcessing] {label}: {'; '.join(problems)}. Keeping the original track."
-            )
-            ctx.flac_conversion_failures.append(f"{label}: {'; '.join(problems)}")
-            return AudioProcessingResult(
-                label,
-                "flac",
-                codec_id,
-                False,
-                "verification failed, original kept",
-                delay_raw_ms=delay_ms,
-                mkvmerge_delay_ms=mkvmerge_ms,
-                problems=tuple(problems),
+            return self._flac_failed(
+                ctx,
+                runner,
+                item,
+                delay_ms,
+                mkvmerge_ms,
+                problems,
+                "verification failed",
             )
 
         log(
@@ -382,6 +389,33 @@ class AudioProcessingStep:
             sample_rate=fmt.sample_rate,
             channel_layout=fmt.channel_layout or "",
             native_layout=res.native_layout,
+        )
+
+    def _flac_failed(
+        self,
+        ctx: Context,
+        runner: CommandRunner,
+        item: PlanItem,
+        delay_ms: float,
+        mkvmerge_ms: int,
+        problems: list[str],
+        what: str,
+    ) -> AudioProcessingResult:
+        """Keep the original track (it is muxed untouched) and report why."""
+        label = item_label(item)
+        runner._log_message(
+            f"[ERROR] [AudioProcessing] {label}: {'; '.join(problems)}. Keeping the original track."
+        )
+        ctx.flac_conversion_failures.append(f"{label}: {'; '.join(problems)}")
+        return AudioProcessingResult(
+            label,
+            "flac",
+            item.track.props.codec_id or "",
+            False,
+            f"{what}, original kept",
+            delay_raw_ms=delay_ms,
+            mkvmerge_delay_ms=mkvmerge_ms,
+            problems=tuple(problems),
         )
 
     # ------------------------------------------------------------------

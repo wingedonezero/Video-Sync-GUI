@@ -290,6 +290,27 @@ class TestStepEndToEnd:
         assert not out[:520].any()
         assert np.array_equal(out[520:], _decode(pcm).reshape(-1, 2))
 
+    def test_damaged_source_keeps_the_original(self, tmp_path: Path) -> None:
+        flac_src = tmp_path / "src.flac"
+        _synth(flac_src, "flac", 2)
+        data = bytearray(flac_src.read_bytes())
+        data[len(data) * 3 // 5] ^= 0x10  # inside a frame, past the headers
+        flac_src.write_bytes(data)
+        item = _item("Source 2", 1, "A_FLAC", flac_src, convert=True)
+        ctx = _ctx(tmp_path, [item], raw_delay_ms=-10.834789)
+        ctx = AudioProcessingStep().run(
+            ctx, CommandRunner(AppSettings(), lambda _m: None)
+        )
+        res = ctx.audio_processing_results[0]
+        assert (res.route, res.ok) == ("flac", False)
+        assert "source does not decode cleanly" in res.problems[0]
+        assert item.extracted_path == flac_src and not item.delay_baked
+        assert ctx.flac_conversion_failures[0].startswith("Source 2 audio track 1: ")
+        tokens = MkvmergeOptionsBuilder().build(
+            MergePlan(items=[item], delays=ctx.delays or Delays()), AppSettings()
+        )
+        assert tokens[tokens.index("--sync") + 1] == "0:-11"
+
     def test_global_shift_uses_the_whole_ms_shift_the_video_got(
         self, tmp_path: Path
     ) -> None:

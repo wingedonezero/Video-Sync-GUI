@@ -12,6 +12,7 @@ import hashlib
 import shutil
 import struct
 import subprocess
+import sys
 from fractions import Fraction
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import pytest
 
 from vsg_core.audio_processing import (
     EditPlan,
+    FinishError,
     Silence,
     SourceFormat,
     Take,
@@ -34,12 +36,14 @@ from vsg_core.audio_processing import (
     trimmed_end_samples,
 )
 from vsg_core.audio_processing.encoder import (
+    STRICT_DECODE_ARGS,
     build_encode_command,
     build_filter_graph,
     default_layout,
     is_native_layout,
 )
 from vsg_core.audio_processing.verify import (
+    _decode_cmd,
     _FrameReader,
     canonical_bytes,
     check_output,
@@ -190,6 +194,15 @@ class TestEncoderCommand:
                 Path("i.wav"), 0, fmt, EditPlan(ops=(Take(0),)), {}, Path("o.flac")
             )
 
+    def test_every_decode_is_strict(self) -> None:
+        encode = build_encode_command(
+            Path("in.thd"), 0, FMT_51, EditPlan(ops=(Take(0),)), {}, Path("o.flac")
+        )
+        for cmd in (encode, _decode_cmd(Path("in.thd"), 0)):
+            at = cmd.index("-i")
+            # Input options only apply to the input that follows them.
+            assert tuple(cmd[at - len(STRICT_DECODE_ARGS) : at]) == STRICT_DECODE_ARGS
+
     def test_layout_tables(self) -> None:
         assert default_layout(6) == "5.1"
         assert is_native_layout("5.1(side)", 6)
@@ -336,6 +349,41 @@ class TestEndToEnd:
         assert not res.ok
         assert res.check is not None and "no audio" in res.check.problems[0]
         assert not out.exists()
+
+    def test_damaged_source_fails_instead_of_matching_itself(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "src.flac"
+        _make_wav(tmp_path / "src.wav", "stereo", 16)
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(tmp_path / "src.wav"), str(src)],
+            check=True,
+        )
+        data = bytearray(src.read_bytes())
+        data[len(data) * 3 // 5] ^= 0x10  # inside a frame, past the headers
+        src.write_bytes(data)
+        # A normal decode accepts the damage silently, so a non-strict source
+        # scan and output check would both see it and agree.
+        lax = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(src), "-f", "null", "-"],
+            capture_output=True,
+            check=False,
+        )
+        assert lax.returncode == 0
+        out = tmp_path / "o.flac"
+        plan = plan_for_delay(bake_delay(ms_to_ns(-10), 48000))
+        with pytest.raises(FinishError, match="source does not decode cleanly"):
+            finish(src, 0, plan, out, lambda _e: {}, _Runner(), {})
+        assert not out.exists()
+
+    def test_failed_stream_names_the_first_stderr_line(self) -> None:
+        cmd = [
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.write('root cause\\nmore\\n'); sys.exit(3)",
+        ]
+        with pytest.raises(RuntimeError, match=r"exit code 3: root cause$"):
+            list(_Runner().stream_binary(cmd, {}))
 
     def test_tags_survive_and_hash_matches_flac_md5(self, tmp_path: Path) -> None:
         src = tmp_path / "src.wav"

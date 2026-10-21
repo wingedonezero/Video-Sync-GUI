@@ -54,7 +54,8 @@ class CommandRunner:
 
         For outputs too large to capture (a whole decoded audio track). stderr
         goes to a temp file so a chatty tool can never block the pipe. Raises
-        RuntimeError (after logging the stderr tail) if the command fails.
+        RuntimeError (after logging the stderr tail) if the command fails; its
+        message carries the first stderr line, usually the root cause.
         """
         resolved = tool_paths.get(cmd[0]) or cmd[0]
         full_cmd = [resolved, *list(map(str, cmd[1:]))]
@@ -75,11 +76,16 @@ class CommandRunner:
                 rc = proc.wait()
             if rc != 0:
                 err.seek(0)
-                tail = err.read()[-2000:].decode("utf-8", errors="replace").strip()
+                stderr = err.read().decode("utf-8", errors="replace").strip()
+                tail = stderr[-2000:]
                 self._log_message(f"[!] Command failed with exit code {rc}")
                 if tail:
                     self._log_message(f"[stderr/tail]\n{tail}")
-                raise RuntimeError(f"{cmd[0]} failed with exit code {rc}")
+                first = stderr.splitlines()[0] if stderr else ""
+                raise RuntimeError(
+                    f"{cmd[0]} failed with exit code {rc}"
+                    + (f": {first}" if first else "")
+                )
 
     def run(
         self,

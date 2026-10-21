@@ -18,6 +18,12 @@ if TYPE_CHECKING:
 
     from .types import EditPlan, SourceFormat
 
+
+class FinishError(RuntimeError):
+    """A finisher stage could not run at all (unreadable source, or a strict
+    decode that hit a damaged or lossy frame). The caller keeps the original."""
+
+
 TAG_DELAY_MS = "VSG_DELAY_MS"
 TAG_SILENCE_ADDED = "VSG_SILENCE_SAMPLES_ADDED"
 TAG_TRIMMED_START = "VSG_SAMPLES_TRIMMED_START"
@@ -69,9 +75,17 @@ def finish(
     tool_paths: dict[str, str | None],
 ) -> FinishResult:
     """Produce ``out`` from ``source`` per ``plan`` and verify it. On failure the
-    partial output is removed; the caller keeps the original track."""
-    fmt = probe_source_format(source, stream_index, runner, tool_paths)
-    expected = scan_expected(source, stream_index, fmt, plan, runner, tool_paths)
+    partial output is removed; the caller keeps the original track. A failed
+    verification is returned in the result; a stage that cannot run at all
+    raises FinishError."""
+    try:
+        fmt = probe_source_format(source, stream_index, runner, tool_paths)
+    except RuntimeError as e:
+        raise FinishError(f"cannot read the source format: {e}") from e
+    try:
+        expected = scan_expected(source, stream_index, fmt, plan, runner, tool_paths)
+    except RuntimeError as e:
+        raise FinishError(f"source does not decode cleanly: {e}") from e
     tag_values = tags(expected)
     if expected.output_samples == 0:
         # The delay/trim removes the whole track: never hand over an empty file.
@@ -83,7 +97,11 @@ def finish(
     if not encode(source, stream_index, fmt, plan, tag_values, out, runner, tool_paths):
         out.unlink(missing_ok=True)
         return FinishResult(fmt, expected, tag_values, None, out)
-    check = check_output(out, expected, fmt, runner, tool_paths)
+    try:
+        check = check_output(out, expected, fmt, runner, tool_paths)
+    except RuntimeError as e:
+        out.unlink(missing_ok=True)
+        raise FinishError(f"the FLAC output does not decode cleanly: {e}") from e
     if not check.ok:
         out.unlink(missing_ok=True)
     return FinishResult(fmt, expected, tag_values, check, out)

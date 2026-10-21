@@ -44,6 +44,13 @@ FLAC_ENCODER_ARGS = (
     "-max_prediction_order",
     "12",
 )
+# Every decode of a source or of our own FLAC output. By default ffmpeg drops a
+# frame that fails to decode (or a DTS-HD MA frame falls back to its lossy core)
+# and still exits 0; the verifier's source scan would contain the same damage
+# and agree with it. Strict decoding turns that into a failed track instead:
+# explode makes the decoder report the error, -xerror makes ffmpeg exit on it,
+# crccheck enables the CRCs that are off by default (FLAC frames).
+STRICT_DECODE_ARGS = ("-err_detect", "+crccheck+explode", "-xerror")
 
 
 def default_layout(channels: int) -> str:
@@ -154,6 +161,7 @@ def build_encode_command(
         "-v",
         "error",
         "-nostdin",
+        *STRICT_DECODE_ARGS,
         "-i",
         str(source),
         "-filter_complex",
