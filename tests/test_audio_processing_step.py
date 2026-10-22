@@ -30,6 +30,7 @@ from vsg_core.orchestrator.steps.audio_processing_step import (
 )
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.orchestrator.validation import StepValidator
+from vsg_core.postprocess.auditors import DriftCorrectionAuditor
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -421,3 +422,39 @@ class TestSteppingRoute:
         assert item.extracted_path == flac_src and not item.delay_baked
         assert ctx.flac_conversion_failures[0].startswith("Source 2 audio track 1: ")
         assert ctx.stepping_quality_issues[0]["issue_type"] == "correction_not_applied"
+
+
+@needs_ffmpeg
+class TestDisconnectedDrift:
+    def test_pal_flag_is_logged_not_corrected(self, tmp_path: Path) -> None:
+        pcm = tmp_path / "pcm.wav"
+        _synth(pcm, "pcm_s16le", 2)
+        item = _item("Source 2", 1, "A_PCM/INT/LIT", pcm, convert=False)
+        ctx = _ctx(tmp_path, [item], raw_delay_ms=-10.0)
+        ctx.settings.stepping_enabled = True  # used to gate PAL / linear too
+        ctx.pal_drift_flags["Source 2_1"] = {"rate": 40.96}
+        lines: list[str] = []
+        ctx = AudioProcessingStep().run(ctx, CommandRunner(AppSettings(), lines.append))
+        StepValidator.validate_audio_processing(ctx)
+        StepValidator.validate_correction(ctx)
+
+        assert ctx.audio_processing_results[0].route == "untouched"
+        assert not item.is_corrected and item.extracted_path == pcm
+        assert any("[Drift] PAL drift detected in Source 2" in ln for ln in lines)
+
+    def test_audit_reports_drift_but_not_an_unverified_stepping_flag(
+        self, tmp_path: Path
+    ) -> None:
+        ctx = _ctx(tmp_path, [], raw_delay_ms=0.0)
+        ctx.linear_drift_flags["Source 2_1"] = {"rate": 1.0}
+        ctx.segment_flags["Source 3_1"] = {
+            "base_delay": 0,
+            "subs_only": False,
+        }  # no EDL
+        lines: list[str] = []
+        auditor = DriftCorrectionAuditor(
+            ctx, CommandRunner(AppSettings(), lines.append)
+        )
+        assert auditor.run(tmp_path / "out.mkv", {}) == 1
+        assert "Linear drift detected in Source 2" in auditor.issues[0].message
+        assert any("no verified EDL" in ln for ln in lines)

@@ -184,63 +184,9 @@ class StepValidator:
         """
         errors = []
 
-        for analysis_key in ctx.pal_drift_flags:
-            source_key = analysis_key.split("_")[0]
-            corrected_items = [
-                item
-                for item in (ctx.extracted_items or [])
-                if (
-                    item.track.source == source_key
-                    and item.track.type == "audio"
-                    and item.is_corrected
-                    and not item.is_preserved
-                )
-            ]
-            if not corrected_items:
-                errors.append(
-                    f"PAL drift correction failed for {source_key}: "
-                    f"No corrected track found in extraction list"
-                )
-            else:
-                for item in corrected_items:
-                    if item.track.props.codec_id != "FLAC":
-                        errors.append(
-                            f"PAL drift corrected track for {source_key} is not FLAC: "
-                            f"{item.track.props.codec_id}"
-                        )
-                    if not item.extracted_path or not item.extracted_path.exists():
-                        errors.append(
-                            f"PAL drift corrected file missing for {source_key}"
-                        )
-
-        for analysis_key in ctx.linear_drift_flags:
-            source_key = analysis_key.split("_")[0]
-            corrected_items = [
-                item
-                for item in (ctx.extracted_items or [])
-                if (
-                    item.track.source == source_key
-                    and item.track.type == "audio"
-                    and item.is_corrected
-                    and not item.is_preserved
-                )
-            ]
-            if not corrected_items:
-                errors.append(
-                    f"Linear drift correction failed for {source_key}: "
-                    f"No corrected track found in extraction list"
-                )
-            else:
-                for item in corrected_items:
-                    if item.track.props.codec_id != "FLAC":
-                        errors.append(
-                            f"Linear drift corrected track for {source_key} is not FLAC: "
-                            f"{item.track.props.codec_id}"
-                        )
-                    if not item.extracted_path or not item.extracted_path.exists():
-                        errors.append(
-                            f"Linear drift corrected file missing for {source_key}"
-                        )
+        # PAL / linear drift correction is disconnected (only flagged and
+        # reported; docs/plans/drift-correction.md), so there is nothing to
+        # validate for it.
 
         # Stepping: AudioCorrectionStep only prepares EDLs (a source without
         # one keeps its analysis delay); validate_audio_processing checks the

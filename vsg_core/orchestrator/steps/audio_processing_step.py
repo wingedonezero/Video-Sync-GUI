@@ -3,8 +3,8 @@
 Audio Processing step: every change to audio before the mux happens here.
 
 Order:
-1. Pending corrections run first. Stepping only verifies its EDL there; PAL /
-   linear still produce their FLAC themselves (``corrected``).
+1. Stepping verifies its EDL first. PAL / linear drift is only logged:
+   that correction is disconnected (docs/plans/drift-correction.md).
 2. Every audio track gets exactly one route:
    - ``corrected`` (stepping): every audio track of a source with a verified
      EDL. One verified finisher encode applies the whole EDL (start delay,
@@ -51,6 +51,7 @@ from vsg_core.models.media import StreamProps, Track
 from vsg_core.orchestrator.steps.audio_correction_step import AudioCorrectionStep
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from vsg_core.audio_processing import DelayBake, FinishResult
@@ -158,6 +159,22 @@ def output_video_end_ms(
     return frame_times_ms[-1] - frame_times_ms[0] + last_interval + video_delay_ms
 
 
+def _log_disconnected_drift(ctx: Context, log: Callable[[str], None]) -> None:
+    """PAL / linear drift is detected but no longer corrected; say so for every
+    flagged source so the log shows why its audio may drift."""
+    flags = [("PAL", ctx.pal_drift_flags), ("Linear", ctx.linear_drift_flags)]
+    for kind, entries in flags:
+        for analysis_key, info in entries.items():
+            source_key = analysis_key.split("_")[0]
+            log(
+                f"[Drift] {kind} drift detected in {source_key} "
+                f"({info.get('rate', 0.0):+.2f} ms/s); correction is disconnected "
+                f"(switch {'on' if ctx.settings.drift_correction_enabled else 'off'}), "
+                f"so its audio keeps the analysis delay and will drift. "
+                f"See docs/plans/drift-correction.md."
+            )
+
+
 def _format_line(res: FinishResult) -> str:
     """Log line for the FLAC's format, noting non-native layouts and requantizing."""
     fmt = res.fmt
@@ -190,9 +207,8 @@ class AudioProcessingStep:
             return ctx
         log = runner._log_message
 
-        if ctx.settings.stepping_enabled and (
-            ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags
-        ):
+        _log_disconnected_drift(ctx, log)
+        if ctx.settings.stepping_enabled and ctx.segment_flags:
             # Local import: validation imports the steps package (cycle).
             from vsg_core.orchestrator.validation import StepValidator
 
@@ -241,9 +257,7 @@ class AudioProcessingStep:
             return self._stepping(ctx, item, runner, edl)
 
         if item.is_corrected:
-            detail = (
-                "corrected by PAL/linear drift correction (FLAC from the corrector)"
-            )
+            detail = "already corrected (FLAC from a corrector)"
             if item.convert_to_flac:
                 ctx.flac_conversion_skips.append(f"{label}: {detail}")
             log(f"[AudioProcessing] {label} ({codec_id}) -> corrected: {detail}")

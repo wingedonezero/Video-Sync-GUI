@@ -1,4 +1,4 @@
-# Plan: Audio Processing step (in progress — steps 1–3 built, see §11)
+# Plan: Audio Processing step (in progress — steps 1–3 built, step 4 deferred, see §11)
 
 Date: 2026-10-21. Steps 1–2 merged to `main` (9a701efa); strict decoding (5d3108fe) and
 step 3 on `claude/video-sync-audio-processing-88a59f`.
@@ -200,6 +200,10 @@ No full-track arrays are needed for the final output. Arrays stay in analysis on
 
 ## 8. PAL / linear integration (route A)
 
+**Superseded (2026-10-22):** PAL / linear correction is disconnected and kept for later; see
+[drift-correction.md](drift-correction.md). Only the separate switch (`drift_correction_enabled`,
+greyed out) was added. The items below are the original plan.
+
 - **New setting:** `drift_correction_enabled` (PAL + linear), separate from `stepping_enabled`.
   Check whether drift *detection* in analysis also needs to follow it; today detection runs
   regardless and only the correction is gated.
@@ -247,7 +251,8 @@ No full-track arrays are needed for the final output. Arrays stay in analysis on
    `AudioCorrectionStep`, temporarily called from inside the new step.
 3. **Stepping onto the finisher:** route A, the bit-depth/layout/compression/single-encode fixes,
    end trim, `delay_baked`. *(built, see §7 "As built")*
-4. **PAL/linear onto the finisher,** new switch, all flagged sources processed.
+4. *(changed)* **PAL/linear:** disconnected with a note ([drift-correction.md](drift-correction.md)); the
+   separate switch exists (greyed out); stepping alone drives the correction phase.
 5. **Cleanup:** dead code, `CLAUDE.md` job flow, `docs/README.md`.
 
 ## 12. Validation plan

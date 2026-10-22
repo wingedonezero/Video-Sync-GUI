@@ -1,15 +1,22 @@
 # vsg_core/postprocess/auditors/drift_correction.py
 """
-Auditor for verifying drift corrections were applied correctly.
+Auditor for timing corrections: stepping corrections that were applied, and
+PAL / linear drift that was detected but is not corrected (that correction is
+disconnected, see docs/plans/drift-correction.md).
 """
 
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from .base import BaseAuditor
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 class DriftCorrectionAuditor(BaseAuditor):
-    """Verifies drift corrections were applied correctly."""
+    """Reports drift that stays uncorrected; verifies applied stepping."""
 
     def run(
         self,
@@ -21,33 +28,48 @@ class DriftCorrectionAuditor(BaseAuditor):
         Audits drift corrections.
         Returns the number of issues found.
         """
-        total_corrections = (
+        flagged = (
             len(self.ctx.pal_drift_flags)
             + len(self.ctx.linear_drift_flags)
             + len(self.ctx.segment_flags)
         )
-
-        if total_corrections == 0:
+        if flagged == 0:
             self.log("✅ No drift corrections were flagged (none needed).")
             return 0
 
-        self.log(f"  → Verifying {total_corrections} drift correction(s)...")
-
-        self._verify_correction_type(self.ctx.pal_drift_flags, "PAL Drift")
-        self._verify_correction_type(self.ctx.linear_drift_flags, "Linear Drift")
-        self._verify_correction_type(self.ctx.segment_flags, "Stepping")
+        self.log(f"  → Checking {flagged} flagged timing issue(s)...")
+        self._report_uncorrected_drift(self.ctx.pal_drift_flags, "PAL drift")
+        self._report_uncorrected_drift(self.ctx.linear_drift_flags, "Linear drift")
+        self._verify_stepping()
 
         if not self.issues:
-            self.log(
-                f"✅ All {total_corrections} drift correction(s) verified successfully."
-            )
-
+            self.log(f"✅ All {flagged} flagged timing issue(s) handled.")
         return len(self.issues)
 
-    def _verify_correction_type(self, flag_dict: dict, correction_name: str) -> None:
-        """Verify corrections for a specific correction type."""
-        for analysis_key in flag_dict:
+    def _report_uncorrected_drift(self, flag_dict: dict, kind: str) -> None:
+        """Drift is detected but never corrected: the track drifts by design."""
+        for analysis_key, info in flag_dict.items():
             source_key = analysis_key.split("_")[0]
+            self._report(
+                f"{kind} detected in {source_key} ({info.get('rate', 0.0):+.2f} ms/s) "
+                f"but not corrected: drift correction is disconnected for now, so "
+                f"its audio keeps the analysis delay and drifts over the file"
+            )
+
+    def _verify_stepping(self) -> None:
+        for analysis_key, flag_info in self.ctx.segment_flags.items():
+            source_key = analysis_key.split("_")[0]
+            if flag_info.get("subs_only", False):
+                continue
+            if source_key not in self.ctx.stepping_corrections:
+                # No verified EDL (uniform after all, or QA failed — the latter
+                # is reported by the stepping auditor): the tracks took the
+                # normal route.
+                self.log(
+                    f"  Note: stepping flagged for {source_key} but no verified EDL; "
+                    f"its audio was muxed with the analysis delay"
+                )
+                continue
 
             corrected_items = [
                 item
@@ -59,44 +81,37 @@ class DriftCorrectionAuditor(BaseAuditor):
                     and not item.is_preserved
                 )
             ]
-
             if not corrected_items:
                 self._report(
-                    f"{correction_name} correction was flagged for "
-                    f"{source_key} but no corrected track found in final "
-                    "file - correction step failed silently"
+                    f"Stepping EDL verified for {source_key} but no corrected track "
+                    f"in the final file (see the Audio Processing log)"
                 )
                 continue
 
             for item in corrected_items:
                 track_name = item.track.props.name or f"Track {item.track.id}"
-
                 if item.track.props.codec_id != "FLAC":
                     self._report(
-                        f"{correction_name} corrected track '{track_name}' "
-                        f"({source_key}) is not FLAC - expected FLAC, got "
-                        f"{item.track.props.codec_id}; correction may not "
-                        "have been applied correctly"
+                        f"Stepping corrected track '{track_name}' ({source_key}) "
+                        f"is not FLAC (got {item.track.props.codec_id})"
                     )
                 else:
                     self.log(
-                        f"  ✓ {correction_name} correction verified for "
-                        f"'{track_name}' ({source_key})"
+                        f"  ✓ Stepping correction verified for '{track_name}' "
+                        f"({source_key})"
                     )
 
-                preserved_items = [
-                    p
-                    for p in (self.ctx.extracted_items or [])
-                    if (
-                        p.track.source == source_key
-                        and p.track.type == "audio"
-                        and p.is_preserved
-                    )
-                ]
-
-                if not preserved_items:
-                    self._report(
-                        f"No preserved original found for corrected track "
-                        f"'{track_name}' ({source_key}) - original audio "
-                        "was not preserved for comparison"
-                    )
+            preserved = [
+                p
+                for p in (self.ctx.extracted_items or [])
+                if (
+                    p.track.source == source_key
+                    and p.track.type == "audio"
+                    and p.is_preserved
+                )
+            ]
+            if not preserved:
+                self._report(
+                    f"No preserved original for the stepping-corrected audio of "
+                    f"{source_key}"
+                )

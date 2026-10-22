@@ -165,6 +165,10 @@ class AppSettings(BaseModel):
     # Segmented Audio Correction
     # =========================================================================
     stepping_enabled: bool = False
+    # PAL / linear drift correction, separate from stepping. The correctors are
+    # disconnected for now (see docs/plans/drift-correction.md): drift is still
+    # detected and reported, but never corrected, whatever this says.
+    drift_correction_enabled: bool = False
 
     # =========================================================================
     # Subtitle Sync Settings

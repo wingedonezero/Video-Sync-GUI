@@ -66,7 +66,7 @@ external tools with streamed log/progress callbacks.
 - `audio_processing/` — sample-exact FLAC finisher: edit plan (start cut / silence / end cap) → one ffmpeg encode → verified output
 - `audit/` — append-only JSON audit trail of timing values at each pipeline step
 - `chapters/` — extract / rename / shift chapters, snap to keyframes
-- `correction/` — audio timing corrections: linear, PAL (24↔25 fps), stepping (silence-gated segments)
+- `correction/` — audio timing corrections: stepping (silence-gated segments; applied through `audio_processing/`). PAL / linear drift correction is disconnected (detected and reported only) — see `docs/plans/drift-correction.md`
 - `extraction/` — extract tracks & attachments from MKV containers
 - `io/` — `CommandRunner` (external-tool execution with streamed logging)
 - `job_discovery.py` — find single-file or batch jobs; match files by name across folders
