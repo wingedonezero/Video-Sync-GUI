@@ -101,10 +101,6 @@ class PlanItem:
     # OCR pixel verification results (for auditor access)
     pixel_verification: dict | None = None
 
-    # Video-verified sync mode stats (for bitmap subtitles)
-    video_verified_bitmap: bool = False
-    video_verified_details: dict | None = None
-
 
 @dataclass(frozen=True, slots=True)
 class MergePlan:

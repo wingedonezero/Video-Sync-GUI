@@ -43,8 +43,8 @@ the UI thread). The worker runs the core pipeline:
 
 ```
 analyze (compute SEC/TER delays) → global shift (remove negative offsets)
-→ extract tracks → audio processing (corrections; lossless → FLAC with the
-delay baked in to the sample, mkvmerge --sync 0) → subtitle transforms
+→ extract tracks → audio processing (stepping and lossless → FLAC through the
+finisher, delay baked in to the sample, mkvmerge --sync 0) → subtitle transforms
 → chapters + attachments → mux (mkvmerge) → post-process/validate
 ```
 

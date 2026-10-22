@@ -1,4 +1,4 @@
-# Plan: Audio Processing step (in progress — steps 1–3 built, step 4 deferred, see §11)
+# Plan: Audio Processing step (steps 1–3 and 5 built, step 4 deferred — see §11)
 
 Date: 2026-10-21. Steps 1–2 merged to `main` (9a701efa); strict decoding (5d3108fe) and
 step 3 on `claude/video-sync-audio-processing-88a59f`.
@@ -253,7 +253,8 @@ greyed out) was added. The items below are the original plan.
    end trim, `delay_baked`. *(built, see §7 "As built")*
 4. *(changed)* **PAL/linear:** disconnected with a note ([drift-correction.md](drift-correction.md)); the
    separate switch exists (greyed out); stepping alone drives the correction phase.
-5. **Cleanup:** dead code, `CLAUDE.md` job flow, `docs/README.md`.
+5. *(done)* **Cleanup:** dead `apply_for_bitmap_subtitle` (+ its unused `video_verified_bitmap` /
+   `video_verified_details` fields) removed, `CLAUDE.md` job flow, `docs/README.md` §8.2a.
 
 ## 12. Validation plan
 
