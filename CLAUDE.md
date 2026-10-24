@@ -99,6 +99,25 @@ sync-exclusion / report / favorites / font-manager dialogs.
 supplies each video's real frame timestamps) is a Python library, not a
 subprocess.
 
+- **MKVToolNix = the user's MKVToolNix-Mod** (MKVToolNix 103.0 + fixes,
+  `mkvmerge v103.0.44`, installed as the system `mkvtoolnix` debs; full change
+  list in its `MOD_CHANGES.md`). What matters here: video from elementary
+  streams is timed exactly from the stream's own clock (stock 103.0 summed
+  frame lengths cut to whole ns, storing ~1 frame in 20 one ms early). The app
+  always muxes Source 1's video from an extracted raw stream, so the output
+  carries the disc's frame times, and a rip made with the mod has the same
+  times as its output (the frame table read from Source 1 matches the output
+  frame for frame). Rips made with stock 103.0 are 1 ms early on those frames.
+  Audio packetizing, negative `--sync` cutting and ms rounding are unchanged
+  from 103.0. mkvextract now writes VC-1 as a `.vc1` elementary stream, not AVI.
+  Don't add workarounds for 103.0's early frames.
+- **FFmpeg = the user's FFmpeg fork** (9.0.2 + patches), picked via the
+  `ffmpeg_dir` setting (put first on PATH; each job logs the build). The audio
+  finisher's strict decoding relies on its fixes: DTS-HD MA lossy frames and
+  TrueHD integrity failures are errors under `-err_detect explode` (stock
+  FFmpeg only warns), and FLAC block size matches 7.1. PyAV and
+  VapourSynth/ffms2 keep the system FFmpeg libraries.
+
 ## Environment gotchas
 
 > Machine-specific paths and overrides (venv/model location, "setup already
