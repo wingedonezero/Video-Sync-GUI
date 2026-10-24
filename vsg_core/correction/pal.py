@@ -1,4 +1,10 @@
 # vsg_core/correction/pal.py
+"""PAL drift correction — DISCONNECTED since 2026-10-22, nothing calls this.
+
+Kept for reference until the detection is reworked; see
+docs/plans/drift-correction.md (why it was disconnected, what to fix first).
+"""
+
 from __future__ import annotations
 
 import copy

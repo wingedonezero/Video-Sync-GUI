@@ -56,14 +56,9 @@ class PlanItem:
     convert_to_flac: bool = False
     flac_converted: bool = False
     original_extracted_path: Path | None = None
-    # Set on stepping-corrected tracks whose content is already shifted to
-    # Source 1's audio-content timeline.  For these, mkvmerge must apply
-    # `container_delay_ms` directly (which we store as Source 1's audio
-    # container delay) instead of the correlation-based source delay, because
-    # the correlation shift is already baked into the FLAC samples.
-    is_pre_aligned: bool = False
     # Set by AudioProcessingStep when the track's whole delay is baked into the
-    # FLAC samples (start cut / digital silence): mkvmerge must apply no delay.
+    # FLAC samples (start cut / digital silence, and every stepping edit):
+    # mkvmerge must apply no delay.
     delay_baked: bool = False
     correction_source: str | None = None
     perform_ocr: bool = False
@@ -105,10 +100,6 @@ class PlanItem:
 
     # OCR pixel verification results (for auditor access)
     pixel_verification: dict | None = None
-
-    # Video-verified sync mode stats (for bitmap subtitles)
-    video_verified_bitmap: bool = False
-    video_verified_details: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -43,8 +43,8 @@ the UI thread). The worker runs the core pipeline:
 
 ```
 analyze (compute SEC/TER delays) → global shift (remove negative offsets)
-→ extract tracks → audio processing (corrections; lossless → FLAC with the
-delay baked in to the sample, mkvmerge --sync 0) → subtitle transforms
+→ extract tracks → audio processing (stepping and lossless → FLAC through the
+finisher, delay baked in to the sample, mkvmerge --sync 0) → subtitle transforms
 → chapters + attachments → mux (mkvmerge) → post-process/validate
 ```
 
@@ -66,7 +66,7 @@ external tools with streamed log/progress callbacks.
 - `audio_processing/` — sample-exact FLAC finisher: edit plan (start cut / silence / end cap) → one ffmpeg encode → verified output
 - `audit/` — append-only JSON audit trail of timing values at each pipeline step
 - `chapters/` — extract / rename / shift chapters, snap to keyframes
-- `correction/` — audio timing corrections: linear, PAL (24↔25 fps), stepping (silence-gated segments)
+- `correction/` — audio timing corrections: stepping (silence-gated segments; applied through `audio_processing/`). PAL / linear drift correction is disconnected (detected and reported only) — see `docs/plans/drift-correction.md`
 - `extraction/` — extract tracks & attachments from MKV containers
 - `io/` — `CommandRunner` (external-tool execution with streamed logging)
 - `job_discovery.py` — find single-file or batch jobs; match files by name across folders
@@ -98,6 +98,25 @@ sync-exclusion / report / favorites / font-manager dialogs.
 `videodiff` tool. VapourSynth (with the ffms2 source filter, whose index also
 supplies each video's real frame timestamps) is a Python library, not a
 subprocess.
+
+- **MKVToolNix = the user's MKVToolNix-Mod** (MKVToolNix 103.0 + fixes,
+  `mkvmerge v103.0.44`, installed as the system `mkvtoolnix` debs; full change
+  list in its `MOD_CHANGES.md`). What matters here: video from elementary
+  streams is timed exactly from the stream's own clock (stock 103.0 summed
+  frame lengths cut to whole ns, storing ~1 frame in 20 one ms early). The app
+  always muxes Source 1's video from an extracted raw stream, so the output
+  carries the disc's frame times, and a rip made with the mod has the same
+  times as its output (the frame table read from Source 1 matches the output
+  frame for frame). Rips made with stock 103.0 are 1 ms early on those frames.
+  Audio packetizing, negative `--sync` cutting and ms rounding are unchanged
+  from 103.0. mkvextract now writes VC-1 as a `.vc1` elementary stream, not AVI.
+  Don't add workarounds for 103.0's early frames.
+- **FFmpeg = the user's FFmpeg fork** (9.0.2 + patches), picked via the
+  `ffmpeg_dir` setting (put first on PATH; each job logs the build). The audio
+  finisher's strict decoding relies on its fixes: DTS-HD MA lossy frames and
+  TrueHD integrity failures are errors under `-err_detect explode` (stock
+  FFmpeg only warns), and FLAC block size matches 7.1. PyAV and
+  VapourSynth/ffms2 keep the system FFmpeg libraries.
 
 ## Environment gotchas
 

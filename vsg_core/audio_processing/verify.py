@@ -10,6 +10,11 @@
    format (rate, channels, bit depth, channel layout).
 
 Both decodes go to signed 32-bit, so equal hashes mean equal sample values.
+For a requantized source (floating-point decode, e.g. a lossy codec) the
+expected samples are cut to the FLAC's 24 bits first, exactly as the encoder
+truncates them.
+Both are strict (``STRICT_DECODE_ARGS``): a damaged frame makes the decode
+fail (RuntimeError from the runner) rather than vanish from both sides alike.
 Memory stays flat: the tracks are streamed in chunks.
 """
 
@@ -23,7 +28,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .encoder import output_layout
+from .encoder import STRICT_DECODE_ARGS, output_layout
 from .types import EditPlan, Silence, SourceFormat, Take
 
 if TYPE_CHECKING:
@@ -41,6 +46,7 @@ def _decode_cmd(path: Path, stream_index: int) -> list[str]:
         "-v",
         "error",
         "-nostdin",
+        *STRICT_DECODE_ARGS,
         "-i",
         str(path),
         "-map",
@@ -120,6 +126,8 @@ def scan_expected(
     digest = hashlib.sha256()
     emitted = 0
     cap = plan.max_output_samples
+    # Keeps the top out_bits of each s32 sample (floor), as the encoder does.
+    keep = np.int32(-(1 << (32 - fmt.out_bits))) if fmt.requantized else None
 
     def emit(data: bytes) -> None:
         nonlocal emitted
@@ -128,6 +136,8 @@ def scan_expected(
             if room <= 0:
                 return
             data = data[: room * frame_bytes]
+        if keep is not None:
+            data = (np.frombuffer(data, dtype="<i4") & keep).tobytes()
         digest.update(data)
         emitted += len(data) // frame_bytes
 
@@ -214,7 +224,7 @@ def check_output(
     digest, md5 = hashlib.sha256(), hashlib.md5()
     for data in reader.read(None):
         digest.update(data)
-        md5.update(canonical_bytes(data, fmt.bits))
+        md5.update(canonical_bytes(data, fmt.out_bits))
     reader.drain()
     count = reader.position
 
@@ -233,11 +243,11 @@ def check_output(
     if (info.sample_rate, info.channels, info.bits) != (
         fmt.sample_rate,
         fmt.channels,
-        fmt.bits,
+        fmt.out_bits,
     ):
         problems.append(
             f"format {info.sample_rate} Hz/{info.channels} ch/{info.bits}-bit, "
-            f"source {fmt.sample_rate} Hz/{fmt.channels} ch/{fmt.bits}-bit"
+            f"expected {fmt.sample_rate} Hz/{fmt.channels} ch/{fmt.out_bits}-bit"
         )
 
     probed = runner.run(

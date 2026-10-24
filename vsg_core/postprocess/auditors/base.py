@@ -236,14 +236,6 @@ class BaseAuditor:
         if tr.source == "Source 1" and tr.type != "subtitles":
             return float(plan_item.container_delay_ms + global_shift)
 
-        # Stepping-corrected tracks with pre-baked alignment: the correlation
-        # delay is in the FLAC samples, not in mkvmerge --sync.  mkvmerge only
-        # applies Source 1's audio-container delay (stashed in
-        # container_delay_ms by _swap_corrected_track).  Mirror
-        # options_builder so the audit matches reality.
-        if plan_item.is_pre_aligned:
-            return float(plan_item.container_delay_ms + global_shift)
-
         # For other sources, the delay from the context already includes the global shift
         sync_key = plan_item.sync_to if tr.source == "External" else tr.source
 

@@ -1158,6 +1158,20 @@ class SteppingTab(QWidget):
         )
         segment_layout.addRow(self.widgets["stepping_enabled"])
 
+        # PAL / linear drift: its own switch, but the correction is disconnected
+        # for now (docs/plans/drift-correction.md), so the box is greyed out.
+        self.widgets["drift_correction_enabled"] = QCheckBox(
+            "Enable PAL / linear drift correction (disconnected for now)"
+        )
+        self.widgets["drift_correction_enabled"].setToolTip(
+            "Separate from stepping. PAL (25 vs 23.976 fps) and linear drift\n"
+            "are still detected and reported in the log and the final report,\n"
+            "but are not corrected: the detection needs rework before the\n"
+            "correction can be trusted. See docs/plans/drift-correction.md."
+        )
+        self.widgets["drift_correction_enabled"].setEnabled(False)
+        segment_layout.addRow(self.widgets["drift_correction_enabled"])
+
         # ===== SECTION 1: DETECTION SETTINGS =====
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>Detection Settings</b>"))

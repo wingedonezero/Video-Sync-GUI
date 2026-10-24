@@ -8,9 +8,11 @@ Stepping correction entry points.
   1. Load dense analysis data from temp folder
   2. Build transition zones from clusters
   3. Refine boundaries with silence detection in Source 2
-  4. Assemble corrected audio from EDL
-  5. QA-check the result
-  6. Apply the verified EDL to all audio tracks from the same source
+  4. Build the EDL and a mono QA track from it
+  5. QA-check the QA track against Source 1
+  6. Hand the verified EDL to AudioProcessingStep (``ctx.stepping_corrections``),
+     which applies it to every audio track of the source through the audio
+     finisher (``swap_in_corrected_track`` then swaps each track in)
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from typing import TYPE_CHECKING
 from ...analysis.correlation import get_audio_stream_info
 from ...models.media import StreamProps, Track
 from .audio_assembly import (
-    assemble_corrected_audio,
+    assemble_check_track,
     decode_to_memory,
     get_audio_properties,
 )
@@ -38,9 +40,10 @@ if TYPE_CHECKING:
     import numpy as np
 
     from ...io.runner import CommandRunner
+    from ...models.jobs import PlanItem
     from ...models.settings import AppSettings
     from ...orchestrator.steps.context import Context
-    from .types import AudioSegment, SplicePoint
+    from .types import SplicePoint
 
 
 # ---------------------------------------------------------------------------
@@ -299,21 +302,20 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
 
             # --- QA: Assemble a mono check track and verify ---
             qa_path = ctx.temp_dir / f"qa_{source_key.replace(' ', '_')}.flac"
-            qa_ok = assemble_corrected_audio(
+            qa_ok = assemble_check_track(
                 edl=edl,
-                target_audio_path=analysis_path,
-                output_path=qa_path,
-                runner=runner,
-                tool_paths=ctx.tool_paths,
-                settings=settings,
-                log=log,
+                pcm=src2_pcm,
                 channels=1,
                 channel_layout="mono",
                 sample_rate=src2_sr,
-                target_pcm=src2_pcm,
+                output_path=qa_path,
+                runner=runner,
+                tool_paths=ctx.tool_paths,
+                log=log,
             )
             if not qa_ok:
                 log("[SteppingCorrection] QA assembly failed.")
+                _report_not_applied(ctx, source_key, "the QA track could not be built")
                 del ctx.stepping_edls[source_key]
                 continue
 
@@ -337,6 +339,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             )
             if not passed:
                 log("[SteppingCorrection] QA check FAILED — skipping correction.")
+                _report_not_applied(ctx, source_key, "the QA check failed")
                 del ctx.stepping_edls[source_key]
                 continue
 
@@ -402,35 +405,12 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                     boundary_audit.append(entry)
                 ctx.segment_flags[analysis_track_key]["audit_metadata"] = boundary_audit
 
-            # --- Apply to all audio tracks from this source ---
+            # --- Hand over: AudioProcessingStep corrects every audio track ---
+            ctx.stepping_corrections[source_key] = edl
             log(
-                f"[SteppingCorrection] QA passed — applying to "
-                f"{len(target_items)} audio track(s)."
+                f"[SteppingCorrection] QA passed — {len(target_items)} audio "
+                f"track(s) of {source_key} will be corrected in Audio Processing."
             )
-            for target_item in target_items:
-                if target_item.extracted_path is None:
-                    log("[ERROR] Skipping track with no extracted path.")
-                    continue
-                corrected_path = ctx.temp_dir / (
-                    f"corrected_{target_item.extracted_path.stem}.flac"
-                )
-                ok = assemble_corrected_audio(
-                    edl=edl,
-                    target_audio_path=str(target_item.extracted_path),
-                    output_path=corrected_path,
-                    runner=runner,
-                    tool_paths=ctx.tool_paths,
-                    settings=settings,
-                    log=log,
-                )
-                if not ok:
-                    log(
-                        f"[ERROR] Assembly failed for "
-                        f"{target_item.extracted_path.name} — keeping original."
-                    )
-                    continue
-
-                _swap_corrected_track(ctx, target_item, corrected_path, settings, log)
 
         finally:
             del src2_pcm
@@ -440,41 +420,25 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
 
 
 # ---------------------------------------------------------------------------
-# apply_plan_to_file (kept for external use / subtitle EDL replay)
-# ---------------------------------------------------------------------------
-
-
-def apply_plan_to_file(
-    target_audio_path: str,
-    edl: list[AudioSegment],
-    temp_dir: Path,
-    runner: CommandRunner,
-    tool_paths: dict[str, str | None],
-    settings: AppSettings,
-    log: Callable[[str], None] | None = None,
-) -> Path | None:
-    """Apply a pre-generated EDL to a given audio file.
-
-    Returns the path to the corrected FLAC, or ``None`` on failure.
-    """
-    _log = log or runner._log_message
-
-    corrected_path = temp_dir / f"corrected_{Path(target_audio_path).stem}.flac"
-    ok = assemble_corrected_audio(
-        edl=edl,
-        target_audio_path=target_audio_path,
-        output_path=corrected_path,
-        runner=runner,
-        tool_paths=tool_paths,
-        settings=settings,
-        log=_log,
-    )
-    return corrected_path if ok else None
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _report_not_applied(ctx: Context, source_key: str, why: str) -> None:
+    """Stepping was found but its audio correction is not applied: the tracks
+    keep the analysis delay (first segment), so the later segments are off."""
+    ctx.stepping_quality_issues.append(
+        {
+            "source": source_key,
+            "issue_type": "correction_not_applied",
+            "severity": "high",
+            "message": (
+                f"Stepping detected in {source_key} but not corrected ({why}); "
+                f"its audio keeps the first segment's delay"
+            ),
+            "details": {},
+        }
+    )
 
 
 def _extract_chapter_times(
@@ -702,20 +666,21 @@ def _find_analysis_track(
     return None
 
 
-def _swap_corrected_track(
+def swap_in_corrected_track(
     ctx: Context,
-    target_item: object,
+    target_item: PlanItem,
     corrected_path: Path,
     settings: AppSettings,
     log: Callable[[str], None],
 ) -> None:
-    """Preserve the original and point the item to the corrected FLAC."""
+    """Preserve the original and point the item to the corrected FLAC, whose
+    whole delay (start + every step) is baked into its samples."""
 
-    # Preserve original
+    # Preserve original (muxed with its analysis delay, as extracted)
     preserved = copy.deepcopy(target_item)
-    preserved.is_preserved = True  # type: ignore[attr-defined]
-    preserved.is_default = False  # type: ignore[attr-defined]
-    original_props = preserved.track.props  # type: ignore[attr-defined]
+    preserved.is_preserved = True
+    preserved.is_default = False
+    original_props = preserved.track.props
 
     # Build names
     preserved_label = settings.stepping_preserved_track_label
@@ -728,10 +693,10 @@ def _swap_corrected_track(
     else:
         preserved_name = original_props.name
 
-    preserved.track = Track(  # type: ignore[attr-defined]
-        source=preserved.track.source,  # type: ignore[attr-defined]
-        id=preserved.track.id,  # type: ignore[attr-defined]
-        type=preserved.track.type,  # type: ignore[attr-defined]
+    preserved.track = Track(
+        source=preserved.track.source,
+        id=preserved.track.id,
+        type=preserved.track.type,
         props=StreamProps(
             codec_id=original_props.codec_id,
             lang=original_props.lang,
@@ -739,20 +704,11 @@ def _swap_corrected_track(
         ),
     )
 
-    # Update main track → corrected FLAC
-    target_item.extracted_path = corrected_path  # type: ignore[attr-defined]
-    target_item.is_corrected = True  # type: ignore[attr-defined]
-    # The corrected FLAC is pre-aligned to Source 1's audio-content timeline.
-    # We still need to apply Source 1's own audio-container delay at mux time
-    # so the corrected track matches where Source 1's audio lands in the
-    # final MKV container.  We stash that value in container_delay_ms and
-    # flip the is_pre_aligned flag; the options builder and audio trim both
-    # read this path for pre-aligned tracks (bypassing the correlation-delay
-    # lookup, which would double-apply the shift we already baked in).
-    target_item.is_pre_aligned = True  # type: ignore[attr-defined]
-    target_item.container_delay_ms = int(  # type: ignore[attr-defined]
-        round(ctx.source1_audio_container_delay_ms)
-    )
+    # Update main track → corrected FLAC; mkvmerge applies no delay to it.
+    target_item.extracted_path = corrected_path
+    target_item.is_corrected = True
+    target_item.delay_baked = True
+    target_item.container_delay_ms = 0
 
     corrected_label = settings.stepping_corrected_track_label
     if corrected_label:
@@ -764,10 +720,10 @@ def _swap_corrected_track(
     else:
         corrected_name = original_props.name
 
-    target_item.track = Track(  # type: ignore[attr-defined]
-        source=target_item.track.source,  # type: ignore[attr-defined]
-        id=target_item.track.id,  # type: ignore[attr-defined]
-        type=target_item.track.type,  # type: ignore[attr-defined]
+    target_item.track = Track(
+        source=target_item.track.source,
+        id=target_item.track.id,
+        type=target_item.track.type,
         props=StreamProps(
             codec_id="FLAC",
             lang=original_props.lang,
@@ -781,7 +737,7 @@ def _swap_corrected_track(
     # apply_track_name is False and custom_name is empty.  The stepping
     # correction shouldn't unilaterally override a per-track choice.
     if ctx.extracted_items is not None:
-        ctx.extracted_items.append(preserved)  # type: ignore[arg-type]
+        ctx.extracted_items.append(preserved)
 
     log(f"[SUCCESS] Stepping correction applied for {original_props.name or 'track'}")
 

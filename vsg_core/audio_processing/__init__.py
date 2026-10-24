@@ -7,7 +7,14 @@ proven against the source sample for sample. Used for every audio track the
 app converts or corrects, so mkvmerge receives them with no delay at all.
 """
 
-from .finisher import FinishResult, delay_tags, finish
+from .finisher import (
+    FinishError,
+    FinishResult,
+    delay_tags,
+    edit_tags,
+    finish,
+    format_edit_plan,
+)
 from .samples import (
     DelayBake,
     bake_delay,
@@ -24,15 +31,18 @@ __all__ = [
     "DelayBake",
     "EditOp",
     "EditPlan",
+    "FinishError",
     "FinishResult",
     "Silence",
     "SourceFormat",
     "Take",
     "bake_delay",
     "delay_tags",
+    "edit_tags",
     "end_cap_samples",
     "expected_output_samples",
     "finish",
+    "format_edit_plan",
     "ms_to_ns",
     "ns_to_samples",
     "plan_for_delay",
