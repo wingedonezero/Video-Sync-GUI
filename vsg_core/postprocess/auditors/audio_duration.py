@@ -86,10 +86,7 @@ class AudioDurationAuditor(BaseAuditor):
         cut_overrun_s = {
             r.label: r.cut.end_overrun_ns / 1e9
             for r in self.ctx.audio_processing_results
-            if r.route == "passthrough"
-            and r.ok
-            and r.cut is not None
-            and r.cut.end_overrun_ns is not None
+            if r.cut is not None and r.cut.end_overrun_ns is not None
         }
 
         for i, _audio_stream in enumerate(audio_streams):

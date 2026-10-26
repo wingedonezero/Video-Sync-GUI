@@ -683,21 +683,24 @@ class AudioProcessingStep:
         what: str,
         route: AudioRouteStr = "flac",
     ) -> AudioProcessingResult:
-        """Keep the original track (it is muxed untouched) and report why."""
+        """Keep the original track in its codec, cut by the passthrough route
+        (so mkvmerge never cuts it), and report why."""
         label = item_label(item)
         runner._log_message(
             f"[ERROR] [AudioProcessing] {label}: {'; '.join(problems)}. Keeping the original track."
         )
         ctx.flac_conversion_failures.append(f"{label}: {'; '.join(problems)}")
+        kept = self._passthrough(ctx, item, runner, f"{what}, original kept")
         return AudioProcessingResult(
             label,
             route,
             item.track.props.codec_id or "",
             False,
-            f"{what}, original kept",
+            f"{what}, original kept" + (" and cut in its codec" if kept.cut else ""),
             delay_raw_ms=delay_ms,
-            mkvmerge_delay_ms=mkvmerge_ms,
+            mkvmerge_delay_ms=item.mux_sync_ms if kept.cut else mkvmerge_ms,
             problems=tuple(problems),
+            cut=kept.cut,
         )
 
     # ------------------------------------------------------------------
@@ -927,7 +930,8 @@ class AudioProcessingStep:
         if table is None:
             log(
                 "[WARNING] [AudioProcessing] Could not read Source 1's real frame "
-                "timestamps — converted tracks are NOT trimmed to the video end."
+                "timestamps — no audio track is trimmed to the video end (FLAC or "
+                "cut in its codec)."
             )
             return None
         video_delay = ctx.delays.global_shift_ms if ctx.delays else 0

@@ -429,12 +429,20 @@ def _wav_header(layout: WavLayout, data_bytes: int) -> bytes:
     )  # fmt: skip
 
 
-def _cut_pcm(
-    src: Path, delay_ns: int, video_end_ns: int | None, dst: Path
-) -> PassthroughCut:
-    layout = read_wav_layout(src)
-    rate, align = layout.rate, layout.block_align
-    total = layout.data_bytes // align
+@dataclass(frozen=True, slots=True)
+class SamplePlan:
+    first: int  # first kept sample
+    keep: int  # samples kept
+    sync_ms: int
+    first_kept_ns: int
+    end_overrun_ns: int | None
+
+
+def plan_samples(
+    total: int, rate: int, delay_ns: int, video_end_ns: int | None
+) -> SamplePlan:
+    """Sample-exact cut (PCM, Opus): the first sample with t + delay >= 0, the
+    last one starting before the video end where the samples really land."""
     first = 0 if delay_ns >= 0 else _ceil_div(-delay_ns * rate, NS)
     if first >= total:
         raise PassthroughError("the delay removes the whole track")
@@ -450,6 +458,17 @@ def _cut_pcm(
         overrun = (keep * NS - limit) // rate
         if overrun < 0:  # the track ends before the video end: nothing to trim
             overrun = None
+    return SamplePlan(first, keep, sync_ms, exact // rate, overrun)
+
+
+def _cut_pcm(
+    src: Path, delay_ns: int, video_end_ns: int | None, dst: Path
+) -> PassthroughCut:
+    layout = read_wav_layout(src)
+    rate, align = layout.rate, layout.block_align
+    total = layout.data_bytes // align
+    plan = plan_samples(total, rate, delay_ns, video_end_ns)
+    first, keep = plan.first, plan.keep
     rewrite = first > 0 or keep < total - first
     if rewrite:
         start = layout.data_offset + first * align
@@ -480,13 +499,13 @@ def _cut_pcm(
     return PassthroughCut(
         "pcm",
         rate,
-        sync_ms,
+        plan.sync_ms,
         dst if rewrite else None,
         total,
         first,
         total - first - keep,
-        exact // rate,
-        overrun,
+        plan.first_kept_ns,
+        plan.end_overrun_ns,
         NS // rate,
     )
 
@@ -518,21 +537,8 @@ def _cut_opus(
     if audible <= 0:
         raise PassthroughError("no audible samples")
 
-    first = 0 if delay_ns >= 0 else _ceil_div(-delay_ns * rate, NS)
-    if first >= audible:
-        raise PassthroughError("the delay removes the whole track")
-    exact = first * NS + delay_ns * rate
-    sync_ms = _round_ms(exact, rate * NS)
-    keep = audible - first
-    overrun: int | None = None
-    if video_end_ns is not None:
-        limit = video_end_ns * rate - sync_ms * 1_000_000 * rate
-        if limit <= 0:
-            raise PassthroughError("no audio is left before the video end")
-        keep = min(keep, _ceil_div(limit, NS))
-        overrun = (keep * NS - limit) // rate
-        if overrun < 0:  # the track ends before the video end: nothing to trim
-            overrun = None
+    plan = plan_samples(audible, rate, delay_ns, video_end_ns)
+    first, keep = plan.first, plan.keep
     rewrite = first > 0 or keep < audible - first
     if rewrite:
         target = first + pre_skip  # decoded-sample index of the first kept sample
@@ -561,13 +567,13 @@ def _cut_opus(
     return PassthroughCut(
         "opus",
         rate,
-        sync_ms,
+        plan.sync_ms,
         dst if rewrite else None,
         audible,
         first,
         audible - first - keep,
-        exact // rate,
-        overrun,
+        plan.first_kept_ns,
+        plan.end_overrun_ns,
         NS // rate,
     )
 

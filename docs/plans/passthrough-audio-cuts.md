@@ -369,3 +369,15 @@ Decisions 2026-10-26 before commit:
 - GUI: the FLAC checkbox tooltips say what happens to a track left unticked (kept in its codec,
   cut in whole frames) and that FLAC keeps only TrueHD's top mix; the dialnorm option says the app
   makes the edit itself and never on TrueHD; the trim option is "Trim audio to the video end".
+
+Full-length film and review (2026-10-26):
+
+- Resident Evil: Apocalypse UHD, 93.8 min: TrueHD Atmos (6.75 M access units) cut, written and
+  checked in 9 s, 355 MB private memory (the rest of the RSS is the mapped file); DTS-HD MA 15 s;
+  AC-3 with the dialnorm edit 5-7 s (61 s before the numpy CRCs). The final audit extracts only the
+  rewritten tracks plus every cut track's frame times with mkvextract (~45 s on 47 GB), instead of
+  mkvinfo -s (2 min, 638 MB of text in memory).
+- Code review fixes: the old sync audit skips tracks cut in their codec (it read an Opus pre-skip as
+  a sync delay); a failed FLAC conversion or stepping correction keeps the original in its codec
+  through the passthrough cut, never mkvmerge's; the first-frame check allows the file's own
+  timestamp rounding; the missing-frame-table warning says no audio is trimmed.

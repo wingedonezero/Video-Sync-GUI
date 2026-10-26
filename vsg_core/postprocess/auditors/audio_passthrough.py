@@ -88,10 +88,10 @@ class AudioPassthroughAuditor(BaseAuditor):
         for entry in self.ctx.passthrough_warnings:
             self._report(entry)
 
+        # A cut is recorded only when it succeeded; a track whose FLAC or
+        # stepping route failed can carry one too.
         results = {
-            r.label: r
-            for r in self.ctx.audio_processing_results
-            if r.route == "passthrough" and r.ok and r.cut is not None
+            r.label: r for r in self.ctx.audio_processing_results if r.cut is not None
         }
         if not results:
             self.log("No tracks were cut in their codec.")
@@ -120,17 +120,31 @@ class AudioPassthroughAuditor(BaseAuditor):
         if not jobs:
             return len(self.issues)
 
+        # Times are stored rounded to the file's timestamp scale (1 ms with video).
+        scale_ns = int(
+            (final_mkvmerge_data.get("container", {}).get("properties") or {}).get(
+                "timestamp_scale"
+            )
+            or 1_000_000
+        )
+        half_scale = Fraction(scale_ns, 2_000_000)  # in ms
         work = self.ctx.temp_dir / "passthrough_audit"
         work.mkdir(parents=True, exist_ok=True)
         try:
-            cmd = ["mkvextract", str(final_mkv_path), "tracks"]
-            cmd += [f"{tid}:{work / f'{tid}.track'}" for _, _, tid in jobs]
+            # Only rewritten tracks are extracted: an unchanged one is the
+            # extraction mkvmerge muxed, so its frame times are what to check.
+            cmd = ["mkvextract", str(final_mkv_path)]
+            rewritten = [tid for _, cut, tid in jobs if cut.output is not None]
+            if rewritten:
+                cmd += ["tracks"] + [
+                    f"{tid}:{work / f'{tid}.track'}" for tid in rewritten
+                ]
             cmd += ["timestamps_v2"]
             cmd += [f"{tid}:{work / f'{tid}.times'}" for _, _, tid in jobs]
             self.runner.run(cmd, self.tool_paths)
             for item, cut, tid in jobs:
                 self._check_track(
-                    item, cut, work / f"{tid}.track", work / f"{tid}.times"
+                    item, cut, work / f"{tid}.track", work / f"{tid}.times", half_scale
                 )
         finally:
             shutil.rmtree(work, ignore_errors=True)
@@ -140,7 +154,12 @@ class AudioPassthroughAuditor(BaseAuditor):
         return len(self.issues)
 
     def _check_track(
-        self, item: PlanItem, cut: PassthroughCut, extracted: Path, times_path: Path
+        self,
+        item: PlanItem,
+        cut: PassthroughCut,
+        extracted: Path,
+        times_path: Path,
+        half_scale: Fraction,
     ) -> None:
         name = (
             f"{item.track.props.name or f'Track {item.track.id}'} ({item.track.source})"
@@ -149,16 +168,20 @@ class AudioPassthroughAuditor(BaseAuditor):
         if written is None or not written.exists():
             self.log(f"  ⓘ {name}: muxed file no longer on disk; check skipped")
             return
-        if not extracted.exists() or not times_path.exists():
+        if not times_path.exists() or (
+            cut.output is not None and not extracted.exists()
+        ):
             self._report(f"{name}: could not extract it from the final file")
             return
 
         times = _read_times(times_path)
-        problems = self._compare(cut, written, extracted, len(times))
-        if not times or times[0] != cut.sync_ms:
+        problems = self._compare(
+            cut, written, extracted if cut.output is not None else None, len(times)
+        )
+        if not times or abs(times[0] - cut.sync_ms) > half_scale:
             first = f"{float(times[0]):.3f} ms" if times else "nothing"
             problems.append(f"first frame at {first}, expected {cut.sync_ms} ms")
-        elif cut.kind not in ("pcm", "opus"):
+        elif not problems and cut.kind not in ("pcm", "opus"):
             problems += self._check_times(cut, written, times)
 
         if problems:
@@ -172,9 +195,19 @@ class AudioPassthroughAuditor(BaseAuditor):
 
     @staticmethod
     def _compare(
-        cut: PassthroughCut, written: Path, extracted: Path, frames: int
+        cut: PassthroughCut, written: Path, extracted: Path | None, frames: int
     ) -> list[str]:
-        """The extracted track must be what the app wrote."""
+        """The extracted track must be what the app wrote (``extracted`` None:
+        the track was not rewritten, only its frame count is checked)."""
+        if extracted is None:
+            if cut.kind in ("pcm", "opus"):
+                return []
+            units = len(parse_file(frame_family(cut.kind), written))
+            return (
+                []
+                if units == frames
+                else [f"{frames} frames in the file, {units} units"]
+            )
         if cut.kind == "opus":
             ours, theirs = read_ogg_opus(written), read_ogg_opus(extracted)
             if ours.packets != theirs.packets:

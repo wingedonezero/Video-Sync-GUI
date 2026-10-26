@@ -7,6 +7,7 @@ Real-media checks live in the Tests harness (finisher_real_samples.py).
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from vsg_core.audio_processing import FinishError
 from vsg_core.audio_processing.passthrough import PassthroughError
 from vsg_core.audio_processing.verify import read_streaminfo
 from vsg_core.correction.stepping import AudioSegment
@@ -23,6 +25,7 @@ from vsg_core.models.jobs import Delays, MergePlan, PlanItem
 from vsg_core.models.media import StreamProps, Track
 from vsg_core.models.settings import AppSettings
 from vsg_core.mux.options_builder import MkvmergeOptionsBuilder
+from vsg_core.orchestrator.steps import audio_processing_step as aps
 from vsg_core.orchestrator.steps.audio_processing_step import (
     AudioProcessingStep,
     eligibility_skip_reason,
@@ -518,6 +521,56 @@ class TestPassthroughRoute:
         res = ctx.audio_processing_results[0]
         assert not res.ok and item.extracted_path == ac3 and item.mux_sync_ms is None
         assert not (tmp_path / "ac3_cut.ac3").exists()
+
+    def test_failed_flac_conversion_is_still_cut_in_its_codec(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pcm = tmp_path / "pcm.wav"
+        _synth(pcm, "pcm_s16le", 2)
+        item = _item("Source 2", 1, "A_PCM/INT/LIT", pcm, convert=True)
+        ctx = _ctx(tmp_path, [item], raw_delay_ms=-10.0)
+
+        def broken(*_args: object) -> None:
+            raise FinishError("encoder failed")
+
+        monkeypatch.setattr(aps, "finish", broken)
+        ctx = AudioProcessingStep().run(
+            ctx, CommandRunner(AppSettings(), lambda _m: None)
+        )
+        StepValidator.validate_audio_processing(ctx)
+        res = ctx.audio_processing_results[0]
+        assert (res.route, res.ok) == ("flac", False)
+        assert res.cut is not None and res.cut.dropped_start == 480
+        assert item.mux_sync_ms == 0 and item.original_extracted_path == pcm
+        assert ctx.flac_conversion_failures[0].startswith("Source 2 audio track 1:")
+
+    def test_audit_compares_the_muxed_track_with_the_cut(self, tmp_path: Path) -> None:
+        ac3 = tmp_path / "ac3.ac3"
+        _synth(ac3, "ac3", 2)
+        item = _item("Source 2", 1, "A_AC3", ac3, convert=False)
+        ctx = _ctx(tmp_path, [item], raw_delay_ms=-100.0)
+        runner = CommandRunner(AppSettings(), lambda _m: None)
+        ctx = AudioProcessingStep().run(ctx, runner)
+        assert item.extracted_path is not None and item.mux_sync_ms == 28
+
+        def mux(audio: Path, sync: int) -> tuple[Path, dict]:
+            out = tmp_path / f"out_{sync}_{audio.name}.mkv"
+            subprocess.run(
+                ["mkvmerge", "-q", "-o", str(out), "--sync", f"0:{sync}", str(audio)],
+                check=True,
+            )
+            info = subprocess.run(
+                ["mkvmerge", "-J", str(out)], capture_output=True, text=True, check=True
+            ).stdout
+            return out, json.loads(info)
+
+        good, info = mux(item.extracted_path, 28)
+        auditor = AudioPassthroughAuditor(ctx, runner)
+        assert auditor.run(good, info) == 0, [i.message for i in auditor.issues]
+        late, info = mux(item.extracted_path, 29)  # one ms off
+        assert AudioPassthroughAuditor(ctx, runner).run(late, info) == 1
+        uncut, info = mux(ac3, 28)  # not the bytes the app wrote
+        assert AudioPassthroughAuditor(ctx, runner).run(uncut, info) >= 1
 
     def test_preserved_original_is_cut_too(self, tmp_path: Path) -> None:
         ac3 = tmp_path / "ac3.ac3"
