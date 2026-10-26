@@ -128,6 +128,12 @@ class Context:
     flac_conversions: list[str] = field(default_factory=list)
     flac_conversion_skips: list[str] = field(default_factory=list)
     flac_conversion_failures: list[str] = field(default_factory=list)
+    # Passthrough tracks the app could not cut (muxed with mkvmerge --sync as
+    # before), as "label: problem".
+    passthrough_cut_failures: list[str] = field(default_factory=list)
+    # Caveats about audio the app keeps in its codec (Opus / Vorbis lacing, a
+    # codec mkvmerge still cuts), as "label: message"; reported by the audit.
+    passthrough_warnings: list[str] = field(default_factory=list)
 
     # AudioProcessingStep: one outcome per audio track (route, bake, checks),
     # for the log summary and the final audit.

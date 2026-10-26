@@ -1,7 +1,7 @@
 # tests/test_passthrough_cuts.py
 """Passthrough cuts: frame parsers on synthetic streams, cut planning (start
 entry rule, residual rounding, end trim), the byte / PCM / Opus writers and
-their checks, and the dialnorm edit.
+their checks, the dialnorm edit, and the mux options.
 
 Real-media checks (parser == mkvmerge on 448 tracks, dialnorm == mkvmerge
 byte for byte, real jobs) live in the Tests harness:
@@ -29,6 +29,10 @@ from vsg_core.audio_processing.passthrough import (
     plan_frames,
     read_wav_layout,
 )
+from vsg_core.models.jobs import Delays, MergePlan, PlanItem
+from vsg_core.models.media import StreamProps, Track
+from vsg_core.models.settings import AppSettings
+from vsg_core.mux.options_builder import MkvmergeOptionsBuilder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -322,3 +326,29 @@ def test_opus_cut_is_sample_exact_through_pre_skip(tmp_path: Path) -> None:
     j = (start_decoded - 3840) // 960
     assert out.pre_skip == start_decoded - j * 960
     assert out.packets[0] == stream.packets[j]
+
+
+# --- mux options ----------------------------------------------------------------------
+
+
+def test_mux_uses_the_residual_and_skips_mkvmerges_dialnorm(tmp_path: Path) -> None:
+    item = PlanItem(
+        track=Track("Source 2", 2, "audio", StreamProps("A_EAC3")),
+        extracted_path=tmp_path / "x.eac3",
+    )
+    item.mux_sync_ms = 29
+    item.dialnorm_removed = True
+    opus = PlanItem(
+        track=Track("Source 3", 1, "audio", StreamProps("A_OPUS")),
+        extracted_path=tmp_path / "x.opus",
+    )
+    settings = AppSettings()
+    settings.apply_dialog_norm_gain = True
+    delays = Delays(source_delays_ms={"Source 2": -11011, "Source 3": 0})
+    tokens = MkvmergeOptionsBuilder().build(
+        MergePlan(items=[item, opus], delays=delays), settings
+    )
+    syncs = [tokens[i + 1] for i, t in enumerate(tokens) if t == "--sync"]
+    assert syncs == ["0:+29", "0:+0"]
+    assert "--remove-dialog-normalization-gain" not in tokens
+    assert "--disable-lacing" not in tokens

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from vsg_core.audio_processing.passthrough import PassthroughError
 from vsg_core.audio_processing.verify import read_streaminfo
 from vsg_core.correction.stepping import AudioSegment
 from vsg_core.correction.stepping.edit_plan import edl_to_edits, render_edits
@@ -30,7 +31,10 @@ from vsg_core.orchestrator.steps.audio_processing_step import (
 )
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.orchestrator.validation import StepValidator
-from vsg_core.postprocess.auditors import DriftCorrectionAuditor
+from vsg_core.postprocess.auditors import (
+    AudioPassthroughAuditor,
+    DriftCorrectionAuditor,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -235,7 +239,7 @@ class TestStepEndToEnd:
             _item("Source 2", 1, "A_PCM/INT/LIT", pcm, convert=True),
             _item(
                 "Source 2", 2, "A_AC3", ac3, convert=True
-            ),  # lossy: skipped, untouched
+            ),  # lossy: skipped, cut in its codec
             _item(
                 "Source 2", 3, "A_FLAC", flac_src, convert=False
             ),  # auto: delay -> re-encode
@@ -245,10 +249,17 @@ class TestStepEndToEnd:
         ctx = AudioProcessingStep().run(ctx, runner)
 
         routes = [(r.route, r.ok) for r in ctx.audio_processing_results]
-        assert routes == [("flac", True), ("untouched", True), ("flac", True)]
+        assert routes == [("flac", True), ("passthrough", True), ("flac", True)]
         pcm_item, ac3_item, _flac_item = items
         assert pcm_item.delay_baked and pcm_item.track.props.codec_id == "A_FLAC"
-        assert not ac3_item.delay_baked and ac3_item.extracted_path == ac3
+        # AC-3 keeps its codec: the first 32 ms frame is dropped, the second
+        # lands at 32 - 10.834789 = 21.165 ms -> --sync +21.
+        assert not ac3_item.delay_baked and ac3_item.mux_sync_ms == 21
+        assert (
+            ac3_item.extracted_path != ac3 and ac3_item.original_extracted_path == ac3
+        )
+        ac3_cut = ctx.audio_processing_results[1].cut
+        assert ac3_cut is not None and ac3_cut.dropped_start == 1
         assert ctx.flac_conversion_skips == [
             "Source 2 audio track 2: codec A_AC3 is not lossless"
         ]
@@ -266,7 +277,7 @@ class TestStepEndToEnd:
             MergePlan(items=items, delays=ctx.delays or Delays()), AppSettings()
         )
         syncs = [tokens[i + 1] for i, t in enumerate(tokens) if t == "--sync"]
-        assert syncs == ["0:+0", "0:-11", "0:+0"]
+        assert syncs == ["0:+0", "0:+21", "0:+0"]
         assert "--stop-after-video-ends" not in tokens
 
     def test_flac_with_nothing_to_change_is_left_alone(self, tmp_path: Path) -> None:
@@ -377,9 +388,12 @@ class TestSteppingRoute:
         assert np.array_equal(_decode(item.extracted_path).reshape(-1, 2), expected)
         assert read_streaminfo(item.extracted_path).bits == 16  # was 24 before
 
-        # The original is kept as a preserved track; mux bakes nothing twice.
+        # The original is kept as a preserved track, cut in its own codec
+        # (never by mkvmerge); mux bakes nothing twice.
         preserved = [i for i in ctx.extracted_items or [] if i.is_preserved]
-        assert [p.extracted_path for p in preserved] == [pcm]
+        assert [p.original_extracted_path for p in preserved] == [pcm]
+        assert preserved[0].mux_sync_ms is not None and preserved[0].mux_sync_ms >= 0
+        assert ctx.audio_processing_results[-1].preserved_original
         tokens = MkvmergeOptionsBuilder().build(
             MergePlan(items=[item], delays=ctx.delays or Delays()), AppSettings()
         )
@@ -438,8 +452,10 @@ class TestDisconnectedDrift:
         StepValidator.validate_audio_processing(ctx)
         StepValidator.validate_correction(ctx)
 
-        assert ctx.audio_processing_results[0].route == "untouched"
-        assert not item.is_corrected and item.extracted_path == pcm
+        res = ctx.audio_processing_results[0]
+        assert res.route == "passthrough" and res.cut is not None
+        assert res.cut.dropped_start == 480 and item.mux_sync_ms == 0
+        assert not item.is_corrected and item.original_extracted_path == pcm
         assert any("[Drift] PAL drift detected in Source 2" in ln for ln in lines)
 
     def test_audit_reports_drift_but_not_an_unverified_stepping_flag(
@@ -458,3 +474,77 @@ class TestDisconnectedDrift:
         assert auditor.run(tmp_path / "out.mkv", {}) == 1
         assert "Linear drift detected in Source 2" in auditor.issues[0].message
         assert any("no verified EDL" in ln for ln in lines)
+
+
+@needs_ffmpeg
+class TestPassthroughRoute:
+    def test_refused_cut_falls_back_to_mkvmerge(self, tmp_path: Path) -> None:
+        ac3 = tmp_path / "ac3.ac3"
+        _synth(ac3, "ac3", 2)
+        damaged = tmp_path / "damaged.ac3"
+        damaged.write_bytes(
+            b"\0\0\0" + ac3.read_bytes()
+        )  # garbage before the first frame
+        item = _item("Source 2", 1, "A_AC3", damaged, convert=False)
+        ctx = _ctx(tmp_path, [item], raw_delay_ms=-10.834789)
+        ctx = AudioProcessingStep().run(
+            ctx, CommandRunner(AppSettings(), lambda _m: None)
+        )
+        StepValidator.validate_audio_processing(ctx)
+        res = ctx.audio_processing_results[0]
+        assert (res.route, res.ok) == ("passthrough", False)
+        assert item.mux_sync_ms is None and item.extracted_path == damaged
+        assert ctx.passthrough_cut_failures[0].startswith("Source 2 audio track 1:")
+        tokens = MkvmergeOptionsBuilder().build(
+            MergePlan(items=[item], delays=ctx.delays or Delays()), AppSettings()
+        )
+        assert tokens[tokens.index("--sync") + 1] == "0:-11"
+
+    def test_cut_mkvmerge_cannot_read_falls_back(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ac3 = tmp_path / "ac3.ac3"
+        _synth(ac3, "ac3", 2)
+        item = _item("Source 2", 1, "A_AC3", ac3, convert=False)
+        ctx = _ctx(tmp_path, [item], raw_delay_ms=-100.0)
+
+        def unreadable(*_args: object) -> None:
+            raise PassthroughError("mkvmerge reads the cut file as nothing")
+
+        monkeypatch.setattr(AudioProcessingStep, "_check_mkvmerge_reads", unreadable)
+        ctx = AudioProcessingStep().run(
+            ctx, CommandRunner(AppSettings(), lambda _m: None)
+        )
+        res = ctx.audio_processing_results[0]
+        assert not res.ok and item.extracted_path == ac3 and item.mux_sync_ms is None
+        assert not (tmp_path / "ac3_cut.ac3").exists()
+
+    def test_preserved_original_is_cut_too(self, tmp_path: Path) -> None:
+        ac3 = tmp_path / "ac3.ac3"
+        _synth(ac3, "ac3", 2)
+        main = _item("Source 2", 1, "A_AC3", ac3, convert=False)
+        original = _item("Source 2", 1, "A_AC3", ac3, convert=False)
+        original.is_preserved = True
+        ctx = _ctx(tmp_path, [main, original], raw_delay_ms=-100.0)
+        ctx = AudioProcessingStep().run(
+            ctx, CommandRunner(AppSettings(), lambda _m: None)
+        )
+        StepValidator.validate_audio_processing(ctx)
+        labels = [(r.label, r.preserved_original) for r in ctx.audio_processing_results]
+        assert labels == [
+            ("Source 2 audio track 1", False),
+            ("Source 2 audio track 1 (preserved original)", True),
+        ]
+        assert original.mux_sync_ms == 28 and main.mux_sync_ms == 28  # 128 - 100 ms
+
+
+def test_audit_reports_passthrough_failures_and_caveats(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, [], raw_delay_ms=0.0)
+    ctx.passthrough_cut_failures.append("Source 2 audio track 1: truncated last frame")
+    ctx.passthrough_warnings.append("Source 3 audio track 1: Opus is muxed with lacing")
+    auditor = AudioPassthroughAuditor(
+        ctx, CommandRunner(AppSettings(), lambda _m: None)
+    )
+    assert auditor.run(tmp_path / "out.mkv", {}) == 2
+    assert [i.severity for i in auditor.issues] == ["warning", "warning"]
+    assert "Opus is muxed with lacing" in auditor.issues[1].message

@@ -77,15 +77,20 @@ class TrackSettingsLogic:
             if is_flac_eligible:
                 self.v.cb_flac.setToolTip(
                     "Losslessly re-encode this track to FLAC (verified "
-                    "bit-identical). Object-based audio (Atmos/DTS:X), lossy "
-                    "DTS profiles, and tracks pending audio correction are "
-                    "skipped automatically at run time."
+                    "bit-identical), with its delay and end trim cut to the "
+                    "sample. Object-based audio (Atmos/DTS:X) and lossy DTS "
+                    "profiles are skipped at run time.\n"
+                    "Unticked, the track keeps its codec and the app cuts it "
+                    "in whole frames instead. For TrueHD, FLAC keeps only the "
+                    "top mix: the disc's own stereo / 5.1 mixes are not kept."
                 )
             else:
                 self.v.cb_flac.setChecked(False)
                 self.v.cb_flac.setToolTip(
                     "Only lossless codecs (PCM, TrueHD, DTS-HD MA) can be "
-                    "converted to FLAC without quality loss."
+                    "converted to FLAC without quality loss. This track keeps "
+                    "its codec; the app cuts it in whole frames at the start "
+                    "and, with the end trim on, at the video end."
                 )
 
         # Show subtitle group only for subtitles

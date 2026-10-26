@@ -2,11 +2,12 @@
 """
 Checks whether audio streams in the final MKV extend past the video track.
 
-With "trim converted audio to the video end" on, AudioProcessingStep cuts
-every FLAC-converted track that is not from Source 1 and runs past the video
-end, to the sample. The tracks it cut must end at the video end (up to the
-container's whole-ms timestamps). Every other track is untouched and is
-warned about only when it overshoots by more than the threshold.
+With "trim audio to the video end" on, AudioProcessingStep cuts every track
+that is not from Source 1 and runs past the video end: FLAC-converted tracks
+to the sample, tracks kept in their codec (passthrough) after the last unit
+that starts before it. Those must end where planned (up to the container's
+whole-ms timestamps). Any other track is warned about only when it
+overshoots by more than the threshold.
 """
 
 from __future__ import annotations
@@ -80,6 +81,16 @@ class AudioDurationAuditor(BaseAuditor):
         end_trimmed = {
             r.label for r in self.ctx.audio_processing_results if r.samples_trimmed_end
         }
+        # Passthrough tracks trimmed in whole units: expected overrun past the
+        # video end (< one unit), in seconds.
+        cut_overrun_s = {
+            r.label: r.cut.end_overrun_ns / 1e9
+            for r in self.ctx.audio_processing_results
+            if r.route == "passthrough"
+            and r.ok
+            and r.cut is not None
+            and r.cut.end_overrun_ns is not None
+        }
 
         for i, _audio_stream in enumerate(audio_streams):
             audio_end = self._get_stream_end(final_mkv_path, f"a:{i}", seek_s)
@@ -93,6 +104,24 @@ class AudioDurationAuditor(BaseAuditor):
                 track_label = f"{name} ({item.track.source})"
 
             overhang_s = audio_end - video_end
+
+            label = item_label(plan_audio_items[i]) if i < len(plan_audio_items) else ""
+            if label in cut_overrun_s:
+                expected_s = cut_overrun_s[label]
+                if abs(overhang_s - expected_s) > _TRIMMED_MAX_DELTA_S:
+                    self._report(
+                        f"{track_label} was cut at the video end in whole units to end "
+                        f"{expected_s * 1000:+.1f} ms after it, but ends "
+                        f"{overhang_s * 1000:+.1f} ms from it ({audio_end:.3f}s vs "
+                        f"{video_end:.3f}s)"
+                    )
+                else:
+                    self.log(
+                        f"  {track_label}: cut at the video end in its codec — ends at "
+                        f"{audio_end:.3f}s (delta {overhang_s * 1000:+.1f} ms, planned "
+                        f"{expected_s * 1000:+.1f} ms, less than one unit)"
+                    )
+                continue
 
             trimmed = (
                 i < len(plan_audio_items)
@@ -114,16 +143,16 @@ class AudioDurationAuditor(BaseAuditor):
             elif overhang_s > _WARN_THRESHOLD_S:
                 item = plan_audio_items[i] if i < len(plan_audio_items) else None
                 if not trim_enabled:
-                    hint = (
-                        "Enable 'Trim converted (FLAC) audio to the video end' "
-                        "to trim tracks converted to FLAC."
-                    )
+                    hint = "Enable 'Trim audio to the video end' to trim it."
                 elif item is not None and item.track.source == "Source 1":
                     hint = "Source 1 audio is never trimmed."
                 elif item is not None and item.delay_baked:
                     hint = "Converted but not trimmed; see the audio processing log."
                 else:
-                    hint = "Only tracks converted to FLAC are trimmed."
+                    hint = (
+                        "Its codec is not cut by the app, or the cut was refused; "
+                        "see the audio processing log."
+                    )
                 self._report(
                     f"{track_label} extends {overhang_s:.1f}s past "
                     f"the video end ({audio_end:.1f}s vs {video_end:.1f}s). {hint}"

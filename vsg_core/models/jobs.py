@@ -60,6 +60,11 @@ class PlanItem:
     # FLAC samples (start cut / digital silence, and every stepping edit):
     # mkvmerge must apply no delay.
     delay_baked: bool = False
+    # Set by AudioProcessingStep for a track it cut in its own codec: the
+    # (>= 0) delay mkvmerge must use instead of the analysis delay, and
+    # whether the app already removed dialnorm (so mkvmerge must not).
+    mux_sync_ms: int | None = None
+    dialnorm_removed: bool = False
     correction_source: str | None = None
     perform_ocr: bool = False
     container_delay_ms: int = 0

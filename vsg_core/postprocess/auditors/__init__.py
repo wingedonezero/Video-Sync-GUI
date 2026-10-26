@@ -4,6 +4,7 @@ from .attachments import AttachmentsAuditor
 from .audio_channels import AudioChannelsAuditor
 from .audio_duration import AudioDurationAuditor
 from .audio_object_based import AudioObjectBasedAuditor
+from .audio_passthrough import AudioPassthroughAuditor
 from .audio_quality import AudioQualityAuditor
 from .audio_sync import AudioSyncAuditor
 from .base import BaseAuditor
@@ -34,6 +35,7 @@ __all__ = [
     "AudioChannelsAuditor",
     "AudioDurationAuditor",
     "AudioObjectBasedAuditor",
+    "AudioPassthroughAuditor",
     "AudioQualityAuditor",
     "AudioSyncAuditor",
     "AuditIssue",

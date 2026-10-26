@@ -86,6 +86,8 @@ class MkvmergeOptionsBuilder:
             # Determine reason for delay value
             if item.delay_baked:
                 reason = "delay_baked=True (delay embedded in the FLAC samples)"
+            elif item.mux_sync_ms is not None:
+                reason = f"passthrough cut by the app (residual {item.mux_sync_ms} ms)"
             elif tr.source == "Source 1" and tr.type == "video":
                 reason = "global_shift_only (video defines timeline)"
             elif tr.source == "Source 1" and tr.type == "audio":
@@ -145,7 +147,11 @@ class MkvmergeOptionsBuilder:
             if settings.disable_header_compression:
                 tokens += ["--compression", "0:none"]
 
-            if settings.apply_dialog_norm_gain and tr.type == "audio":
+            if (
+                settings.apply_dialog_norm_gain
+                and tr.type == "audio"
+                and not item.dialnorm_removed
+            ):
                 cid = (tr.props.codec_id or "").upper()
                 if "AC3" in cid or "EAC3" in cid:
                     tokens += ["--remove-dialog-normalization-gain", "0"]
@@ -214,6 +220,11 @@ class MkvmergeOptionsBuilder:
         # shift it again.
         if item.delay_baked:
             return 0
+
+        # Cut in its own codec by AudioProcessingStep: only the (>= 0)
+        # residual is left for mkvmerge.
+        if item.mux_sync_ms is not None:
+            return item.mux_sync_ms
 
         # Source 1 AUDIO: Preserve individual container delays + add global shift
         if tr.source == "Source 1" and tr.type == "audio":
