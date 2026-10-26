@@ -381,3 +381,7 @@ Full-length film and review (2026-10-26):
   a sync delay); a failed FLAC conversion or stepping correction keeps the original in its codec
   through the passthrough cut, never mkvmerge's; the first-frame check allows the file's own
   timestamp rounding; the missing-frame-table warning says no audio is trimmed.
+- **Frame-by-frame audit is an option** (`verify_passthrough_frames`, off by default; Options →
+  Merge Behavior). Every cut is checked against the source before the mux (re-parse, byte
+  comparison, mkvmerge identification), so by default the final audit checks only each cut track's
+  first frame time, from the mkvmerge -J data it already reads.

@@ -112,11 +112,11 @@ class AudioPassthroughAuditor(BaseAuditor):
             )
             return len(self.issues)
 
-        jobs: list[tuple[PlanItem, PassthroughCut, int]] = []
+        jobs: list[tuple[PlanItem, PassthroughCut, dict]] = []
         for item, track in zip(audio_items, audio_tracks, strict=True):
             result = results.get(item_label(item))
             if result is not None and result.cut is not None:
-                jobs.append((item, result.cut, int(track.get("id", -1))))
+                jobs.append((item, result.cut, track))
         if not jobs:
             return len(self.issues)
 
@@ -128,30 +128,72 @@ class AudioPassthroughAuditor(BaseAuditor):
             or 1_000_000
         )
         half_scale = Fraction(scale_ns, 2_000_000)  # in ms
+        full = self.ctx.settings.verify_passthrough_frames
+        if full:
+            self._check_frames(final_mkv_path, jobs, half_scale)
+        else:
+            self._check_first_frames(jobs, half_scale)
+
+        if not self.issues:
+            self.log(
+                "✅ Every passthrough cut is in the file exactly as written."
+                if full
+                else "✅ Every passthrough cut starts where planned."
+            )
+        return len(self.issues)
+
+    def _check_first_frames(
+        self, jobs: list[tuple[PlanItem, PassthroughCut, dict]], half_scale: Fraction
+    ) -> None:
+        """Without the frame-by-frame check: each cut track's first frame, from
+        the mkvmerge -J data the audit already has. The cut itself was checked
+        against the source before the mux."""
+        for item, cut, track in jobs:
+            name = f"{item.track.props.name or f'Track {item.track.id}'} ({item.track.source})"
+            first_ns = (track.get("properties") or {}).get("minimum_timestamp")
+            if first_ns is None:
+                self.log(f"  ⓘ {name}: no first timestamp reported; check skipped")
+                continue
+            first_ms = Fraction(int(first_ns), 1_000_000)
+            if abs(first_ms - cut.sync_ms) > half_scale:
+                self._report(
+                    f"{name}: first frame at {float(first_ms):.3f} ms, expected {cut.sync_ms} ms"
+                )
+            else:
+                self.log(
+                    f"  ✓ {name}: first frame at {cut.sync_ms} ms (frame-by-frame "
+                    "check off: Options → Merge Behavior → 'Verify audio cut in its codec')"
+                )
+
+    def _check_frames(
+        self,
+        final_mkv_path: Path,
+        jobs: list[tuple[PlanItem, PassthroughCut, dict]],
+        half_scale: Fraction,
+    ) -> None:
         work = self.ctx.temp_dir / "passthrough_audit"
         work.mkdir(parents=True, exist_ok=True)
         try:
             # Only rewritten tracks are extracted: an unchanged one is the
             # extraction mkvmerge muxed, so its frame times are what to check.
             cmd = ["mkvextract", str(final_mkv_path)]
-            rewritten = [tid for _, cut, tid in jobs if cut.output is not None]
+            ids = [int(track.get("id", -1)) for _, _, track in jobs]
+            rewritten = [
+                tid for (_, cut, _), tid in zip(jobs, ids, strict=True) if cut.output
+            ]
             if rewritten:
                 cmd += ["tracks"] + [
                     f"{tid}:{work / f'{tid}.track'}" for tid in rewritten
                 ]
             cmd += ["timestamps_v2"]
-            cmd += [f"{tid}:{work / f'{tid}.times'}" for _, _, tid in jobs]
+            cmd += [f"{tid}:{work / f'{tid}.times'}" for tid in ids]
             self.runner.run(cmd, self.tool_paths)
-            for item, cut, tid in jobs:
+            for (item, cut, _), tid in zip(jobs, ids, strict=True):
                 self._check_track(
                     item, cut, work / f"{tid}.track", work / f"{tid}.times", half_scale
                 )
         finally:
             shutil.rmtree(work, ignore_errors=True)
-
-        if not self.issues:
-            self.log("✅ Every passthrough cut is in the file exactly as written.")
-        return len(self.issues)
 
     def _check_track(
         self,

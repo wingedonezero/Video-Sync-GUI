@@ -565,6 +565,12 @@ class TestPassthroughRoute:
             return out, json.loads(info)
 
         good, info = mux(item.extracted_path, 28)
+        # Off (the default): only the first frame time, from mkvmerge -J.
+        assert AudioPassthroughAuditor(ctx, runner).run(good, info) == 0
+        late, late_info = mux(item.extracted_path, 29)
+        assert AudioPassthroughAuditor(ctx, runner).run(late, late_info) == 1
+
+        ctx.settings.verify_passthrough_frames = True
         auditor = AudioPassthroughAuditor(ctx, runner)
         assert auditor.run(good, info) == 0, [i.message for i in auditor.issues]
         late, info = mux(item.extracted_path, 29)  # one ms off

@@ -2353,8 +2353,20 @@ class MergeBehaviorTab(QWidget):
         self.widgets["post_mux_strip_tags"].setToolTip(
             "If the timestamp normalization step is run, FFmpeg will add an 'ENCODER' tag to the file.\nThis option will run a quick update with mkvpropedit to remove that tag for a cleaner file."
         )
+        self.widgets["verify_passthrough_frames"] = QCheckBox(
+            "Verify audio cut in its codec frame by frame (slower)"
+        )
+        self.widgets["verify_passthrough_frames"].setToolTip(
+            "Every audio track the app cuts in its own codec is already checked\n"
+            "against the source before the mux. With this on, the final audit also\n"
+            "extracts those tracks from the finished file and compares every frame\n"
+            "and its time with what the app wrote: one extra read of the whole file\n"
+            "(about 45 s for a 47 GB UHD). Off, only each track's first frame time\n"
+            "is checked."
+        )
         form2.addWidget(self.widgets["post_mux_normalize_timestamps"])
         form2.addWidget(self.widgets["post_mux_strip_tags"])
+        form2.addWidget(self.widgets["verify_passthrough_frames"])
         main_layout.addWidget(post_merge_group)
 
         names_group = QGroupBox("Custom Track Names")

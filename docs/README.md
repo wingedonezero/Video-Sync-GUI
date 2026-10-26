@@ -460,8 +460,9 @@ Each finished FLAC carries Vorbis tags that survive the mux: `VSG_DELAY_MS`,
 **Passthrough cuts** (`audio_processing/frames.py`, `passthrough.py`, `dialnorm.py`, `ogg_opus.py`)
 use mkvmerge's own packet rules for raw streams (ported from MKVToolNix 103.0, unchanged in the
 Mod; checked against mkvmerge on 448 sample tracks), so a cut lands exactly where mkvmerge sees a
-boundary. The final audit (`AudioPassthroughAuditor`) compares every muxed frame with the cut
-file (count, adler32, first frame at the residual, TrueHD key frame, times within half a ms) — at
+boundary. The final audit (`AudioPassthroughAuditor`) checks each cut track's first frame time;
+with Options → Merge Behavior → "Verify audio cut in its codec frame by frame" on, it extracts the
+cut tracks with mkvextract and compares every frame and its time with the file the app wrote — at
 packet level, since a strict decode passes every bad start. Design: `docs/plans/passthrough-audio-cuts.md`.
 
 **PAL / linear drift** is detected and reported but not corrected (disconnected,

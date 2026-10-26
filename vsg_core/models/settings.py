@@ -142,6 +142,11 @@ class AppSettings(BaseModel):
     # =========================================================================
     post_mux_normalize_timestamps: bool = False
     post_mux_strip_tags: bool = False
+    # Final audit: extract every audio track the app cut in its codec and
+    # compare it frame by frame with the cut file (one mkvextract pass over the
+    # whole MKV, ~45 s for a 47 GB UHD). Off, only each cut track's first frame
+    # time is checked; the cut itself is always checked before the mux.
+    verify_passthrough_frames: bool = False
 
     # =========================================================================
     # Logging Settings
