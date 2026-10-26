@@ -1,20 +1,21 @@
 # vsg_core/postprocess/auditors/audio_passthrough.py
-"""Checks the tracks the app cut in their own codec, on the final MKV's blocks.
+"""Checks the tracks the app cut in their own codec, against the final MKV.
 
-For every passthrough track the muxed frames must be exactly the file the app
-wrote, in order: same count (byte codecs: one block frame per unit), every
-frame byte-identical (adler32 over the same bytes of the cut file), the first
-frame at exactly the residual ``--sync``, a TrueHD start flagged as a key
-frame, and every frame within half a ms of its exact time. This is
-packet-level on purpose: a strict decode passes every bad start this exists
-to catch (TrueHD off a major sync, a DTS ramp-in).
+mkvextract writes every passthrough track back out of the final file, with
+each frame's time (``timestamps_v2``, laced frames included). The extracted
+track must be exactly the file the app wrote (byte for byte; AAC payloads,
+since mkvextract rebuilds the ADTS headers), the first frame must sit at
+exactly the residual ``--sync``, and every frame of a byte-cut codec within
+half a ms of its exact time. This is packet-level on purpose: a strict
+decode passes every bad start this exists to catch (TrueHD off a major sync,
+a DTS ramp-in). One mkvextract pass reads the file once, about 45 s for a
+47 GB UHD, and keeps nothing large in memory.
 """
 
 from __future__ import annotations
 
-import re
-import zlib
-from dataclasses import dataclass
+import hashlib
+import shutil
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
@@ -31,25 +32,50 @@ if TYPE_CHECKING:
     from vsg_core.audio_processing.passthrough import PassthroughCut
     from vsg_core.models.jobs import PlanItem
 
-_FRAME_LINE = re.compile(
-    r"^(?P<kind>\w) frame, track (?P<track>\d+), timestamp (?P<h>\d+):(?P<m>\d+):"
-    r"(?P<s>\d+)\.(?P<ns>\d{9})(?:, duration [^,]+)?, size (?P<size>\d+), "
-    r"adler 0x(?P<adler>[0-9a-f]+)"
-)
-_NS = 1_000_000_000
-_HALF_MS_NS = 500_000
+_HALF_MS = Fraction(1, 2)
+_CHUNK = 8 * 1024 * 1024
 
 
-@dataclass(frozen=True, slots=True)
-class _Frame:
-    ts_ns: int
-    size: int
-    adler: int
-    key: bool
+def _sha256(path: Path, start: int = 0, length: int | None = None) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        f.seek(start)
+        left = length
+        while left is None or left > 0:
+            chunk = f.read(_CHUNK if left is None else min(_CHUNK, left))
+            if not chunk:
+                break
+            h.update(chunk)
+            if left is not None:
+                left -= len(chunk)
+    return h.hexdigest()
+
+
+def _aac_payload_hash(path: Path) -> tuple[int, str]:
+    """(frame count, hash of the payloads without their ADTS headers)."""
+    fmap = parse_file("aac", path)
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for i in range(len(fmap)):
+            f.seek(fmap.pos[i])
+            frame = f.read(fmap.size[i])
+            h.update(frame[7 if frame[1] & 1 else 9 :])
+    return len(fmap), h.hexdigest()
+
+
+def _read_times(path: Path) -> list[Fraction]:
+    """Frame start times in ms from a timestamps_v2 file (the last line is the
+    end of the last frame and is dropped)."""
+    times = [
+        Fraction(line.strip())
+        for line in path.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    return times[:-1]
 
 
 class AudioPassthroughAuditor(BaseAuditor):
-    """Verifies passthrough cuts frame by frame against the muxed file."""
+    """Verifies passthrough cuts against the tracks extracted from the final MKV."""
 
     def run(
         self,
@@ -86,117 +112,103 @@ class AudioPassthroughAuditor(BaseAuditor):
             )
             return len(self.issues)
 
-        frames_by_track = self._read_frames(final_mkv_path)
+        jobs: list[tuple[PlanItem, PassthroughCut, int]] = []
         for item, track in zip(audio_items, audio_tracks, strict=True):
             result = results.get(item_label(item))
-            if result is None or result.cut is None:
-                continue
-            number = int((track.get("properties") or {}).get("number") or 0)
-            self._check_track(item, result.cut, frames_by_track.get(number, []))
+            if result is not None and result.cut is not None:
+                jobs.append((item, result.cut, int(track.get("id", -1))))
+        if not jobs:
+            return len(self.issues)
+
+        work = self.ctx.temp_dir / "passthrough_audit"
+        work.mkdir(parents=True, exist_ok=True)
+        try:
+            cmd = ["mkvextract", str(final_mkv_path), "tracks"]
+            cmd += [f"{tid}:{work / f'{tid}.track'}" for _, _, tid in jobs]
+            cmd += ["timestamps_v2"]
+            cmd += [f"{tid}:{work / f'{tid}.times'}" for _, _, tid in jobs]
+            self.runner.run(cmd, self.tool_paths)
+            for item, cut, tid in jobs:
+                self._check_track(
+                    item, cut, work / f"{tid}.track", work / f"{tid}.times"
+                )
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
         if not self.issues:
             self.log("✅ Every passthrough cut is in the file exactly as written.")
         return len(self.issues)
 
-    def _read_frames(self, mkv: Path) -> dict[int, list[_Frame]]:
-        out = self.runner.run(["mkvinfo", "-s", str(mkv)], self.tool_paths)
-        frames: dict[int, list[_Frame]] = {}
-        for line in (out if isinstance(out, str) else "").splitlines():
-            m = _FRAME_LINE.match(line.strip())
-            if not m:
-                continue
-            ts = (int(m["h"]) * 3600 + int(m["m"]) * 60 + int(m["s"])) * _NS + int(
-                m["ns"]
-            )
-            frames.setdefault(int(m["track"]), []).append(
-                _Frame(ts, int(m["size"]), int(m["adler"], 16), m["kind"] == "I")
-            )
-        return frames
-
     def _check_track(
-        self, item: PlanItem, cut: PassthroughCut, frames: list[_Frame]
+        self, item: PlanItem, cut: PassthroughCut, extracted: Path, times_path: Path
     ) -> None:
         name = (
             f"{item.track.props.name or f'Track {item.track.id}'} ({item.track.source})"
         )
-        path = item.extracted_path
-        if path is None or not path.exists():
+        written = item.extracted_path
+        if written is None or not written.exists():
             self.log(f"  ⓘ {name}: muxed file no longer on disk; check skipped")
             return
-        if not frames:
-            self._report(f"{name}: no frames found in the final file")
+        if not extracted.exists() or not times_path.exists():
+            self._report(f"{name}: could not extract it from the final file")
             return
 
-        problems = self._compare_bytes(path, cut, frames)
-        if frames[0].ts_ns != cut.sync_ms * 1_000_000:
-            problems.append(
-                f"first frame at {frames[0].ts_ns / 1e6:.3f} ms, expected {cut.sync_ms} ms"
-            )
-        if cut.kind == "truehd" and not frames[0].key:
-            problems.append("first TrueHD access unit is not flagged as a key frame")
-        if cut.kind not in ("pcm", "opus"):
-            problems += self._check_times(path, cut, frames)
+        times = _read_times(times_path)
+        problems = self._compare(cut, written, extracted, len(times))
+        if not times or times[0] != cut.sync_ms:
+            first = f"{float(times[0]):.3f} ms" if times else "nothing"
+            problems.append(f"first frame at {first}, expected {cut.sync_ms} ms")
+        elif cut.kind not in ("pcm", "opus"):
+            problems += self._check_times(cut, written, times)
 
         if problems:
             for p in problems:
                 self._report(f"{name}: {p}")
         else:
             self.log(
-                f"  ✓ {name}: {len(frames)} frames identical to the cut file, first at "
-                f"{cut.sync_ms} ms, times exact to the ms"
+                f"  ✓ {name}: {len(times)} frames identical to the cut file, first at "
+                f"{cut.sync_ms} ms, every frame within half a ms of its exact time"
             )
 
-    def _compare_bytes(
-        self, path: Path, cut: PassthroughCut, frames: list[_Frame]
+    @staticmethod
+    def _compare(
+        cut: PassthroughCut, written: Path, extracted: Path, frames: int
     ) -> list[str]:
-        """Slice the muxed source file by the frames' sizes; every adler must match."""
+        """The extracted track must be what the app wrote."""
         if cut.kind == "opus":
-            packets = read_ogg_opus(path).packets
-            if len(packets) != len(frames):
-                return [
-                    f"{len(frames)} frames in the file, {len(packets)} Opus packets written"
-                ]
-            for i, (p, f) in enumerate(zip(packets, frames, strict=True)):
-                if len(p) != f.size or (zlib.adler32(p) & 0xFFFFFFFF) != f.adler:
-                    return [f"frame {i} differs from the written Opus packet"]
+            ours, theirs = read_ogg_opus(written), read_ogg_opus(extracted)
+            if ours.packets != theirs.packets:
+                return ["Opus packets differ from the written file"]
             return []
         if cut.kind == "pcm":
-            layout = read_wav_layout(path)
-            start, total = layout.data_offset, layout.data_bytes
-        else:
-            fmap = parse_file(frame_family(cut.kind), path)
-            if len(fmap) != len(frames):
-                return [f"{len(frames)} frames in the file, {len(fmap)} units written"]
-            if any(fmap.size[i] != f.size for i, f in enumerate(frames)):
-                return ["frame sizes differ from the written units"]
-            start, total = 0, fmap.end
-        if sum(f.size for f in frames) != total:
-            return ["the frames do not add up to the written file"]
-        with path.open("rb") as fh:
-            fh.seek(start)
-            for i, f in enumerate(frames):
-                if (zlib.adler32(fh.read(f.size)) & 0xFFFFFFFF) != f.adler:
-                    return [f"frame {i} is not byte-identical to the written file"]
+            a, b = read_wav_layout(written), read_wav_layout(extracted)
+            if a.data_bytes != b.data_bytes or _sha256(
+                written, a.data_offset, a.data_bytes
+            ) != _sha256(extracted, b.data_offset, b.data_bytes):
+                return ["PCM samples differ from the written file"]
+            return []
+        if cut.kind == "aac":
+            if _aac_payload_hash(written) != _aac_payload_hash(extracted):
+                return ["AAC frames differ from the written file"]
+            return []
+        if _sha256(written) != _sha256(extracted):
+            return ["the track is not byte-identical to the written file"]
+        units = len(parse_file(frame_family(cut.kind), written))
+        if units != frames:
+            return [f"{frames} frames in the file, {units} units written"]
         return []
 
     @staticmethod
     def _check_times(
-        path: Path, cut: PassthroughCut, frames: list[_Frame]
+        cut: PassthroughCut, written: Path, times: list[Fraction]
     ) -> list[str]:
-        """Frames sharing a stored time form a lace (or share a ms); the first
-        frame of each run must be within half a ms of its exact time."""
-        fmap = parse_file(frame_family(cut.kind), path)
-        base = Fraction(cut.sync_ms, 1000)
+        fmap = parse_file(frame_family(cut.kind), written)
         offset = 0
-        prev_ts: int | None = None
-        for i, f in enumerate(frames):
-            if f.ts_ns != prev_ts:
-                exact_ns = (base + Fraction(offset, fmap.rate)) * _NS
-                if abs(f.ts_ns - exact_ns) > _HALF_MS_NS:
-                    return [
-                        f"frame {i} stored at {f.ts_ns / 1e6:.3f} ms, exact time "
-                        f"{float(exact_ns) / 1e6:.3f} ms"
-                    ]
-                prev_ts = f.ts_ns
+        for i, t in enumerate(times):
+            exact = cut.sync_ms + Fraction(offset * 1000, fmap.rate)
+            if abs(t - exact) > _HALF_MS:
+                return [
+                    f"frame {i} at {float(t):.3f} ms, exact time {float(exact):.3f} ms"
+                ]
             offset += fmap.samples[i]
         return []

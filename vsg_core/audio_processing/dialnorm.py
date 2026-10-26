@@ -15,6 +15,8 @@ TrueHD is deliberately not handled: editing its dialnorm breaks Atmos data
 
 from __future__ import annotations
 
+import numpy as np
+
 REMOVED_LEVEL = 31
 _SYNC_WORD = 0x0B77
 _CRC16_POLY = (1 << 0) | (1 << 2) | (1 << 15) | (1 << 16)  # x^16 + x^15 + x^2 + 1
@@ -146,7 +148,7 @@ def dialnorm_positions(frame: bytes | bytearray) -> tuple[bool, list[int]]:
     raise ValueError(f"not an AC-3 / E-AC-3 frame (bsid {bsid})")
 
 
-def _get_bits(data: bytearray, bit: int, n: int) -> int:
+def get_bits(data: bytes | bytearray, bit: int, n: int) -> int:
     v = 0
     for i in range(n):
         p = bit + i
@@ -167,7 +169,7 @@ def _put_bits(data: bytearray, bit: int, n: int, value: int) -> None:
 def remove_dialnorm_frame(frame: bytearray) -> bool:
     """Edit one frame in place; True when it changed."""
     is_eac3, positions = dialnorm_positions(frame)
-    if all(_get_bits(frame, p, 5) == REMOVED_LEVEL for p in positions):
+    if all(get_bits(frame, p, 5) == REMOVED_LEVEL for p in positions):
         return False
     for p in positions:
         _put_bits(frame, p, 5, REMOVED_LEVEL)
@@ -183,23 +185,83 @@ def remove_dialnorm_frame(frame: bytearray) -> bool:
     return True
 
 
-def remove_dialnorm_unit(unit: bytearray, frame_sizes: list[int]) -> int:
-    """Edit every frame of one unit (independent + dependent frames) in place.
+# --- many frames at once ------------------------------------------------------
+#
+# A film's AC-3 track has ~200,000 frames; computing their CRCs byte by byte in
+# Python takes about a minute. The functions below do the same arithmetic for
+# all frames of one size at once with numpy, column by column.
 
-    ``frame_sizes`` are the frames' byte sizes in order. Returns how many frames
-    changed. Every edited frame's CRCs are re-verified before returning.
+_CRC16_NP = np.array(_CRC16, dtype=np.uint16)
+
+
+def crc16_rows(rows: np.ndarray, start: int, stop: int) -> np.ndarray:
+    """``crc16(row[start:stop])`` for every row of a 2-D uint8 array."""
+    crc = np.zeros(rows.shape[0], dtype=np.uint16)
+    for col in range(start, stop):
+        crc = ((crc << 8) & 0xFFFF) ^ _CRC16_NP[(crc >> 8) ^ rows[:, col]]
+    return crc
+
+
+def ac3_crc1_rows(rows: np.ndarray) -> np.ndarray:
+    """``ac3_crc1`` for every row (all rows one frame size)."""
+    words = rows.shape[1] >> 1
+    words_58 = (words >> 1) + (words >> 3)
+    crc = crc16_rows(rows, 4, 2 * words_58)
+    inverse = _pow_poly(_CRC16_POLY >> 1, 16 * words_58 - 16, _CRC16_POLY)
+    # Multiplying by a constant is linear in the bits of crc.
+    out = np.zeros_like(crc)
+    for bit in range(16):
+        term = _mul_poly(inverse, 1 << bit, _CRC16_POLY)
+        out ^= np.where((crc >> bit) & 1, np.uint16(term), np.uint16(0))
+    return out
+
+
+def checksums_ok_rows(rows: np.ndarray, is_eac3: bool) -> np.ndarray:
+    """``checksums_ok`` for every row (all rows one frame size and type)."""
+    size = rows.shape[1]
+    stored2 = (rows[:, size - 2].astype(np.uint16) << 8) | rows[:, size - 1]
+    ok = crc16_rows(rows, 2, size - 2) == stored2
+    if not is_eac3:
+        stored1 = (rows[:, 2].astype(np.uint16) << 8) | rows[:, 3]
+        ok &= ac3_crc1_rows(rows) == stored1
+    return ok
+
+
+def _rewrite_checksums(rows: np.ndarray, is_eac3: bool) -> None:
+    """CRC1 (AC-3), crcrsv and CRC2 of every row, in place, as mkvmerge writes them."""
+    size = rows.shape[1]
+    if not is_eac3:
+        crc1 = ac3_crc1_rows(rows)
+        rows[:, 2] = crc1 >> 8
+        rows[:, 3] = crc1 & 0xFF
+    rows[:, size - 3] &= 0xFE  # crcrsv
+    crc2 = crc16_rows(rows, 2, size - 2)
+    sync = crc2 == _SYNC_WORD
+    if sync.any():
+        rows[sync, size - 3] |= 0x01
+        crc2[sync] = crc16_rows(rows[sync], 2, size - 2)
+    rows[:, size - 2] = crc2 >> 8
+    rows[:, size - 1] = crc2 & 0xFF
+
+
+def remove_dialnorm_frames(frames: list[bytearray]) -> int:
+    """``remove_dialnorm_frame`` for many frames at once, in place.
+
+    Returns how many changed. The bit edits are the same; the CRCs are
+    computed per group of equal-size frames with numpy.
     """
-    changed = 0
-    pos = 0
-    for size in frame_sizes:
-        frame = unit[pos : pos + size]
-        if remove_dialnorm_frame(frame):
-            is_eac3, _ = dialnorm_positions(frame)
-            if not checksums_ok(frame, is_eac3):
-                raise ValueError("dialnorm edit produced a frame with a bad checksum")
-            unit[pos : pos + size] = frame
-            changed += 1
-        pos += size
-    if pos != len(unit):
-        raise ValueError("frame sizes do not add up to the unit size")
-    return changed
+    groups: dict[tuple[int, bool], list[int]] = {}
+    for i, frame in enumerate(frames):
+        is_eac3, positions = dialnorm_positions(frame)
+        if all(get_bits(frame, p, 5) == REMOVED_LEVEL for p in positions):
+            continue
+        for p in positions:
+            _put_bits(frame, p, 5, REMOVED_LEVEL)
+        groups.setdefault((len(frame), is_eac3), []).append(i)
+    for (size, is_eac3), idx in groups.items():
+        rows = np.frombuffer(b"".join(frames[i] for i in idx), dtype=np.uint8)
+        rows = rows.reshape(len(idx), size).copy()
+        _rewrite_checksums(rows, is_eac3)
+        for row, i in zip(rows, idx, strict=True):
+            frames[i][:] = row.tobytes()
+    return sum(len(idx) for idx in groups.values())

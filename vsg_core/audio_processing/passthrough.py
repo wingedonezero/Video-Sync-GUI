@@ -24,7 +24,15 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from .dialnorm import checksums_ok, dialnorm_positions, remove_dialnorm_unit
+import numpy as np
+
+from .dialnorm import (
+    REMOVED_LEVEL,
+    checksums_ok_rows,
+    dialnorm_positions,
+    get_bits,
+    remove_dialnorm_frames,
+)
 from .frames import FrameFamily, FrameMap, ac3_header, parse_file
 from .ogg_opus import (
     OPUS_RATE,
@@ -41,6 +49,8 @@ PassthroughKind = Literal["ac3", "truehd", "dts", "aac", "mpa", "pcm", "opus"]
 
 NS = 1_000_000_000
 _COPY_CHUNK = 8 * 1024 * 1024
+# Units edited and checked per batch when removing dialnorm (~15 MB of AC-3).
+_DIALNORM_BLOCK = 8192
 # Opus decoders converge within 80 ms; RFC 7845 §4.6 recommends that much pre-roll.
 _OPUS_PREROLL = 3840
 
@@ -175,16 +185,26 @@ def plan_frames(fmap: FrameMap, delay_ns: int, video_end_ns: int | None) -> Fram
     return FramePlan(first, last, sync_ms, first_kept_ns, overrun)
 
 
-def _frame_sizes(unit: bytes | bytearray) -> list[int]:
-    sizes = []
+def _split_frames(data: bytes) -> list[bytearray]:
+    """AC-3 / E-AC-3 frames of a run of whole units."""
+    frames = []
     pos = 0
-    while pos < len(unit):
-        h = ac3_header(unit, pos)
+    while pos < len(data):
+        h = ac3_header(data, pos)
         if h is None:
-            raise PassthroughError("unit does not split into AC-3 frames")
-        sizes.append(h.size)
+            raise PassthroughError("units do not split into AC-3 frames")
+        frames.append(bytearray(data[pos : pos + h.size]))
         pos += h.size
-    return sizes
+    return frames
+
+
+def _unit_blocks(fmap: FrameMap, plan: FramePlan) -> list[tuple[int, int]]:
+    """(start unit, byte count) of each batch of kept units."""
+    blocks = []
+    for i in range(plan.first, plan.last + 1, _DIALNORM_BLOCK):
+        j = min(i + _DIALNORM_BLOCK, plan.last + 1)
+        blocks.append((i, fmap.pos[j - 1] + fmap.size[j - 1] - fmap.pos[i]))
+    return blocks
 
 
 def _write_frames(
@@ -203,10 +223,10 @@ def _write_frames(
                 out.write(chunk)
                 left -= len(chunk)
             return 0
-        for i in range(plan.first, plan.last + 1):
-            unit = bytearray(f.read(fmap.size[i]))
-            changed += remove_dialnorm_unit(unit, _frame_sizes(unit))
-            out.write(unit)
+        for _start, nbytes in _unit_blocks(fmap, plan):
+            frames = _split_frames(f.read(nbytes))
+            changed += remove_dialnorm_frames(frames)
+            out.write(b"".join(frames))
     return changed
 
 
@@ -224,7 +244,7 @@ def _sha256_range(path: Path, start: int, end: int) -> str:
     return h.hexdigest()
 
 
-def _dialnorm_bytes(frame: bytes) -> set[int]:
+def _dialnorm_bytes(frame: bytes | bytearray) -> set[int]:
     """Byte offsets a dialnorm edit may change in one frame."""
     is_eac3, positions = dialnorm_positions(frame)
     allowed = {len(frame) - 3, len(frame) - 2, len(frame) - 1}
@@ -240,21 +260,33 @@ def _check_dialnorm_copy(
 ) -> str | None:
     with src.open("rb") as a, dst.open("rb") as b:
         a.seek(fmap.pos[plan.first])
-        for i in range(plan.first, plan.last + 1):
-            orig = a.read(fmap.size[i])
-            new = b.read(fmap.size[i])
+        for start, nbytes in _unit_blocks(fmap, plan):
+            new = b.read(nbytes)
+            groups: dict[tuple[int, bool], list[bytes]] = {}
             pos = 0
-            for size in _frame_sizes(orig):
-                fo, fn = orig[pos : pos + size], new[pos : pos + size]
-                is_eac3, _ = dialnorm_positions(fn)
-                if not checksums_ok(fn, is_eac3):
+            for fo in _split_frames(a.read(nbytes)):
+                size = len(fo)
+                fn = new[pos : pos + size]
+                expected = bytearray(fo)
+                for j in _dialnorm_bytes(fo):
+                    expected[j] = fn[j]
+                if expected != fn:
+                    return f"units from {start}: bytes other than dialnorm/CRC changed"
+                is_eac3, positions = dialnorm_positions(fn)
+                if any(get_bits(fn, p, 5) != REMOVED_LEVEL for p in positions):
                     return (
-                        f"unit {i}: a frame has a bad checksum after the dialnorm edit"
+                        f"units from {start}: a dialnorm field is not {REMOVED_LEVEL}"
                     )
-                allowed = _dialnorm_bytes(fo)
-                if any(fo[j] != fn[j] for j in range(size) if j not in allowed):
-                    return f"unit {i}: bytes other than dialnorm/CRC changed"
+                groups.setdefault((size, is_eac3), []).append(fn)
                 pos += size
+            for (size, is_eac3), frames in groups.items():
+                rows = np.frombuffer(b"".join(frames), dtype=np.uint8)
+                if not checksums_ok_rows(
+                    rows.reshape(len(frames), size), is_eac3
+                ).all():
+                    return (
+                        f"units from {start}: a frame has a bad checksum after the edit"
+                    )
     return None
 
 
@@ -266,9 +298,7 @@ def _verify_frames(
     problems: list[str] = list(again.problems)
     if len(again) != m - k:
         problems.append(f"{len(again)} units, planned {m - k}")
-    elif list(again.size) != list(fmap.size[k:m]) or list(again.samples[:-1]) != list(
-        fmap.samples[k : m - 1]
-    ):
+    elif again.size != fmap.size[k:m] or again.samples != fmap.samples[k:m]:
         problems.append("unit sizes or durations differ from the plan")
     elif not again.entry[0]:
         problems.append("the cut file does not start on an entry unit")

@@ -13,6 +13,7 @@ from __future__ import annotations
 import struct
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 
 from vsg_core.audio_processing import dialnorm, frames
@@ -261,12 +262,24 @@ def test_dialnorm_edit_matches_the_ac3_rules(tmp_path: Path) -> None:
     assert dialnorm.remove_dialnorm_frame(edited)
     assert dialnorm.checksums_ok(edited, False)
     _, positions = dialnorm.dialnorm_positions(edited)
-    assert dialnorm._get_bits(edited, positions[0], 5) == dialnorm.REMOVED_LEVEL
+    assert dialnorm.get_bits(edited, positions[0], 5) == dialnorm.REMOVED_LEVEL
     assert not dialnorm.remove_dialnorm_frame(edited)  # already 31: unchanged
 
     src = _write(tmp_path / "a.ac3", b"".join(bytes(_ac3_frame(i)) for i in range(6)))
     cut = cut_passthrough("ac3", src, 0, None, tmp_path / "c.ac3", remove_dialnorm=True)
     assert cut.output is not None and cut.dialnorm_frames == 6
+
+
+def test_batched_dialnorm_edit_equals_the_frame_by_frame_one() -> None:
+    frames = [_ac3_frame(i, dialnorm_level=20 + i % 10) for i in range(40)]
+    frames += [bytearray(_eac3_frame(False, i)) for i in range(5)]
+    single = [bytearray(f) for f in frames]
+    changed_single = sum(dialnorm.remove_dialnorm_frame(f) for f in single)
+    batch = [bytearray(f) for f in frames]
+    assert dialnorm.remove_dialnorm_frames(batch) == changed_single
+    assert batch == single
+    ac3_rows = np.frombuffer(b"".join(batch[:40]), dtype=np.uint8).reshape(40, -1)
+    assert dialnorm.checksums_ok_rows(ac3_rows, False).all()
 
 
 def _wav(path: Path, samples: int, channels: int = 2, rate: int = 48000) -> bytes:
