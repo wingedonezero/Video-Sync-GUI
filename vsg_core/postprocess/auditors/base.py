@@ -231,6 +231,10 @@ class BaseAuditor:
         if plan_item.delay_baked:
             return 0.0
 
+        # Cut by the app in its own codec: mkvmerge applied only the residual.
+        if plan_item.mux_sync_ms is not None:
+            return float(plan_item.mux_sync_ms)
+
         # Source 1 tracks use their original container delays PLUS the global shift
         # BUT: Only for audio/video, never for subtitles
         if tr.source == "Source 1" and tr.type != "subtitles":

@@ -132,8 +132,9 @@ class AppSettings(BaseModel):
     apply_dialog_norm_gain: bool = False
     disable_track_statistics_tags: bool = False
     disable_header_compression: bool = True
-    # AudioProcessingStep cuts FLAC-converted audio (never Source 1's) to the
-    # sample where the Source 1 video ends. Other tracks are left as they are.
+    # AudioProcessingStep cuts audio (never Source 1's) where the Source 1 video
+    # ends: FLAC-converted tracks to the sample, tracks kept in their codec after
+    # the last unit that starts before it.
     trim_audio_to_video_duration: bool = False
 
     # =========================================================================
@@ -141,6 +142,11 @@ class AppSettings(BaseModel):
     # =========================================================================
     post_mux_normalize_timestamps: bool = False
     post_mux_strip_tags: bool = False
+    # Final audit: extract every audio track the app cut in its codec and
+    # compare it frame by frame with the cut file (one mkvextract pass over the
+    # whole MKV, ~45 s for a 47 GB UHD). Off, only each cut track's first frame
+    # time is checked; the cut itself is always checked before the mux.
+    verify_passthrough_frames: bool = False
 
     # =========================================================================
     # Logging Settings

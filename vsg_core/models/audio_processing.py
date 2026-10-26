@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-AudioRouteStr = Literal["flac", "untouched", "corrected"]
+if TYPE_CHECKING:
+    from vsg_core.audio_processing.passthrough import PassthroughCut
+
+AudioRouteStr = Literal["flac", "untouched", "corrected", "passthrough"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +19,9 @@ class AudioProcessingResult:
     ``route``:
       - ``flac``: converted / re-encoded to FLAC with its delay baked in
         (mkvmerge gets 0); ``ok`` False means it fell back to untouched.
+      - ``passthrough``: kept in its codec; the app cut whole units (samples
+        for PCM / Opus) at the start and end, mkvmerge gets ``cut.sync_ms``.
+        ``ok`` False means the cut was refused and it fell back to untouched.
       - ``untouched``: extracted file muxed as-is with mkvmerge ``--sync``.
       - ``corrected``: produced by stepping / PAL / linear correction.
     """
@@ -36,3 +42,7 @@ class AudioProcessingResult:
     channel_layout: str = ""
     native_layout: bool = True
     problems: tuple[str, ...] = ()
+    cut: PassthroughCut | None = None  # passthrough route only
+    # The original track kept beside a stepping-corrected one (not counted
+    # among the plan's audio tracks).
+    preserved_original: bool = False

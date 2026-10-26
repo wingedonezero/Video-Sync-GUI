@@ -16,8 +16,13 @@ Order:
      positive delay) and, when "trim converted audio to the video end" is on,
      cuts the end at the video end (never Source 1). mkvmerge then applies no
      delay to it.
-   - ``untouched``: everything else (lossy, object audio, not requested); muxed
-     as extracted with mkvmerge ``--sync`` exactly as before.
+   - ``passthrough``: every other track (lossy, object audio, lossless not
+     converted) in a codec the app can cut: it stays in its codec, the app
+     drops whole units before the delay point and, with the end trim on (not
+     Source 1), after the video end; mkvmerge gets only the residual (>= 0).
+     See ``vsg_core/audio_processing/passthrough.py``.
+   - ``untouched``: a codec the app does not cut, or a refused cut; muxed as
+     extracted with mkvmerge ``--sync`` exactly as before.
 
 A FLAC request is never lost: if a correction was pending but produced
 nothing (no EDL, QA failure), the track still takes the FLAC route here. Any failure keeps the
@@ -27,6 +32,7 @@ hits a damaged or lossy frame (see ``STRICT_DECODE_ARGS``).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import TYPE_CHECKING
 
@@ -43,6 +49,12 @@ from vsg_core.audio_processing import (
     plan_for_delay,
 )
 from vsg_core.audio_processing.encoder import STRICT_DECODE_ARGS, SUPPORTED_BITS
+from vsg_core.audio_processing.passthrough import (
+    PassthroughCut,
+    PassthroughError,
+    cut_passthrough,
+    passthrough_kind,
+)
 from vsg_core.correction.stepping import swap_in_corrected_track
 from vsg_core.correction.stepping.edit_plan import edl_to_edits
 from vsg_core.extraction.tracks import get_stream_info_with_delays
@@ -68,7 +80,8 @@ _FLAC_MAX_CHANNELS = 8
 
 def item_label(item: PlanItem) -> str:
     """Stable identifier used in logs, skip/failure records, and validation."""
-    return f"{item.track.source} audio track {item.track.id}"
+    label = f"{item.track.source} audio track {item.track.id}"
+    return f"{label} (preserved original)" if item.is_preserved else label
 
 
 def stream_bits(stream: dict) -> int | None:
@@ -232,12 +245,25 @@ class AudioProcessingStep:
         for item in audio_items:
             result = self._process(ctx, item, runner)
             ctx.audio_processing_results.append(result)
+        # Originals kept beside stepping-corrected tracks keep their codec;
+        # they get the same cut, so mkvmerge never cuts them itself.
+        for item in ctx.extracted_items or []:
+            if item.track.type == "audio" and item.is_preserved:
+                result = self._passthrough(
+                    ctx, item, runner, "original kept beside the corrected track"
+                )
+                ctx.audio_processing_results.append(
+                    dataclasses.replace(result, preserved_original=True)
+                )
 
-        flac = [r for r in ctx.audio_processing_results if r.route == "flac" and r.ok]
+        results = ctx.audio_processing_results
+        flac = [r for r in results if r.route == "flac" and r.ok]
+        cut = [r for r in results if r.route == "passthrough" and r.ok]
         log(
             f"[AudioProcessing] Done: {len(flac)} track(s) baked into FLAC, "
-            f"{sum(r.route == 'untouched' for r in ctx.audio_processing_results)} untouched, "
-            f"{sum(r.route == 'corrected' for r in ctx.audio_processing_results)} corrected."
+            f"{len(cut)} cut in their codec, "
+            f"{sum(r.route == 'untouched' or (r.route == 'passthrough' and not r.ok) for r in results)} "
+            f"untouched, {sum(r.route == 'corrected' for r in results)} corrected."
         )
         return ctx
 
@@ -265,14 +291,14 @@ class AudioProcessingStep:
 
         is_flac = "A_FLAC" in codec_id.upper()
         if not (item.convert_to_flac or is_flac):
-            return self._untouched(ctx, item, runner, "FLAC conversion not requested")
+            return self._passthrough(ctx, item, runner, "FLAC conversion not requested")
 
         stream = self._probe_stream(item.extracted_path, runner, ctx.tool_paths)
         reason = eligibility_skip_reason(codec_id, stream)
         if reason is not None:
             if item.convert_to_flac:
                 ctx.flac_conversion_skips.append(f"{label}: {reason}")
-            return self._untouched(ctx, item, runner, reason)
+            return self._passthrough(ctx, item, runner, reason)
 
         assert stream is not None
         delay_ms = self._baked_delay_ms(ctx, item, runner)
@@ -295,6 +321,229 @@ class AudioProcessingStep:
             f"[AudioProcessing] {label} ({codec_id}) -> untouched: {reason}"
         )
         return AudioProcessingResult(label, "untouched", codec_id, True, reason)
+
+    # ------------------------------------------------------------------
+    # passthrough route
+    # ------------------------------------------------------------------
+
+    def _passthrough(
+        self, ctx: Context, item: PlanItem, runner: CommandRunner, reason: str
+    ) -> AudioProcessingResult:
+        """Keep the codec; cut whole units at the start and (trim on) the end."""
+        log = runner._log_message
+        label = item_label(item)
+        codec_id = item.track.props.codec_id or ""
+        src = item.extracted_path
+        if "A_VORBIS" in codec_id.upper():
+            if self._mkvmerge_delay_ms(ctx, item) < 0:
+                self._warn(
+                    ctx,
+                    log,
+                    f"{label}: Vorbis is cut by mkvmerge; muxed with lacing, "
+                    "FFmpeg-based players place a cut Vorbis track up to 9.33 ms "
+                    "early (measured)",
+                )
+            return self._untouched(
+                ctx,
+                item,
+                runner,
+                f"{reason}; Vorbis is cut by mkvmerge, its end is not trimmed",
+            )
+        kind = passthrough_kind(codec_id)
+        if kind is None or src is None:
+            mkvmerge_ms = self._mkvmerge_delay_ms(ctx, item)
+            if mkvmerge_ms < 0:
+                self._warn(
+                    ctx,
+                    log,
+                    f"{label}: {codec_id or 'this codec'} is not cut by the app; "
+                    f"mkvmerge cuts it with --sync {mkvmerge_ms:+d}",
+                )
+            return self._untouched(
+                ctx,
+                item,
+                runner,
+                f"{reason}; the app does not cut {codec_id or 'this codec'}",
+            )
+
+        delay_ms = self._baked_delay_ms(ctx, item, runner)
+        mkvmerge_ms = self._mkvmerge_delay_ms(ctx, item)
+        video_end_ms = self._passthrough_video_end_ms(ctx, item, runner)
+        dialnorm = ctx.settings.apply_dialog_norm_gain and kind == "ac3"
+        dst = ctx.temp_dir / f"{src.stem}_cut{src.suffix}"
+        try:
+            cut = cut_passthrough(
+                kind,
+                src,
+                ms_to_ns(delay_ms),
+                None if video_end_ms is None else ms_to_ns(video_end_ms),
+                dst,
+                dialnorm,
+            )
+            if cut.output is not None:
+                self._check_mkvmerge_reads(src, cut.output, runner, ctx.tool_paths)
+        except (PassthroughError, OSError, ValueError) as e:
+            problem = str(e)
+            log(
+                f"[WARNING] [AudioProcessing] {label} ({codec_id}): not cut by the app "
+                f"({problem}). mkvmerge gets --sync {mkvmerge_ms:+d} as before."
+            )
+            ctx.passthrough_cut_failures.append(f"{label}: {problem}")
+            dst.unlink(missing_ok=True)
+            return AudioProcessingResult(
+                label,
+                "passthrough",
+                codec_id,
+                False,
+                "not cut, mkvmerge --sync as before",
+                delay_raw_ms=delay_ms,
+                mkvmerge_delay_ms=mkvmerge_ms,
+                problems=(problem,),
+            )
+
+        item.mux_sync_ms = cut.sync_ms
+        item.dialnorm_removed = dialnorm
+        if kind == "opus":
+            self._warn(
+                ctx,
+                log,
+                f"{label}: Opus is muxed with lacing; FFmpeg decodes variable-size "
+                "Opus packets in a lace slightly differently from unlaced ones "
+                "(measured, with or without a cut)",
+            )
+        if cut.output is not None:
+            item.original_extracted_path = src
+            item.extracted_path = cut.output
+        self._log_cut(
+            log, label, codec_id, reason, delay_ms, mkvmerge_ms, cut, video_end_ms
+        )
+        if ctx.audit:
+            ctx.audit.append_event(
+                "milestone",
+                f"Audio processing (passthrough cut): {label}",
+                {
+                    "codec": codec_id,
+                    "original_file": str(src),
+                    "muxed_file": str(item.extracted_path),
+                    "delay_raw_ms": delay_ms,
+                    "mkvmerge_delay_ms": cut.sync_ms,
+                    "units_total": cut.units_total,
+                    "units_dropped_start": cut.dropped_start,
+                    "units_dropped_end": cut.dropped_end,
+                    "end_overrun_ns": cut.end_overrun_ns,
+                    "dialnorm_frames": cut.dialnorm_frames,
+                },
+            )
+        return AudioProcessingResult(
+            label,
+            "passthrough",
+            codec_id,
+            True,
+            "cut in its codec" if cut.output is not None else "nothing to cut",
+            delay_raw_ms=delay_ms,
+            mkvmerge_delay_ms=cut.sync_ms,
+            sample_rate=cut.rate,
+            cut=cut,
+        )
+
+    @staticmethod
+    def _warn(ctx: Context, log: Callable[[str], None], message: str) -> None:
+        """Log a passthrough caveat and keep it for the final audit."""
+        log(f"[WARNING] [AudioProcessing] {message}")
+        ctx.passthrough_warnings.append(message)
+
+    @staticmethod
+    def _check_mkvmerge_reads(
+        src: Path,
+        cut: Path,
+        runner: CommandRunner,
+        tool_paths: dict[str, str | None],
+    ) -> None:
+        """mkvmerge must identify the cut file exactly as it identifies the
+        extraction (one audio track, same codec, channels and rate): a file it
+        can't read would fail the whole mux."""
+
+        def identify(path: Path) -> list[tuple[str, str, object, object]]:
+            out = runner.run(["mkvmerge", "-J", str(path)], tool_paths)
+            try:
+                info = json.loads(out) if isinstance(out, str) and out else {}
+            except json.JSONDecodeError:
+                info = {}
+            return [
+                (
+                    str(t.get("type")),
+                    str(t.get("codec")),
+                    (t.get("properties") or {}).get("audio_channels"),
+                    (t.get("properties") or {}).get("audio_sampling_frequency"),
+                )
+                for t in info.get("tracks") or []
+            ]
+
+        before, after = identify(src), identify(cut)
+        if len(after) != 1 or after != before:
+            raise PassthroughError(
+                f"mkvmerge reads the cut file as {after or 'nothing'}, the extraction as {before}"
+            )
+
+    @staticmethod
+    def _log_cut(
+        log: Callable[[str], None],
+        label: str,
+        codec_id: str,
+        reason: str,
+        delay_ms: float,
+        mkvmerge_ms: int,
+        cut: PassthroughCut,
+        video_end_ms: float | None,
+    ) -> None:
+        units = cut.unit_name
+        unit_ms = cut.longest_unit_ns / 1e6
+        log(
+            f"[AudioProcessing] {label} ({codec_id}) -> passthrough: kept in its "
+            f"codec ({reason}); the app cuts whole {units} ({unit_ms:.3f} ms each)"
+        )
+        log(
+            f"  delay:  raw {delay_ms:+.6f} ms (mkvmerge alone would have used {mkvmerge_ms:+d} ms)"
+        )
+        if cut.dropped_start:
+            log(
+                f"  start:  dropped {cut.dropped_start} {units}; the first kept one "
+                f"lands at {cut.first_kept_ns / 1e6:+.6f} ms -> --sync {cut.sync_ms:+d}"
+            )
+        else:
+            log(f"  start:  nothing dropped -> --sync {cut.sync_ms:+d}")
+        if cut.end_overrun_ns is not None:
+            log(
+                f"  end:    dropped {cut.dropped_end} {units} after the video end "
+                f"({video_end_ms:.3f} ms); the audio ends "
+                f"{cut.end_overrun_ns / 1e6:.3f} ms after it"
+            )
+        if cut.dialnorm_frames:
+            log(
+                f"  dialnorm: set to 31 (no attenuation) in {cut.dialnorm_frames} frames "
+                "by the app, the same edit as mkvmerge's"
+            )
+        kept = cut.units_total - cut.dropped_start - cut.dropped_end
+        if cut.output is None:
+            log(
+                f"  verify: nothing to cut; the extraction is muxed unchanged with --sync {cut.sync_ms:+d}"
+            )
+        else:
+            log(
+                f"  verify: {kept} {units} re-read from the cut file, identical to the "
+                f"source{' apart from dialnorm and checksums' if cut.dialnorm_frames else ''}; "
+                f"mkvmerge gets --sync {cut.sync_ms:+d}"
+            )
+
+    def _passthrough_video_end_ms(
+        self, ctx: Context, item: PlanItem, runner: CommandRunner
+    ) -> float | None:
+        """The video end to trim at, or None (trim off, or Source 1)."""
+        if not ctx.settings.trim_audio_to_video_duration:
+            return None
+        if item.track.source == "Source 1":
+            return None
+        return self._output_video_end_ms(ctx, runner)
 
     # ------------------------------------------------------------------
     # FLAC route
@@ -434,21 +683,24 @@ class AudioProcessingStep:
         what: str,
         route: AudioRouteStr = "flac",
     ) -> AudioProcessingResult:
-        """Keep the original track (it is muxed untouched) and report why."""
+        """Keep the original track in its codec, cut by the passthrough route
+        (so mkvmerge never cuts it), and report why."""
         label = item_label(item)
         runner._log_message(
             f"[ERROR] [AudioProcessing] {label}: {'; '.join(problems)}. Keeping the original track."
         )
         ctx.flac_conversion_failures.append(f"{label}: {'; '.join(problems)}")
+        kept = self._passthrough(ctx, item, runner, f"{what}, original kept")
         return AudioProcessingResult(
             label,
             route,
             item.track.props.codec_id or "",
             False,
-            f"{what}, original kept",
+            f"{what}, original kept" + (" and cut in its codec" if kept.cut else ""),
             delay_raw_ms=delay_ms,
-            mkvmerge_delay_ms=mkvmerge_ms,
+            mkvmerge_delay_ms=item.mux_sync_ms if kept.cut else mkvmerge_ms,
             problems=tuple(problems),
+            cut=kept.cut,
         )
 
     # ------------------------------------------------------------------
@@ -678,7 +930,8 @@ class AudioProcessingStep:
         if table is None:
             log(
                 "[WARNING] [AudioProcessing] Could not read Source 1's real frame "
-                "timestamps — converted tracks are NOT trimmed to the video end."
+                "timestamps — no audio track is trimmed to the video end (FLAC or "
+                "cut in its codec)."
             )
             return None
         video_delay = ctx.delays.global_shift_ms if ctx.delays else 0

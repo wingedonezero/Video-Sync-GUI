@@ -1,0 +1,289 @@
+# vsg_core/postprocess/auditors/audio_passthrough.py
+"""Checks the tracks the app cut in their own codec, against the final MKV.
+
+mkvextract writes every passthrough track back out of the final file, with
+each frame's time (``timestamps_v2``, laced frames included). The extracted
+track must be exactly the file the app wrote (byte for byte; AAC payloads,
+since mkvextract rebuilds the ADTS headers), the first frame must sit at
+exactly the residual ``--sync``, and every frame of a byte-cut codec within
+half a ms of its exact time. This is packet-level on purpose: a strict
+decode passes every bad start this exists to catch (TrueHD off a major sync,
+a DTS ramp-in). One mkvextract pass reads the file once, about 45 s for a
+47 GB UHD, and keeps nothing large in memory.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import shutil
+from fractions import Fraction
+from typing import TYPE_CHECKING
+
+from vsg_core.audio_processing.frames import parse_file
+from vsg_core.audio_processing.ogg_opus import read_ogg_opus
+from vsg_core.audio_processing.passthrough import frame_family, read_wav_layout
+from vsg_core.orchestrator.steps.audio_processing_step import item_label
+
+from .base import BaseAuditor
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vsg_core.audio_processing.passthrough import PassthroughCut
+    from vsg_core.models.jobs import PlanItem
+
+_HALF_MS = Fraction(1, 2)
+_CHUNK = 8 * 1024 * 1024
+
+
+def _sha256(path: Path, start: int = 0, length: int | None = None) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        f.seek(start)
+        left = length
+        while left is None or left > 0:
+            chunk = f.read(_CHUNK if left is None else min(_CHUNK, left))
+            if not chunk:
+                break
+            h.update(chunk)
+            if left is not None:
+                left -= len(chunk)
+    return h.hexdigest()
+
+
+def _aac_payload_hash(path: Path) -> tuple[int, str]:
+    """(frame count, hash of the payloads without their ADTS headers)."""
+    fmap = parse_file("aac", path)
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for i in range(len(fmap)):
+            f.seek(fmap.pos[i])
+            frame = f.read(fmap.size[i])
+            h.update(frame[7 if frame[1] & 1 else 9 :])
+    return len(fmap), h.hexdigest()
+
+
+def _read_times(path: Path) -> list[Fraction]:
+    """Frame start times in ms from a timestamps_v2 file (the last line is the
+    end of the last frame and is dropped)."""
+    times = [
+        Fraction(line.strip())
+        for line in path.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    return times[:-1]
+
+
+class AudioPassthroughAuditor(BaseAuditor):
+    """Verifies passthrough cuts against the tracks extracted from the final MKV."""
+
+    def run(
+        self,
+        final_mkv_path: Path,
+        final_mkvmerge_data: dict,
+        final_ffprobe_data: dict | None = None,
+    ) -> int:
+        for entry in self.ctx.passthrough_cut_failures:
+            self._report(f"Not cut by the app (mkvmerge --sync as before): {entry}")
+        for entry in self.ctx.passthrough_warnings:
+            self._report(entry)
+
+        # A cut is recorded only when it succeeded; a track whose FLAC or
+        # stepping route failed can carry one too.
+        results = {
+            r.label: r for r in self.ctx.audio_processing_results if r.cut is not None
+        }
+        if not results:
+            self.log("No tracks were cut in their codec.")
+            return len(self.issues)
+
+        audio_items = [
+            item
+            for item in (self.ctx.extracted_items or [])
+            if item.track.type == "audio"
+        ]
+        audio_tracks = [
+            t for t in final_mkvmerge_data.get("tracks", []) if t.get("type") == "audio"
+        ]
+        if len(audio_items) != len(audio_tracks):
+            self._report(
+                f"Audio track count mismatch ({len(audio_items)} planned, "
+                f"{len(audio_tracks)} in the file); passthrough check skipped"
+            )
+            return len(self.issues)
+
+        jobs: list[tuple[PlanItem, PassthroughCut, dict]] = []
+        for item, track in zip(audio_items, audio_tracks, strict=True):
+            result = results.get(item_label(item))
+            if result is not None and result.cut is not None:
+                jobs.append((item, result.cut, track))
+        if not jobs:
+            return len(self.issues)
+
+        # Times are stored rounded to the file's timestamp scale (1 ms with video).
+        scale_ns = int(
+            (final_mkvmerge_data.get("container", {}).get("properties") or {}).get(
+                "timestamp_scale"
+            )
+            or 1_000_000
+        )
+        half_scale = Fraction(scale_ns, 2_000_000)  # in ms
+        full = self.ctx.settings.verify_passthrough_frames
+        if full:
+            self._check_frames(final_mkv_path, jobs, half_scale)
+        else:
+            self._check_first_frames(jobs, half_scale)
+
+        if not self.issues:
+            self.log(
+                "✅ Every passthrough cut is in the file exactly as written."
+                if full
+                else "✅ Every passthrough cut starts where planned."
+            )
+        return len(self.issues)
+
+    def _check_first_frames(
+        self, jobs: list[tuple[PlanItem, PassthroughCut, dict]], half_scale: Fraction
+    ) -> None:
+        """Without the frame-by-frame check: each cut track's first frame, from
+        the mkvmerge -J data the audit already has. The cut itself was checked
+        against the source before the mux."""
+        for item, cut, track in jobs:
+            name = f"{item.track.props.name or f'Track {item.track.id}'} ({item.track.source})"
+            first_ns = (track.get("properties") or {}).get("minimum_timestamp")
+            if first_ns is None:
+                self.log(f"  ⓘ {name}: no first timestamp reported; check skipped")
+                continue
+            first_ms = Fraction(int(first_ns), 1_000_000)
+            if abs(first_ms - cut.sync_ms) > half_scale:
+                self._report(
+                    f"{name}: first frame at {float(first_ms):.3f} ms, expected {cut.sync_ms} ms"
+                )
+            else:
+                self.log(
+                    f"  ✓ {name}: first frame at {cut.sync_ms} ms (frame-by-frame "
+                    "check off: Options → Merge Behavior → 'Verify audio cut in its codec')"
+                )
+
+    def _check_frames(
+        self,
+        final_mkv_path: Path,
+        jobs: list[tuple[PlanItem, PassthroughCut, dict]],
+        half_scale: Fraction,
+    ) -> None:
+        work = self.ctx.temp_dir / "passthrough_audit"
+        work.mkdir(parents=True, exist_ok=True)
+        try:
+            # Only rewritten tracks are extracted: an unchanged one is the
+            # extraction mkvmerge muxed, so its frame times are what to check.
+            cmd = ["mkvextract", str(final_mkv_path)]
+            ids = [int(track.get("id", -1)) for _, _, track in jobs]
+            rewritten = [
+                tid for (_, cut, _), tid in zip(jobs, ids, strict=True) if cut.output
+            ]
+            if rewritten:
+                cmd += ["tracks"] + [
+                    f"{tid}:{work / f'{tid}.track'}" for tid in rewritten
+                ]
+            cmd += ["timestamps_v2"]
+            cmd += [f"{tid}:{work / f'{tid}.times'}" for tid in ids]
+            self.runner.run(cmd, self.tool_paths)
+            for (item, cut, _), tid in zip(jobs, ids, strict=True):
+                self._check_track(
+                    item, cut, work / f"{tid}.track", work / f"{tid}.times", half_scale
+                )
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def _check_track(
+        self,
+        item: PlanItem,
+        cut: PassthroughCut,
+        extracted: Path,
+        times_path: Path,
+        half_scale: Fraction,
+    ) -> None:
+        name = (
+            f"{item.track.props.name or f'Track {item.track.id}'} ({item.track.source})"
+        )
+        written = item.extracted_path
+        if written is None or not written.exists():
+            self.log(f"  ⓘ {name}: muxed file no longer on disk; check skipped")
+            return
+        if not times_path.exists() or (
+            cut.output is not None and not extracted.exists()
+        ):
+            self._report(f"{name}: could not extract it from the final file")
+            return
+
+        times = _read_times(times_path)
+        problems = self._compare(
+            cut, written, extracted if cut.output is not None else None, len(times)
+        )
+        if not times or abs(times[0] - cut.sync_ms) > half_scale:
+            first = f"{float(times[0]):.3f} ms" if times else "nothing"
+            problems.append(f"first frame at {first}, expected {cut.sync_ms} ms")
+        elif not problems and cut.kind not in ("pcm", "opus"):
+            problems += self._check_times(cut, written, times)
+
+        if problems:
+            for p in problems:
+                self._report(f"{name}: {p}")
+        else:
+            self.log(
+                f"  ✓ {name}: {len(times)} frames identical to the cut file, first at "
+                f"{cut.sync_ms} ms, every frame within half a ms of its exact time"
+            )
+
+    @staticmethod
+    def _compare(
+        cut: PassthroughCut, written: Path, extracted: Path | None, frames: int
+    ) -> list[str]:
+        """The extracted track must be what the app wrote (``extracted`` None:
+        the track was not rewritten, only its frame count is checked)."""
+        if extracted is None:
+            if cut.kind in ("pcm", "opus"):
+                return []
+            units = len(parse_file(frame_family(cut.kind), written))
+            return (
+                []
+                if units == frames
+                else [f"{frames} frames in the file, {units} units"]
+            )
+        if cut.kind == "opus":
+            ours, theirs = read_ogg_opus(written), read_ogg_opus(extracted)
+            if ours.packets != theirs.packets:
+                return ["Opus packets differ from the written file"]
+            return []
+        if cut.kind == "pcm":
+            a, b = read_wav_layout(written), read_wav_layout(extracted)
+            if a.data_bytes != b.data_bytes or _sha256(
+                written, a.data_offset, a.data_bytes
+            ) != _sha256(extracted, b.data_offset, b.data_bytes):
+                return ["PCM samples differ from the written file"]
+            return []
+        if cut.kind == "aac":
+            if _aac_payload_hash(written) != _aac_payload_hash(extracted):
+                return ["AAC frames differ from the written file"]
+            return []
+        if _sha256(written) != _sha256(extracted):
+            return ["the track is not byte-identical to the written file"]
+        units = len(parse_file(frame_family(cut.kind), written))
+        if units != frames:
+            return [f"{frames} frames in the file, {units} units written"]
+        return []
+
+    @staticmethod
+    def _check_times(
+        cut: PassthroughCut, written: Path, times: list[Fraction]
+    ) -> list[str]:
+        fmap = parse_file(frame_family(cut.kind), written)
+        offset = 0
+        for i, t in enumerate(times):
+            exact = cut.sync_ms + Fraction(offset * 1000, fmap.rate)
+            if abs(t - exact) > _HALF_MS:
+                return [
+                    f"frame {i} at {float(t):.3f} ms, exact time {float(exact):.3f} ms"
+                ]
+            offset += fmap.samples[i]
+        return []

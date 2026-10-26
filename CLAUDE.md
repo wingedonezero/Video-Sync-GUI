@@ -44,7 +44,8 @@ the UI thread). The worker runs the core pipeline:
 ```
 analyze (compute SEC/TER delays) → global shift (remove negative offsets)
 → extract tracks → audio processing (stepping and lossless → FLAC through the
-finisher, delay baked in to the sample, mkvmerge --sync 0) → subtitle transforms
+finisher, delay baked in to the sample, mkvmerge --sync 0; every other track
+cut by the app in its own codec, whole frames, mkvmerge --sync >= 0) → subtitle transforms
 → chapters + attachments → mux (mkvmerge) → post-process/validate
 ```
 
@@ -63,7 +64,7 @@ external tools with streamed log/progress callbacks.
 ### `vsg_core/` (backend)
 
 - `analysis/` — audio cross-correlation + VideoDiff delay analysis, stream probing, source separation
-- `audio_processing/` — sample-exact FLAC finisher: edit plan (start cut / silence / end cap) → one ffmpeg encode → verified output
+- `audio_processing/` — sample-exact FLAC finisher: edit plan (start cut / silence / end cap) → one ffmpeg encode → verified output; passthrough cuts for tracks that keep their codec (`frames.py` = mkvmerge's packet rules, `passthrough.py`, `dialnorm.py`, `ogg_opus.py`), so mkvmerge never cuts audio itself
 - `audit/` — append-only JSON audit trail of timing values at each pipeline step
 - `chapters/` — extract / rename / shift chapters, snap to keyframes
 - `correction/` — audio timing corrections: stepping (silence-gated segments; applied through `audio_processing/`). PAL / linear drift correction is disconnected (detected and reported only) — see `docs/plans/drift-correction.md`

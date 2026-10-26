@@ -139,9 +139,12 @@ class StepValidator:
             for item in (ctx.extracted_items or [])
             if item.track.type == "audio" and not item.is_preserved
         ]
-        if ctx.and_merge and len(ctx.audio_processing_results) != len(audio):
+        main_results = [
+            r for r in ctx.audio_processing_results if not r.preserved_original
+        ]
+        if ctx.and_merge and len(main_results) != len(audio):
             errors.append(
-                f"{len(audio)} audio tracks but {len(ctx.audio_processing_results)} "
+                f"{len(audio)} audio tracks but {len(main_results)} "
                 f"audio processing outcomes"
             )
         outcomes = {r.label: r for r in ctx.audio_processing_results}

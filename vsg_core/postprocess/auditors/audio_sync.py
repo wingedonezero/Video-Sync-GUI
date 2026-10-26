@@ -56,6 +56,17 @@ class AudioSyncAuditor(BaseAuditor):
         for i, (plan_item, final_track) in enumerate(
             zip(audio_plan_items, final_audio_tracks)
         ):
+            # Cut by the app in its own codec: AudioPassthroughAuditor checks
+            # every frame's time. CodecDelay here would be an Opus pre-skip,
+            # not a sync delay.
+            if plan_item.mux_sync_ms is not None:
+                name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+                self.log(
+                    f"  ⓘ '{name}' ({plan_item.track.source}) cut in its codec: "
+                    "timing checked by the passthrough audit"
+                )
+                continue
+
             # Calculate what the delay SHOULD be
             expected_delay_ms = self._calculate_expected_delay(plan_item)
 

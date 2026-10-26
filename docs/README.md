@@ -438,7 +438,8 @@ subtitles. Each audio track gets exactly one route, decided and logged up front:
 |---|---|---|
 | `corrected` | the track's source has a stepping EDL that passed its QA check (stepping on) | one finisher encode applies the whole EDL (start delay, silence inserts, cuts) plus the optional end trim; mkvmerge `--sync 0`; the original is kept as a preserved track |
 | `flac` | "Convert to FLAC" ticked, or the track is already FLAC and something changes; lossless and eligible (PCM, TrueHD/MLP, DTS-HD MA; not Atmos / DTS:X, float or 32-bit PCM, > 8 channels) | one finisher encode bakes the whole delay into the samples (cut for negative, digital silence for positive, nearest sample) and, when "trim converted audio to the video end" is on, cuts at the real video end (never Source 1); mkvmerge `--sync 0` |
-| `untouched` | everything else (lossy, object audio, not requested) | muxed as extracted with mkvmerge `--sync <rounded ms>` |
+| `passthrough` | everything else in a codec the app can cut: AC-3/E-AC-3, TrueHD/MLP (incl. Atmos), DTS (core, HRA, MA, DTS:X, coreless MA, DTS Express), AAC (ADTS), MPEG audio, PCM, Opus | kept in its codec; the app drops whole units before the delay point (the first kept one an entry unit: TrueHD major sync, E-AC-3 independent frame with its dependents, never a lone DTS extension, a DTS Express packet only with its decoder-init header) and, with the trim on (not Source 1), every unit starting at or after the video end; PCM and Opus to the sample (Opus via Ogg pre-skip / end granule). The file is re-read and checked, mkvmerge must identify it like the extraction, and mkvmerge gets only the whole-ms residual `--sync r >= 0`. Dialnorm removal (AC-3/E-AC-3) is done by the app, the same edit as mkvmerge's. Originals kept beside a stepping-corrected track get the same cut |
+| `untouched` | Vorbis (cut by mkvmerge; a warning for negative delays, since FFmpeg places a laced cut Vorbis 9.33 ms early), codecs the app doesn't cut (ALAC, TTA, WavPack, float PCM, DTS Express with sync-only packets), or a refused passthrough cut | muxed as extracted with mkvmerge `--sync <rounded ms>` |
 
 **The finisher** (`audio_processing/`) runs an *edit plan* — source takes and
 silence inserts plus an optional end cap — as one streaming ffmpeg pass into FLAC
@@ -455,6 +456,14 @@ Each finished FLAC carries Vorbis tags that survive the mux: `VSG_DELAY_MS`,
 `VSG_SILENCE_SAMPLES_ADDED`, `VSG_SAMPLES_TRIMMED_START`,
 `VSG_SAMPLES_TRIMMED_END`, `VSG_SOURCE_CODEC` and `VSG_EDIT_PLAN` (e.g.
 `S24768 T0-6455228 S48048 T6455228-…`: S = silence, T = source samples, C = cap).
+
+**Passthrough cuts** (`audio_processing/frames.py`, `passthrough.py`, `dialnorm.py`, `ogg_opus.py`)
+use mkvmerge's own packet rules for raw streams (ported from MKVToolNix 103.0, unchanged in the
+Mod; checked against mkvmerge on 448 sample tracks), so a cut lands exactly where mkvmerge sees a
+boundary. The final audit (`AudioPassthroughAuditor`) checks each cut track's first frame time;
+with Options → Merge Behavior → "Verify audio cut in its codec frame by frame" on, it extracts the
+cut tracks with mkvextract and compares every frame and its time with the file the app wrote — at
+packet level, since a strict decode passes every bad start. Design: `docs/plans/passthrough-audio-cuts.md`.
 
 **PAL / linear drift** is detected and reported but not corrected (disconnected,
 see `docs/plans/drift-correction.md`). Design notes: `docs/plans/audio-processing-step.md`.
@@ -490,7 +499,7 @@ We generate a JSON options file that mkvmerge reads as `@opts.json`. For **each 
 
 - `--language 0:<lang>`  
 - `--track-name 0:<name>` *(if “Keep Name”)*  
-- `--sync 0:<delay_ms>` where `<delay_ms> = global_shift + (secondary_ms|tertiary_ms)` or just `global_shift` for REF — except audio whose delay is baked into its FLAC by audio processing (§8.2a), which gets `--sync 0:0`
+- `--sync 0:<delay_ms>` where `<delay_ms> = global_shift + (secondary_ms|tertiary_ms)` or just `global_shift` for REF — except audio whose delay is baked into its FLAC by audio processing (§8.2a), which gets `--sync 0:0`, and passthrough audio, which gets the residual left after the app's own cut
 - `--default-track-flag 0:(yes|no)` per **Default** rules (first REF video OR selected audio/subs)
 - `--forced-display-flag 0:yes` (subs only, if “Forced”)
 - `--compression 0:none`
