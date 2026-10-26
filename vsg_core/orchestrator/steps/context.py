@@ -94,6 +94,11 @@ class Context:
     # Format: {source_key: {track_id: delay_ms}}
     container_delays: dict[str, dict[int, int]] = field(default_factory=dict)
 
+    # The audio track (mkvmerge id) each other source was correlated on. Only
+    # that track's start is in the source's delay; the audit flags other audio
+    # of the source whose container delay differs from it.
+    correlation_track_ids: dict[str, int] = field(default_factory=dict)
+
     # A flag to determine if a global shift is necessary
     global_shift_is_required: bool = False
 

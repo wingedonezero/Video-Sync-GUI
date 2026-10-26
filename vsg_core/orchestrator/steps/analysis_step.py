@@ -612,6 +612,7 @@ class AnalysisStep:
         correlation_source_track = target_track_selection.track_index
 
         target_track_id = target_track_selection.track_id
+        ctx.correlation_track_ids[source_key] = target_track_id
         target_codec_id = (
             audio_tracks[target_track_selection.track_index]
             .get("properties", {})

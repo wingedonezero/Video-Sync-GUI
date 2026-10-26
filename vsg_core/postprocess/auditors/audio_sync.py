@@ -3,6 +3,8 @@ import json
 import math
 from pathlib import Path
 
+from vsg_core.models.jobs import PlanItem
+
 from .base import BaseAuditor
 
 
@@ -40,8 +42,12 @@ class AudioSyncAuditor(BaseAuditor):
 
         # Build a mapping of track index to plan item
         audio_plan_items = [
-            item for item in (self.ctx.extracted_items or []) if item.track.type == "audio"
+            item
+            for item in (self.ctx.extracted_items or [])
+            if item.track.type == "audio"
         ]
+
+        self._check_track_offsets(audio_plan_items)
 
         # Get audio tracks from final file
         final_audio_tracks = [t for t in final_tracks if t.get("type") == "audio"]
@@ -88,6 +94,32 @@ class AudioSyncAuditor(BaseAuditor):
             )
 
         return len(self.issues)
+
+    def _check_track_offsets(self, audio_plan_items: list[PlanItem]) -> None:
+        """Flag audio of another source whose container delay differs from the
+        track that source was correlated on. Only the correlated track's start
+        is in the source's delay, so this one lands off by the difference (a
+        disc's tracks are normally aligned; a split can start codecs apart)."""
+        for item in audio_plan_items:
+            source = item.track.source
+            if source in ("Source 1", "External") or item.is_preserved:
+                continue
+            corr_id = self.ctx.correlation_track_ids.get(source)
+            delays = self.ctx.container_delays.get(source, {})
+            if corr_id is None or item.track.id == corr_id:
+                continue
+            if corr_id not in delays or item.track.id not in delays:
+                continue
+            diff_ms = delays[item.track.id] - delays[corr_id]
+            if diff_ms == 0:
+                continue
+            name = item.track.props.name or f"Track {item.track.id}"
+            self._report(
+                f"'{name}' ({source} track {item.track.id}) starts {diff_ms:+d} ms "
+                f"from the correlated track {corr_id} in its file; that offset is "
+                f"not applied (it gets {source}'s delay), so it plays "
+                f"{abs(diff_ms)} ms {'early' if diff_ms > 0 else 'late'}"
+            )
 
     def _verify_codec_delay(
         self, plan_item, final_track: dict, expected_delay_ms: float, track_index: int

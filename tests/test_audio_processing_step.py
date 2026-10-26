@@ -36,6 +36,7 @@ from vsg_core.orchestrator.steps.context import Context
 from vsg_core.orchestrator.validation import StepValidator
 from vsg_core.postprocess.auditors import (
     AudioPassthroughAuditor,
+    AudioSyncAuditor,
     DriftCorrectionAuditor,
 )
 
@@ -607,3 +608,30 @@ def test_audit_reports_passthrough_failures_and_caveats(tmp_path: Path) -> None:
     assert auditor.run(tmp_path / "out.mkv", {}) == 2
     assert [i.severity for i in auditor.issues] == ["warning", "warning"]
     assert "Opus is muxed with lacing" in auditor.issues[1].message
+
+
+def test_audit_flags_tracks_offset_from_the_correlated_one(tmp_path: Path) -> None:
+    """Only the correlated track's start is in a source's delay: another track
+    of that source starting 1 ms later in its file plays 1 ms early."""
+    items = [
+        _item("Source 1", 1, "A_TRUEHD", tmp_path / "a", convert=False),
+        _item("Source 3", 2, "A_OPUS", tmp_path / "b", convert=False),
+        _item("Source 3", 1, "A_OPUS", tmp_path / "c", convert=False),
+        _item("Source 2", 1, "A_EAC3", tmp_path / "d", convert=False),
+    ]
+    preserved = _item("Source 3", 1, "A_OPUS", tmp_path / "c", convert=False)
+    preserved.is_preserved = True
+    ctx = _ctx(tmp_path, [*items, preserved], raw_delay_ms=0.0)
+    ctx.container_delays = {
+        "Source 1": {1: 40},
+        "Source 2": {1: 5, 2: 0},  # not correlated on a recorded track: skipped
+        "Source 3": {1: 1, 2: 0},
+    }
+    ctx.correlation_track_ids = {"Source 3": 2}
+    auditor = AudioSyncAuditor(ctx, CommandRunner(AppSettings(), lambda _m: None))
+    auditor._check_track_offsets([*items, preserved])
+    assert [i.message for i in auditor.issues] == [
+        "'Track 1' (Source 3 track 1) starts +1 ms from the correlated track 2 in "
+        "its file; that offset is not applied (it gets Source 3's delay), so it "
+        "plays 1 ms early"
+    ]
