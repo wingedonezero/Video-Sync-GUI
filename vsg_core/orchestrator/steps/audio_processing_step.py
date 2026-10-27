@@ -370,6 +370,9 @@ class AudioProcessingStep:
         mkvmerge_ms = self._mkvmerge_delay_ms(ctx, item)
         video_end_ms = self._passthrough_video_end_ms(ctx, item, runner)
         dialnorm = ctx.settings.apply_dialog_norm_gain and kind == "ac3"
+        if dialnorm and self._is_eac3_atmos(codec_id, src, runner, ctx.tool_paths):
+            dialnorm = False
+            item.keep_dialnorm = True
         dst = ctx.temp_dir / f"{src.stem}_cut{src.suffix}"
         try:
             cut = cut_passthrough(
@@ -417,6 +420,11 @@ class AudioProcessingStep:
         self._log_cut(
             log, label, codec_id, reason, delay_ms, mkvmerge_ms, cut, video_end_ms
         )
+        if item.keep_dialnorm:
+            log(
+                "  dialnorm: kept: E-AC-3 Atmos (receivers play it as plain DD+ "
+                "after the edit)"
+            )
         if ctx.audit:
             ctx.audit.append_event(
                 "milestone",
@@ -445,6 +453,20 @@ class AudioProcessingStep:
             sample_rate=cut.rate,
             cut=cut,
         )
+
+    def _is_eac3_atmos(
+        self,
+        codec_id: str,
+        src: Path,
+        runner: CommandRunner,
+        tool_paths: dict[str, str | None],
+    ) -> bool:
+        """E-AC-3 with Atmos (JOC): FFmpeg reports it from the frame header's
+        extension-type-A flag, the one MediaInfo and receivers go by."""
+        if "EAC3" not in codec_id.upper():
+            return False
+        stream = self._probe_stream(src, runner, tool_paths)
+        return stream is not None and "atmos" in str(stream.get("profile", "")).lower()
 
     @staticmethod
     def _warn(ctx: Context, log: Callable[[str], None], message: str) -> None:

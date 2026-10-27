@@ -151,6 +151,7 @@ class MkvmergeOptionsBuilder:
                 settings.apply_dialog_norm_gain
                 and tr.type == "audio"
                 and not item.dialnorm_removed
+                and not item.keep_dialnorm
             ):
                 cid = (tr.props.codec_id or "").upper()
                 if "AC3" in cid or "EAC3" in cid:

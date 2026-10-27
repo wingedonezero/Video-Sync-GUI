@@ -65,6 +65,9 @@ class PlanItem:
     # whether the app already removed dialnorm (so mkvmerge must not).
     mux_sync_ms: int | None = None
     dialnorm_removed: bool = False
+    # E-AC-3 Atmos: dialnorm is never edited (receivers then play it as plain
+    # DD+), by the app or by mkvmerge when a cut falls back to it.
+    keep_dialnorm: bool = False
     correction_source: str | None = None
     perform_ocr: bool = False
     container_delay_ms: int = 0

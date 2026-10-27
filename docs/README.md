@@ -503,7 +503,9 @@ We generate a JSON options file that mkvmerge reads as `@opts.json`. For **each 
 - `--default-track-flag 0:(yes|no)` per **Default** rules (first REF video OR selected audio/subs)
 - `--forced-display-flag 0:yes` (subs only, if “Forced”)
 - `--compression 0:none`
-- (Optional) `--remove-dialog-normalization-gain 0` for AC3/E‑AC3 if enabled in settings
+- (Optional) `--remove-dialog-normalization-gain 0` for AC3/E‑AC3 if enabled in settings, only
+  for a track the app did not cut itself (it makes the same edit on the tracks it cuts); never for
+  E‑AC‑3 Atmos, which receivers then play as plain DD+
 - Wrap the source with parentheses: `( <extracted_path> )`
 
 Track order is explicit via `--track-order "0:0,1:0,2:0,..."` where indices are positional across our list.

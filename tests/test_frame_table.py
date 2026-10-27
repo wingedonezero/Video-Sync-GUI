@@ -292,3 +292,21 @@ def test_unreadable_timestamps_fall_back_to_old_behaviour(fake_build):
     [note] = ctx.frame_grid_notes  # never expected for progressive: final-audit warning
     assert note.severity == "warning" and "fell back to 24000/1001" in note.message
     assert _resolve(_ctx(1), "/x.mkv", None, _Runner()) is None
+
+
+def test_frame_snapped_duration_change_is_not_counted():
+    """Dungeon 24: a sign ending on Source 3's frame 277 (11560) is snapped to
+    the BD's frame 277 (11553); centisecond storage then shortens it by 3 ms on
+    the same frames. A plain off-centisecond time still counts."""
+    film = FrameClock(24000, 1001)
+    table = _formula_table(film, 400)
+    assert table.times_ms[277] == 11553.0
+    data = SubtitleData()
+    data.events = [
+        SubtitleEvent(start_ms=11150.0, end_ms=11553.0, text="snapped end"),
+        SubtitleEvent(start_ms=11150.0, end_ms=11552.0, text="not a frame time"),
+    ]
+    result = run_frame_audit(data, table, "floor", 0.0, "snap")
+    assert result.start_early + result.start_late + result.end_early == 0
+    assert result.duration_delta_frame_time == 1
+    assert result.duration_delta_10ms == 1

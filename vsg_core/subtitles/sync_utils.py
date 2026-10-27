@@ -33,10 +33,11 @@ def build_frame_shift(
     Eligible only when: the offset really came from sliding frame matching (not
     a correlation fallback), there is no sub-frame global shift, both videos'
     real frame timestamps are available, and the matched frame offset holds
-    file-wide on both timelines (``matched_frame_offset``: no holes, same
-    rate, agrees with the measured wall-clock offset). Different start offsets
-    are fine — frames are paired by index, so each snap lands on the real
-    target frame time. Anything else returns None and events take the flat
+    on both timelines (``matched_frame_range``: no holes, same rate, agrees
+    with the measured wall-clock offset) - file-wide, or up to a break that
+    comes after every picture the matcher compared, past which times take the
+    flat delay. Different start offsets are fine — frames are paired by index,
+    so each snap lands on the real target frame time. Anything else returns None and events take the flat
     millisecond delay exactly as before. Shared by the cached dispatcher path
     and the inline plugin path. ``load_source`` reads the source video's frame
     timestamps; it is only called once the cheap gates pass.
@@ -47,7 +48,7 @@ def build_frame_shift(
     real times DO show the offset is wrong (holes, rate mismatch), there is no
     fallback: the flat delay is the correct answer there.
     """
-    from .frame_grids import matched_frame_offset
+    from .frame_grids import matched_frame_range
     from .frame_utils.frame_table import FrameShift, FrameTable
 
     if fallback or details.get("reason") != "sliding-matched":
@@ -63,10 +64,12 @@ def build_frame_shift(
         return _formula_frame_shift(
             target_clock, details, log, warn, "the source's real frame times unreadable"
         )
-    frames = matched_frame_offset(source, target, details, log)
-    if frames is None:
+    match = matched_frame_range(source, target, details, log, allow_tail=True)
+    if match is None:
         return None
-    return FrameShift(source=source, target=target, frames=frames)
+    return FrameShift(
+        source=source, target=target, frames=match.frames, source_end=match.source_end
+    )
 
 
 def _formula_frame_shift(

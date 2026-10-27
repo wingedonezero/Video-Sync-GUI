@@ -10,7 +10,9 @@ recomputed. Doing it before the mux means the MKV holds exactly the bytes the
 app wrote, so the post-mux check can compare them byte for byte.
 
 TrueHD is deliberately not handled: editing its dialnorm breaks Atmos data
-(Doom9 eac3to reports), and the app never asks for it.
+(Doom9 eac3to reports), and the app never asks for it. Nor does it ask for
+E-AC-3 Atmos (JOC): after this exact edit receivers play it as plain DD+
+(Doom9 "Remove dialog norm. from DD+ w/ Atmos?", Denon X6500 and another).
 """
 
 from __future__ import annotations

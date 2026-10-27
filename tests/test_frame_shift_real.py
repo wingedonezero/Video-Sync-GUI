@@ -288,3 +288,59 @@ def test_formula_backup_keeps_the_old_start_offset_rule():
         warn=warnings.append,
     )
     assert shift is None and warnings == []  # old code never snapped this either
+
+
+# --- a late-stamped last frame (neoDESU Dungeon encodes) -----------------------
+
+
+def _late_last_frame(n: int, start_ms: float, late_ms: float) -> FrameTable:
+    """A clean CFR file whose last frame is stamped ``late_ms`` late."""
+    times = [start_ms + FILM.frame_ms(i) for i in range(n)]
+    times[-1] += late_ms
+    return FrameTable.from_timestamps(times, origin="test")
+
+
+def _compared(*windows: tuple[int, int]) -> list[dict]:
+    """``per_position_results`` entries: (first source frame, window length)."""
+    return [{"src_start": s, "total": t} for s, t in windows]
+
+
+def test_late_last_frame_snaps_up_to_it():
+    # Dungeon 14: Source 3 starts at 7 ms (Opus pre-skip), its last frame is
+    # stamped 125 ms late (2 missing slots); the BD starts at 0.
+    source = _late_last_frame(3000, 7.0, 2 * 1001 / 24)
+    target = _grid(FILM, 3050)
+    details = _details(0, 0, 0.0) | {
+        "per_position_results": _compared((300, 239), (1500, 239), (2600, 239))
+    }
+    lines: list[str] = []
+    shift = _build(lambda: source, target, details, log=lines.append)
+    assert shift is not None and shift.frames == 0 and shift.source_end == 2999
+    assert "source frames 0-2998 of 3000" in shift.coverage
+    assert any("agree up to source frame 2999" in line for line in lines)
+    for k in (0, 277, 1500, 2998):
+        assert shift.shifted_ms(source.times_ms[k], 0.0) == target.times_ms[k]
+    last = source.times_ms[2999]
+    assert shift.shifted_ms(last, 0.0) == last  # the late frame: flat delay
+
+
+def test_break_before_a_compared_picture_still_refuses():
+    times = [FILM.frame_ms(i) for i in range(3000)]
+    times = times[:1500] + [t + 1001 for t in times[1500:]]  # hole at 1500
+    source = FrameTable.from_timestamps(times, origin="test")
+    target = _grid(FILM, 3100)
+    details = _details(4, 0, 4 * 1001 / 24) | {
+        "per_position_results": _compared((300, 239), (2600, 239))
+    }
+    lines: list[str] = []
+    assert _build(lambda: source, target, details, log=lines.append) is None
+    assert any("drift" in line for line in lines)
+
+
+def test_bitmap_path_still_requires_the_whole_file():
+    source = _late_last_frame(3000, 7.0, 2 * 1001 / 24)
+    target = _grid(FILM, 3050)
+    details = _details(0, 0, 0.0) | {"per_position_results": _compared((300, 239))}
+    assert fg.matched_frame_offset(source, target, details, _no_log) is None
+    clean = _grid(FILM, 3000, start_ms=7.0)
+    assert fg.matched_frame_offset(clean, target, details, _no_log) == 0

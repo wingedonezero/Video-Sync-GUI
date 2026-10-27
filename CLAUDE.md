@@ -101,7 +101,7 @@ supplies each video's real frame timestamps) is a Python library, not a
 subprocess.
 
 - **MKVToolNix = the user's MKVToolNix-Mod** (MKVToolNix 103.0 + fixes,
-  `mkvmerge v103.0.44`, installed as the system `mkvtoolnix` debs; full change
+  `mkvmerge v103.0.50`, installed as the system `mkvtoolnix` debs; full change
   list in its `MOD_CHANGES.md`). What matters here: video from elementary
   streams is timed exactly from the stream's own clock (stock 103.0 summed
   frame lengths cut to whole ns, storing ~1 frame in 20 one ms early). The app

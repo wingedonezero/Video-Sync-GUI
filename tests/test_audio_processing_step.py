@@ -523,6 +523,57 @@ class TestPassthroughRoute:
         assert not res.ok and item.extracted_path == ac3 and item.mux_sync_ms is None
         assert not (tmp_path / "ac3_cut.ac3").exists()
 
+    @pytest.mark.parametrize("atmos", [False, True])
+    @pytest.mark.parametrize("cut_ok", [True, False])
+    def test_dialnorm_kept_on_eac3_atmos(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        atmos: bool,
+        cut_ok: bool,
+    ) -> None:
+        """E-AC-3 Atmos keeps its dialnorm: not edited by the app, and not by
+        mkvmerge when the cut falls back to it. Other E-AC-3 is edited."""
+        eac3 = tmp_path / "dd.eac3"
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+             "aevalsrc=0.3*sin(300*2*PI*t)|0.3*sin(400*2*PI*t):s=48000:c=stereo:d=2",
+             "-c:a", "eac3", "-dialnorm", "-24", str(eac3)],
+            check=True,
+        )  # fmt: skip
+        item = _item("Source 2", 1, "A_EAC3", eac3, convert=False)
+        ctx = _ctx(tmp_path, [item], raw_delay_ms=-100.0)
+        ctx.settings.apply_dialog_norm_gain = True
+        profile = "Dolby Digital Plus + Dolby Atmos" if atmos else "unknown"
+        monkeypatch.setattr(
+            AudioProcessingStep, "_probe_stream", lambda *_a: {"profile": profile}
+        )
+        if not cut_ok:
+
+            def unreadable(*_args: object) -> None:
+                raise PassthroughError("mkvmerge reads the cut file as nothing")
+
+            monkeypatch.setattr(
+                AudioProcessingStep, "_check_mkvmerge_reads", unreadable
+            )
+        ctx = AudioProcessingStep().run(
+            ctx, CommandRunner(AppSettings(), lambda _m: None)
+        )
+        res = ctx.audio_processing_results[0]
+        assert res.ok == cut_ok
+        assert item.keep_dialnorm == atmos
+        assert item.dialnorm_removed == (cut_ok and not atmos)
+        if cut_ok:
+            assert res.cut is not None
+            assert (res.cut.dialnorm_frames > 0) == (not atmos)
+        tokens = MkvmergeOptionsBuilder().build(
+            MergePlan(items=[item], delays=ctx.delays or Delays()), ctx.settings
+        )
+        # mkvmerge edits it only when the app didn't and it isn't Atmos.
+        assert ("--remove-dialog-normalization-gain" in tokens) == (
+            not cut_ok and not atmos
+        )
+
     def test_failed_flac_conversion_is_still_cut_in_its_codec(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
