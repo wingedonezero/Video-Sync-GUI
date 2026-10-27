@@ -2307,7 +2307,8 @@ class MergeBehaviorTab(QWidget):
         self.widgets["apply_dialog_norm_gain"].setToolTip(
             "For AC3/E-AC3 audio tracks, remove the DialNorm metadata.\nThis can sometimes prevent players from lowering the volume.\n"
             "The app makes this edit itself on tracks it cuts (the same edit as mkvmerge's).\n"
-            "TrueHD is never edited: changing its dialnorm breaks Atmos."
+            "TrueHD and E-AC-3 Atmos are never edited: receivers then lose Atmos\n"
+            "(TrueHD's Atmos data breaks; DD+ Atmos plays as plain DD+)."
         )
         self.widgets["disable_track_statistics_tags"] = QCheckBox(
             "Disable track statistics tags (for purist remuxes)"

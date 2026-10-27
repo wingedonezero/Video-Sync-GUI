@@ -1,4 +1,4 @@
-# Plan: the app cuts passthrough audio itself (built 2026-10-25, uncommitted — see §21)
+# Plan: the app cuts passthrough audio itself (built 2026-10-25, merged to main 2026-10-26 — see §21)
 
 Date: 2026-10-25. Follows `audio-processing-step.md` (FLAC route, built).
 Research and proof: `~/Desktop/Makemkv/Tests/audio_negative_sync/` — `CUT-SAFETY-2026-10-25.md`
@@ -263,8 +263,13 @@ mkvmerge's `--remove-dialog-normalization-gain` is a fixed header edit (MKVToolN
 The app does the same edit on the cut file before the mux and stops passing the option to
 mkvmerge. Then the MKV holds exactly the bytes of our file, and the post-mux V2 check is exact.
 Proof before use: our edited units must be byte-identical to mkvmerge's own output with the
-option, on every AC-3/E-AC-3 sample. Whether the E-AC-3 dialnorm edit is safe for JOC Atmos is
-untested (same caution as TrueHD).
+option, on every AC-3/E-AC-3 sample. **E-AC-3 Atmos (JOC) is never edited** (2026-10-27): on
+Doom9 ("Remove dialog norm. from DD+ w/ Atmos?") this exact edit made two receivers play DD+
+Atmos as plain DD+, while MediaInfo showed nothing but the new dialnorm; ffprobe likewise still
+says "Dolby Atmos" after it, so no tool check here could catch it. The app detects Atmos from
+ffprobe's profile (the frame header's extension-type-A flag), skips the edit and marks the item
+(`keep_dialnorm`) so a refused cut doesn't hand the edit to mkvmerge either. Plain AC-3 cannot
+carry Atmos.
 
 ## 19. Other ways to get sample-exact lossy tracks (not in this plan)
 
@@ -285,7 +290,7 @@ MP3, Opus, Vorbis), the library (AC-3, E-AC-3 5.1/2.0, TrueHD 5.1/2.0, PCM).
 
 ## 21. Build status (2026-10-25)
 
-Built on `claude/audio-work-status-53134d`, not committed:
+Built on `claude/audio-work-status-53134d` (merged to main as 319e69ff, 2026-10-26):
 
 - `vsg_core/audio_processing/frames.py`, `passthrough.py`, `dialnorm.py`, `ogg_opus.py`;
   `passthrough` route in `AudioProcessingStep`; `PlanItem.mux_sync_ms / dialnorm_removed /
