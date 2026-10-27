@@ -229,13 +229,16 @@ class SlidingConfidenceAuditor(BaseAuditor):
     def _render_timeline(self, source_key: str, details: dict) -> None:
         """Render timeline-integrity results for one source.
 
-        Covers four states explicitly:
+        Covers five states explicitly:
         1. Normal - both containers gapless, index and wall-clock agree.
         2. Gap correction - a container has dropped/extra frame slots and
            the matcher corrected its offset using real timestamps (issue).
-        3. Timestamps unavailable - the check could not run (issue, because
+        3. Gap without effect - a container has a gap (e.g. a late-stamped
+           last frame) but every position was measured from real timestamps
+           and none needed correcting (info, not an issue).
+        4. Timestamps unavailable - the check could not run (issue, because
            the offset then rests on the unverified gapless-CFR assumption).
-        4. Inconsistent divergence - index-vs-timestamp disagreement varies
+        5. Inconsistent divergence - index-vs-timestamp disagreement varies
            across positions, suggesting a mid-file anomaly (issue).
 
         Older result payloads (pre-fix runs, e.g. replayed jobs) have none
@@ -296,6 +299,37 @@ class SlidingConfidenceAuditor(BaseAuditor):
                 f"    ✓ Timeline integrity OK (no pts gaps; frame-index "
                 f"and wall-clock agree at all {num_positions} positions)"
             )
+        elif (
+            num_positions > 0
+            and pts_based == num_positions
+            and src_ok is not None
+            and tgt_ok is not None
+        ):
+            # A gap was found, but every compared position was measured from
+            # real timestamps and none needed correcting: the offset holds.
+            for label, ok, slots, gap_s in (
+                (
+                    "Source",
+                    src_ok,
+                    details.get("timeline_src_missing_slots", 0),
+                    details.get("timeline_src_first_gap_s"),
+                ),
+                (
+                    "Target",
+                    tgt_ok,
+                    details.get("timeline_tgt_missing_slots", 0),
+                    details.get("timeline_tgt_first_gap_s"),
+                ),
+            ):
+                if ok is False:
+                    where = f" at ~{gap_s:.3f}s" if gap_s is not None else ""
+                    self.log(
+                        f"    ⓘ {source_key}: {label} has {abs(slots)} "
+                        f"{'missing' if slots > 0 else 'extra'} frame slot(s)"
+                        f"{where}; all {num_positions} positions were measured "
+                        "from real timestamps and agree, so the offset is "
+                        "unaffected"
+                    )
         else:
             self.log(
                 f"  ⚠ {source_key}: timeline integrity UNVERIFIED "

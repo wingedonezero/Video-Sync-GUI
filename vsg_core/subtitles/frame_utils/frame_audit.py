@@ -115,6 +115,9 @@ class FrameAuditResult:
     # Duration stats
     duration_unchanged: int = 0  # 0ms delta
     duration_delta_10ms: int = 0  # ±10ms
+    # ±10ms only from storing an exact Source 1 frame time (the frame snap) in
+    # centiseconds; start, end and span stay on their frames. Not an issue.
+    duration_delta_frame_time: int = 0
     duration_delta_20ms: int = 0  # ±20ms
     duration_delta_large: int = 0  # >±20ms
 
@@ -165,6 +168,19 @@ def _round_to_centisecond(ms: float, mode: str) -> int:
         return int(round(value)) * 10
     else:  # floor (default)
         return int(math.floor(value)) * 10
+
+
+def _off_centisecond_on_frames(clock: FrameGrid, *times_ms: float) -> bool:
+    """Every time not stored exactly in centiseconds sits on a frame time.
+
+    The frame snap moves a time onto Source 1's exact (whole-ms) frame time;
+    centisecond storage then shortens or lengthens the event by a few ms
+    without moving it off its frame.
+    """
+    from .frame_table import frame_at
+
+    off = [t for t in times_ms if t != math.floor(t / 10) * 10]
+    return bool(off) and all(frame_at(clock, t) is not None for t in off)
 
 
 def _find_minimal_fix(exact_ms: float, clock: FrameGrid) -> int:
@@ -296,6 +312,14 @@ def run_frame_audit(
 
         if duration_delta == 0:
             result.duration_unchanged += 1
+        elif (
+            abs(duration_delta) <= 10
+            and start_drift == 0
+            and end_drift == 0
+            and actual_span == target_span
+            and _off_centisecond_on_frames(clock, exact_start, exact_end)
+        ):
+            result.duration_delta_frame_time += 1
         elif abs(duration_delta) <= 10:
             result.duration_delta_10ms += 1
         elif abs(duration_delta) <= 20:
@@ -462,6 +486,10 @@ def write_audit_report(
         )
         lines.append(
             f"  +/-10ms:           {result.duration_delta_10ms:4d} ({100 * result.duration_delta_10ms / total:.1f}%)"
+        )
+        lines.append(
+            f"  On frame times:    {result.duration_delta_frame_time:4d} ({100 * result.duration_delta_frame_time / total:.1f}%)"
+            "  (exact frame snap; centisecond storage, frames unchanged)"
         )
         lines.append(
             f"  +/-20ms:           {result.duration_delta_20ms:4d} ({100 * result.duration_delta_20ms / total:.1f}%)"

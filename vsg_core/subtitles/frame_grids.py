@@ -16,6 +16,7 @@ VFR targets only in single-source jobs, until frame matching supports them.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -144,6 +145,15 @@ def add_grid_warning(ctx: Context, message: str, log: Log) -> None:
     ctx.frame_grid_notes.append(FrameGridNote("warning", message))
 
 
+@dataclass(frozen=True, slots=True)
+class MatchedFrames:
+    """A frame match confirmed on both real timelines: source frame k shows on
+    target frame ``k + frames`` for every source frame below ``source_end``."""
+
+    frames: int
+    source_end: int
+
+
 def matched_frame_offset(
     source: FrameTable,
     target: FrameTable,
@@ -157,6 +167,26 @@ def matched_frame_offset(
     timelines confirm it file-wide: every paired frame (k, k+R) is the same
     wall-clock distance apart, up to whole-ms storage. A hole in either video
     or a different frame rate breaks that and returns None (flat delay).
+    """
+    match = matched_frame_range(source, target, details, log, allow_tail=False)
+    return None if match is None else match.frames
+
+
+def matched_frame_range(
+    source: FrameTable,
+    target: FrameTable,
+    details: Mapping[str, Any],  # Any: sliding-matcher details dict (JSON-like)
+    log: Log,
+    *,
+    allow_tail: bool,
+) -> MatchedFrames | None:
+    """``matched_frame_offset``, optionally confirmed only up to a break.
+
+    With ``allow_tail``, paired frames that stop agreeing after every picture
+    the matcher compared (e.g. an encode whose last frame is stamped late)
+    still give the offset, valid for the source frames before the break; the
+    frames from the break on take the flat delay. A break at or before a
+    compared picture returns None, as file-wide.
     """
     if details.get("reason") != "sliding-matched":
         return None
@@ -172,13 +202,26 @@ def matched_frame_offset(
         log(f"[FrameGrid] Offset {r:+d} frames leaves no overlap - no exact snap")
         return None
     diffs = [target.times_ms[k + r] - source.times_ms[k] for k in range(lo, hi)]
-    spread = max(diffs) - min(diffs)
-    if spread > _MS_QUANTISATION_SPREAD:
+    agree = _agreeing_prefix(diffs)
+    if agree < len(diffs):
+        brk = lo + agree
+        compared_end = _compared_source_end(details)
+        if not allow_tail or compared_end is None or brk < compared_end:
+            spread = max(diffs) - min(diffs)
+            log(
+                f"[FrameGrid] Paired frames drift {spread:.1f} ms over the file at "
+                f"{r:+d} frames (hole or different frame rate) - no exact snap"
+            )
+            return None
         log(
-            f"[FrameGrid] Paired frames drift {spread:.1f} ms over the file at "
-            f"{r:+d} frames (hole or different frame rate) - no exact snap"
+            f"[FrameGrid] Paired frames at {r:+d} frames agree up to source frame "
+            f"{brk} of {source.num_frames}, after every compared picture (last "
+            f"{compared_end - 1}); source frame {brk} breaks the pairing by "
+            f"{diffs[agree] - diffs[0]:+.1f} ms - exact snap before it, flat "
+            "delay from it"
         )
-        return None
+        diffs = diffs[:agree]
+        hi = brk
     video_offset = details.get("video_offset_ms")
     if isinstance(video_offset, (int, float)):
         paired = (max(diffs) + min(diffs)) / 2
@@ -188,7 +231,27 @@ def matched_frame_offset(
                 f"the matched {video_offset:+.1f} ms - no exact snap"
             )
             return None
-    return r
+    return MatchedFrames(frames=r, source_end=hi)
+
+
+def _agreeing_prefix(diffs: list[float]) -> int:
+    """How many leading paired-frame differences stay within whole-ms storage."""
+    low = high = diffs[0]
+    for i, d in enumerate(diffs):
+        low, high = min(low, d), max(high, d)
+        if high - low > _MS_QUANTISATION_SPREAD:
+            return i
+    return len(diffs)
+
+
+def _compared_source_end(details: Mapping[str, Any]) -> int | None:
+    """One past the last source frame any matcher window compared, or None."""
+    ends = [
+        int(p["src_start"]) + int(p["total"])
+        for p in details.get("per_position_results") or []
+        if isinstance(p, Mapping) and "src_start" in p and "total" in p
+    ]
+    return max(ends) if ends else None
 
 
 def _compare_formula(table: FrameTable, clock: FrameClock) -> list[FrameGridNote]:

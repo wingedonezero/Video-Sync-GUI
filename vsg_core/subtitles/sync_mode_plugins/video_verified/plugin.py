@@ -227,7 +227,7 @@ class VideoVerifiedSync(SyncPlugin):
         if frame_shift is not None:
             log(
                 f"[VideoVerified] Exact frame snap: source frame k -> Source 1 "
-                f"frame k{frame_shift.frames:+d} (real timestamps, verified file-wide)"
+                f"frame k{frame_shift.frames:+d} (real timestamps, {frame_shift.coverage})"
             )
         events_synced = apply_delay_to_events(
             subtitle_data, final_offset_ms, frame_shift=frame_shift

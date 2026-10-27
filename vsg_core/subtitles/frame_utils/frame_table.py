@@ -155,15 +155,30 @@ class FrameShift:
     source: FrameGrid
     target: FrameGrid
     frames: int
+    # Source frames from here on take the flat delay: the pairing was confirmed
+    # only before it (a late-stamped last frame, say). None = the whole file.
+    source_end: int | None = None
 
     def shifted_ms(self, time_ms: float, flat_delay_ms: float) -> float:
         """Exact-snap ``time_ms`` when it is on a source frame, else the flat delay."""
         k = frame_at(self.source, time_ms)
-        if k is not None:
+        if k is not None and (self.source_end is None or k < self.source_end):
             dest = k + self.frames
             if _in_range(self.target, dest):
                 return float(self.target.frame_ms(dest))
         return time_ms + flat_delay_ms
+
+    @property
+    def coverage(self) -> str:
+        """Where the snap applies, for the log."""
+        total = getattr(self.source, "num_frames", None)
+        if self.source_end is None or (total is not None and self.source_end >= total):
+            return "verified file-wide"
+        of = f" of {total}" if total is not None else ""
+        return (
+            f"verified for source frames 0-{self.source_end - 1}{of}; later times "
+            "take the flat delay"
+        )
 
 
 def _in_range(grid: FrameGrid, n: int) -> bool:

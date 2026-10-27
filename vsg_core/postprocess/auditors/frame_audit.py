@@ -69,6 +69,14 @@ class FrameAuditAuditor(BaseAuditor):
                 if quantization_deltas > 0
                 else ""
             )
+            # Deltas from storing an exact frame-snap time in centiseconds:
+            # every frame of those events is checked unchanged, so not counted.
+            snapped = getattr(result, "duration_delta_frame_time", 0)
+            if snapped:
+                quant_note += (
+                    f"; {snapped} duration delta(s) ≤10ms from frame-snapped "
+                    "times (centisecond storage, frames unchanged)"
+                )
 
             has_any = start_issues + end_issues + span_issues + duration_issues > 0
 

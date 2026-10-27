@@ -247,7 +247,7 @@ def _apply_cached_video_verified(
     if frame_shift is not None:
         log(
             f"[Sync]   Exact frame snap: {source_key} frame k -> Source 1 frame "
-            f"k{frame_shift.frames:+d} (real timestamps, verified file-wide)"
+            f"k{frame_shift.frames:+d} (real timestamps, {frame_shift.coverage})"
         )
 
     # Apply the delay directly to subtitle events (like time-based mode)
