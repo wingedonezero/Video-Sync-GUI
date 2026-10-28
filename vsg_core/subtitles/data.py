@@ -18,6 +18,7 @@ import math
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
+from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1193,21 +1194,37 @@ class SubtitleData:
         return apply_size_multiplier(self, multiplier, runner)
 
     def apply_rescale(
-        self, target_resolution: tuple[int, int], runner=None
+        self,
+        target_resolution: tuple[int, int],
+        runner=None,
+        *,
+        source_dar: Fraction | None = None,
+        target_sar: Fraction = Fraction(1),
+        source_size: tuple[int, int] | None = None,
     ) -> OperationResult:
         """
         Rescale subtitle to target resolution.
 
         Args:
-            target_resolution: (width, height) tuple
+            target_resolution: Target's stored (width, height)
             runner: CommandRunner for logging
+            source_dar: Display aspect of the script's own video (None = unknown)
+            target_sar: Pixel aspect of the target's stored pixels
+            source_size: Stored size of the script's own video (None = unknown)
 
         Returns:
             OperationResult
         """
         from .operations.style_ops import apply_rescale
 
-        return apply_rescale(self, target_resolution, runner)
+        return apply_rescale(
+            self,
+            target_resolution,
+            runner,
+            source_dar=source_dar,
+            target_sar=target_sar,
+            source_size=source_size,
+        )
 
     def filter_by_styles(
         self,
