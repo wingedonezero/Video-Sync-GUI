@@ -240,3 +240,22 @@ def test_font_sizes_stay_exact() -> None:
     data.styles["Default"].fontsize = 35.0
     apply_rescale(data, (1920, 1080), source_dar=Fraction(16, 9))
     assert data.styles["Default"].fontsize == 52.5
+
+
+def test_karaoke_template_lines_are_left_as_written() -> None:
+    template = "{\\pos($x,500)\\blur2\\fs!syl.height*2!}"
+    data = _data((1280, 720), template, template, template)
+    data.events[0].is_comment = True
+    data.events[0].effect = "template syl noblank"
+    data.events[0].margin_v = 20
+    data.events[1].is_comment = True
+    data.events[1].effect = "karaoke"  # the karaoke source line is resampled
+    data.events[2].effect = "fx"  # generated line, shown on screen
+    apply_rescale(data, (1920, 1080), source_dar=Fraction(16, 9))
+    assert data.events[0].text == template
+    assert data.events[0].margin_v == 20
+    assert (
+        data.events[1].text
+        == data.events[2].text
+        == ("{\\pos($x,750)\\blur2\\fs!syl.height*2!}")
+    )

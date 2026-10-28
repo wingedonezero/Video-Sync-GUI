@@ -797,6 +797,13 @@ def apply_rescale(
     # Scale event margins and inline override tags
     events_affected = 0
     for event in data.events:
+        # Karaoke template / code lines are generator source, never shown:
+        # left as written, like Aegisub. Scaling them would scale plain
+        # numbers but not ones inside !lua! expressions, so a re-applied
+        # template would come out half converted.
+        if event.is_comment and event.effect.lower().startswith(("template", "code")):
+            continue
+
         # Event margins: 0 means "use the style's", so only set ones move
         if event.margin_l != 0:
             event.margin_l = int(event.margin_l * geom.scale_x + geom.offset_x + 0.5)
