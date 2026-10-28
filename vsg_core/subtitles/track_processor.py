@@ -15,7 +15,10 @@ All operations modify SubtitleData in place and return OperationResult.
 
 from __future__ import annotations
 
+import json
 import math
+from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -369,9 +372,16 @@ def process_subtitle_track(
     # Rescale
     if item.rescale and source1_file:
         runner._log_message("[SubtitleData] Applying rescale...")
-        target_res = _get_video_resolution(source1_file, runner, ctx)
-        if target_res:
-            result = subtitle_data.apply_rescale(target_res, runner)
+        target = _probe_picture(source1_file, runner, ctx)
+        if target:
+            source = _subtitle_source_picture(item, ctx, runner)
+            result = subtitle_data.apply_rescale(
+                (target.width, target.height),
+                runner,
+                source_dar=source.dar if source else None,
+                target_sar=target.sar,
+                source_size=(source.width, source.height) if source else None,
+            )
             if result.success:
                 runner._log_message(f"[SubtitleData] Rescale: {result.summary}")
 
@@ -550,17 +560,69 @@ def process_subtitle_track(
     )
 
 
-def _get_video_resolution(video_path: Path, runner, ctx) -> tuple | None:
-    """Get video resolution for rescaling."""
-    try:
-        from vsg_core.subtitles.frame_utils import get_video_properties
+@dataclass(frozen=True, slots=True)
+class _Picture:
+    """A video's stored size and the pixel aspect players show it with."""
 
-        props = get_video_properties(str(video_path), runner, ctx.tool_paths)
-        if props:
-            return (props.get("width", 1920), props.get("height", 1080))
-    except Exception as e:
-        runner._log_message(f"[Rescale] WARNING: Could not get video resolution: {e}")
-    return None
+    width: int
+    height: int
+    sar: Fraction
+
+    @property
+    def dar(self) -> Fraction:
+        return Fraction(self.width, self.height) * self.sar
+
+
+def _probe_picture(
+    video_path: Path, runner, ctx, *, warn: bool = True
+) -> _Picture | None:
+    """Stored size and pixel aspect of the first video stream (ffprobe).
+
+    For MKV, ffprobe derives the pixel aspect from the track's display
+    dimensions, the values players use. A missing or 0:1 aspect means
+    square pixels.
+    """
+    out = runner.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,sample_aspect_ratio",
+            "-of",
+            "json",
+            str(video_path),
+        ],
+        ctx.tool_paths,
+    )
+    try:
+        stream = json.loads(out or "{}")["streams"][0]
+        width, height = int(stream["width"]), int(stream["height"])
+    except (ValueError, KeyError, IndexError, TypeError):
+        if warn:
+            runner._log_message(
+                f"[Rescale] WARNING: Could not probe video {video_path}"
+            )
+        return None
+    sar = Fraction(1)
+    num, _, den = str(stream.get("sample_aspect_ratio", "")).partition(":")
+    if num.isdigit() and den.isdigit() and int(num) > 0 and int(den) > 0:
+        sar = Fraction(int(num), int(den))
+    return _Picture(width=width, height=height, sar=sar)
+
+
+def _subtitle_source_picture(item, ctx: Context, runner) -> _Picture | None:
+    """The picture the subtitle was made for: its own source file's video.
+
+    None for external files or sources without video; the rescale then takes
+    the script's PlayRes as square pixels, as it always has.
+    """
+    source_file = ctx.sources.get(item.track.source)
+    if not source_file:
+        return None
+    return _probe_picture(Path(source_file), runner, ctx, warn=False)
 
 
 def _get_ocr_debug_dir(item, ctx: Context) -> Path | None:

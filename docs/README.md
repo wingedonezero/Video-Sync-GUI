@@ -479,7 +479,7 @@ We merge the **extracted record** with the **UI options** (rule):
 
 For each plan item of type **subtitles**:
 - **Convert SRT→ASS** (ffmpeg) if requested (and only for SRT). Path is updated to the `.ass` file.
-- **Rescale** ASS/SSA to REF video resolution: we probe REF via `ffprobe` and rewrite `PlayResX/PlayResY`. If the subtitle lacks PlayRes tags, we log and skip.
+- **Rescale** ASS/SSA to REF video resolution, matched by displayed picture shape (see §9.2).
 - **Size multiplier**: see §9 for robust parsing and rewrite of `Style: ... ,Fontsize, ...` lines.
 
 #### 8.5 Attachments & chapters (`mkv_utils.extract_attachments`, `process_chapters`)
@@ -532,8 +532,13 @@ On success we log `Output file created: <output_dir>/<ref_filename>`.
 - If `out.ass` fails to materialize, we keep original `.srt` and log a warning.
 
 ### 9.2 Rescale to video resolution
-- We probe REF video width/height with `ffprobe`, then rewrite `PlayResX:` and `PlayResY:` exact values within the ASS/SSA header.  
-- If `PlayResX/Y` tags are absent, we log “no tags” and skip (we do not inject a brand-new header to avoid header corruption).
+Aegisub's resolution resampler, with the aspect mode chosen from the videos (`style_ops.rescale_geometry`):
+- We probe the REF video's stored size and pixel aspect, and the subtitle's own source video (its display shape), with `ffprobe`. External files / sources without video: PlayRes is taken as square pixels.
+- Pictures are matched by **displayed** shape, exactly (fractions). Same shape → plain scale; different shape → "Add borders": the border goes into positions, clips **and** margins. Font sizes (kept fractional, not rounded as Aegisub does), script-pixel outlines and spacing follow the vertical factor.
+- When a pixel aspect differs (anamorphic DVD as source or target), style ScaleX and inline `\fscx` take the correction so glyphs keep their shape, and drawings are divided by it.
+- `\blur`, `\be`, borders/shadows when `ScaledBorderAndShadow` is off (or missing), and the `\frx`/`\fry` camera distance are in **LayoutRes pixels** (the video's stored pixels when the script has none). The rescale keeps that unit the same relative to the text, as Aegisub does: the target LayoutRes has the source's unit height (plus any top/bottom border) and PlayRes's shape, and those tags stay unscaled. It is written when the script had one, when the target is anamorphic (libass then takes the glyph aspect from it, so mpv, Kodi, Jellyfin and ffmpeg burn-in all agree), or when it differs from the target's stored size (libass's fallback).
+- Each job logs the decision on one `[Rescale]` line. `\fs+N`/`\fs-N` are relative steps and are left alone. `Scroll up/down` and `Banner` effect positions and speeds are scaled (rounded, as renderers read integers).
+- A tag missing its `)` ends at the end of its `{...}` block, as libass reads it. Karaoke `template`/`code` comment lines are left as written (Aegisub). No PlayRes in the script: we just set it to the REF size.
 
 ### 9.3 Font size multiplier
 We read the ASS/SSA file (`utf-8-sig` to absorb BOM if any), then **line-by-line** transform:
