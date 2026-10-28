@@ -6,11 +6,13 @@ from typing import TYPE_CHECKING, Any
 
 from lxml import etree as ET
 
-from ..io.runner import CommandRunner
 from .keyframes import probe_duration_ns, probe_keyframes_ns
 
 if TYPE_CHECKING:
     from vsg_core.models import AppSettings
+
+    from ..io.runner import CommandRunner
+    from .keyframes import KeyframeTimes
 
 
 def _parse_ns(t: str) -> int:
@@ -389,10 +391,10 @@ def process_chapters(
         # This ensures chapters land on actual keyframes in the final muxed file
         # (Video gets container delay, so keyframe at video_time X = container_time X + shift)
         if settings.snap_chapters:
-            keyframes_ns = probe_keyframes_ns(keyframe_source, runner, tool_paths)
-            if keyframes_ns:
+            keyframes = probe_keyframes_ns(keyframe_source, runner, tool_paths)
+            if keyframes is not None:
                 _snap_chapter_times_inplace(
-                    root, keyframes_ns, settings, runner, nsmap, prefix
+                    root, keyframes, settings, runner, nsmap, prefix
                 )
             else:
                 runner._log_message(
@@ -480,7 +482,7 @@ def process_chapters(
 
 def _snap_chapter_times_inplace(
     root,
-    keyframes_ns: list[int],
+    keyframes: KeyframeTimes,
     settings: AppSettings,
     runner: CommandRunner,
     nsmap: dict,
@@ -493,11 +495,26 @@ def _snap_chapter_times_inplace(
     threshold_ms = settings.snap_threshold_ms
     starts_only = settings.snap_starts_only
     threshold_ns = threshold_ms * 1_000_000
+    keyframes_ns = keyframes.times_ns
+    keyframe_set = set(keyframes_ns)
     moved, on_kf, too_far = 0, 0, 0
 
     runner._log_message(
         f"[Chapters] Snapping with mode={mode}, threshold={threshold_ms}ms..."
     )
+
+    def stored_keyframe(ts_ns: int) -> bool:
+        """The file stores this exact time as a keyframe's timestamp.
+
+        Chapters keep full ns while the video's timestamps are rounded (half
+        up) to the stream's unit, so a chapter on a keyframe's exact frame
+        time differs from the stored value by under half a unit. Same frame:
+        keep the chapter's exact time rather than overwrite it.
+        """
+        unit = keyframes.unit_ns
+        if unit is None:
+            return ts_ns in keyframe_set
+        return (ts_ns + unit // 2) // unit * unit in keyframe_set
 
     def pick_candidate(ts_ns: int) -> int:
         if not keyframes_ns:
@@ -530,7 +547,11 @@ def _snap_chapter_times_inplace(
             node = atom.find(f"{prefix}{tag}", namespaces=nsmap)
             if node is not None and node.text:
                 original_ns = _parse_ns(node.text)
-                candidate_ns = pick_candidate(original_ns)
+                candidate_ns = (
+                    original_ns
+                    if stored_keyframe(original_ns)
+                    else pick_candidate(original_ns)
+                )
                 delta_ns = candidate_ns - original_ns  # Keep sign for direction
                 abs_delta_ns = abs(delta_ns)
 

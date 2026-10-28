@@ -1,11 +1,25 @@
 import json
+from dataclasses import dataclass
 
 from ..io.runner import CommandRunner
 
 
+@dataclass(frozen=True, slots=True)
+class KeyframeTimes:
+    """Keyframe times as the file stores them, plus the unit it stores them in.
+
+    ``unit_ns`` is the stream's time base in ns (1,000,000 for an MKV with the
+    default 1 ms timestamp scale), or None when the time base is not a whole
+    number of ns.
+    """
+
+    times_ns: list[int]
+    unit_ns: int | None
+
+
 def probe_keyframes_ns(
     ref_video_path: str, runner: CommandRunner, tool_paths: dict
-) -> list[int]:
+) -> KeyframeTimes | None:
     args = [
         "ffprobe",
         "-v",
@@ -13,7 +27,7 @@ def probe_keyframes_ns(
         "-select_streams",
         "v:0",
         "-show_entries",
-        "packet=pts_time,flags",
+        "packet=pts,flags:stream=time_base",
         "-of",
         "json",
         str(ref_video_path),
@@ -21,20 +35,23 @@ def probe_keyframes_ns(
     out = runner.run(args, tool_paths)
     if not out:
         runner._log_message("[WARN] ffprobe for keyframes produced no output.")
-        return []
+        return None
     try:
         data = json.loads(out)
-        kfs_ns = [
-            int(round(float(p["pts_time"]) * 1_000_000_000))
+        num, den = (int(x) for x in data["streams"][0]["time_base"].split("/"))
+        kfs_ns = sorted(
+            (int(p["pts"]) * num * 1_000_000_000 + den // 2) // den
             for p in data.get("packets", [])
-            if "pts_time" in p and "K" in p.get("flags", "")
-        ]
-        kfs_ns.sort()
+            if p.get("pts") is not None and "K" in p.get("flags", "")
+        )
+        unit_ns = (
+            num * 1_000_000_000 // den if (num * 1_000_000_000) % den == 0 else None
+        )
         runner._log_message(f"[Chapters] Found {len(kfs_ns)} keyframes for snapping.")
-        return kfs_ns
+        return KeyframeTimes(times_ns=kfs_ns, unit_ns=unit_ns) if kfs_ns else None
     except Exception as e:
         runner._log_message(f"[WARN] Could not parse ffprobe keyframe JSON: {e}")
-        return []
+        return None
 
 
 def probe_duration_ns(
