@@ -22,6 +22,7 @@ from .language_tags import LanguageTagsAuditor
 from .sliding_confidence import SlidingConfidenceAuditor
 from .stepping_correction import SteppingCorrectionAuditor
 from .stepping_separated import SteppingSeparatedAuditor
+from .subtitle_bars import SubtitleBarsAuditor
 from .subtitle_clamping import SubtitleClampingAuditor
 from .subtitle_duration import SubtitleDurationAuditor
 from .subtitle_formats import SubtitleFormatsAuditor
@@ -54,6 +55,7 @@ __all__ = [
     "SlidingConfidenceAuditor",
     "SteppingCorrectionAuditor",
     "SteppingSeparatedAuditor",
+    "SubtitleBarsAuditor",
     "SubtitleClampingAuditor",
     "SubtitleDurationAuditor",
     "SubtitleFormatsAuditor",

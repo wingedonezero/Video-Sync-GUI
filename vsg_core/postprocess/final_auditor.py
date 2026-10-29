@@ -38,6 +38,7 @@ from .auditors import (
     SlidingConfidenceAuditor,
     SteppingCorrectionAuditor,
     SteppingSeparatedAuditor,
+    SubtitleBarsAuditor,
     SubtitleClampingAuditor,
     SubtitleDurationAuditor,
     SubtitleFormatsAuditor,
@@ -218,6 +219,7 @@ class FinalAuditor:
             ("Audio Duration vs Video", AudioDurationAuditor, True),
             ("Subtitle Duration vs Video", SubtitleDurationAuditor, False),
             ("Subtitle Formats", SubtitleFormatsAuditor, False),
+            ("Rescaled Subtitles vs Black Bars", SubtitleBarsAuditor, True),
             (
                 "Sliding-Window Verification Confidence",
                 SlidingConfidenceAuditor,

@@ -40,6 +40,10 @@ class PlanItem:
     apply_track_name: bool = False
     convert_to_ass: bool = False
     rescale: bool = False
+    # Set when the rescale added black bars (>= 1 px): the subtitle source's
+    # picture as (x0, y0, x1, y1) in Source 1's stored pixels. Read by the
+    # final audit's black-bar checks; nothing else uses it.
+    rescale_picture: tuple[float, float, float, float] | None = None
     size_multiplier: float = 1.0
     style_patch: StylePatch | None = None
     font_replacements: FontReplacements | None = (
