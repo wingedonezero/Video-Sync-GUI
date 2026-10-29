@@ -384,6 +384,9 @@ def process_subtitle_track(
             )
             if result.success:
                 runner._log_message(f"[SubtitleData] Rescale: {result.summary}")
+                item.rescale_picture = _picture_area(
+                    result.details, target.width, target.height
+                )
 
     # Size multiplier
     size_mult = float(item.size_multiplier) if hasattr(item, "size_multiplier") else 1.0
@@ -611,6 +614,23 @@ def _probe_picture(
     if num.isdigit() and den.isdigit() and int(num) > 0 and int(den) > 0:
         sar = Fraction(int(num), int(den))
     return _Picture(width=width, height=height, sar=sar)
+
+
+def _picture_area(
+    details: dict[str, Any] | None, width: int, height: int
+) -> tuple[float, float, float, float] | None:
+    """Where the subtitle source's picture sits on Source 1, if bars were added.
+
+    Only bars of at least one whole pixel count: a thinner one (an anamorphic
+    rounding) can't show anything.
+    """
+    if not details:
+        return None
+    ox = float(details.get("offset_x", 0.0))
+    oy = float(details.get("offset_y", 0.0))
+    if ox < 1.0 and oy < 1.0:
+        return None
+    return (ox, oy, width - ox, height - oy)
 
 
 def _subtitle_source_picture(item, ctx: Context, runner) -> _Picture | None:

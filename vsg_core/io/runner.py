@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from pathlib import Path
 
     from vsg_core.models import AppSettings
 
@@ -49,6 +50,7 @@ class CommandRunner:
         cmd: list[str],
         tool_paths: dict,
         chunk_bytes: int = 1 << 22,
+        cwd: Path | None = None,
     ) -> Iterator[bytes]:
         """Run ``cmd`` and yield its stdout in chunks, without holding it all.
 
@@ -56,6 +58,8 @@ class CommandRunner:
         goes to a temp file so a chatty tool can never block the pipe. Raises
         RuntimeError (after logging the stderr tail) if the command fails; its
         message carries the first stderr line, usually the root cause.
+        ``cwd`` lets a command name its files relatively (ffmpeg filter
+        arguments can't carry arbitrary paths without fragile escaping).
         """
         resolved = tool_paths.get(cmd[0]) or cmd[0]
         full_cmd = [resolved, *list(map(str, cmd[1:]))]
@@ -66,6 +70,7 @@ class CommandRunner:
                 stdout=subprocess.PIPE,
                 stderr=err,
                 env=get_subprocess_environment(),
+                cwd=cwd,
             )
             assert proc.stdout is not None
             try:
