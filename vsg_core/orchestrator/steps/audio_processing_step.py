@@ -690,6 +690,7 @@ class AudioProcessingStep:
             residual_ns=bake.residual_ns,
             output_samples=res.expected.output_samples,
             sample_rate=fmt.sample_rate,
+            channels=fmt.channels,
             channel_layout=fmt.channel_layout or "",
             native_layout=res.native_layout,
         )
@@ -873,6 +874,7 @@ class AudioProcessingStep:
             samples_trimmed_end=trimmed_end,
             output_samples=res.expected.output_samples,
             sample_rate=rate,
+            channels=res.fmt.channels,
             channel_layout=res.fmt.channel_layout or "",
             native_layout=res.native_layout,
         )

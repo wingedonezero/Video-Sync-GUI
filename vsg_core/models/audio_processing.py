@@ -39,6 +39,7 @@ class AudioProcessingResult:
     residual_ns: float = 0.0
     output_samples: int = 0
     sample_rate: int = 0
+    channels: int = 0
     channel_layout: str = ""
     native_layout: bool = True
     problems: tuple[str, ...] = ()

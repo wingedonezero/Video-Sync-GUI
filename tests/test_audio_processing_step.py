@@ -21,6 +21,7 @@ from vsg_core.audio_processing.verify import read_streaminfo
 from vsg_core.correction.stepping import AudioSegment
 from vsg_core.correction.stepping.edit_plan import edl_to_edits, render_edits
 from vsg_core.io.runner import CommandRunner
+from vsg_core.models.audio_processing import AudioProcessingResult
 from vsg_core.models.jobs import Delays, MergePlan, PlanItem
 from vsg_core.models.media import StreamProps, Track
 from vsg_core.models.settings import AppSettings
@@ -38,6 +39,7 @@ from vsg_core.postprocess.auditors import (
     AudioPassthroughAuditor,
     AudioSyncAuditor,
     DriftCorrectionAuditor,
+    FlacConversionAuditor,
 )
 
 if TYPE_CHECKING:
@@ -659,6 +661,47 @@ def test_audit_reports_passthrough_failures_and_caveats(tmp_path: Path) -> None:
     assert auditor.run(tmp_path / "out.mkv", {}) == 2
     assert [i.severity for i in auditor.issues] == ["warning", "warning"]
     assert "Opus is muxed with lacing" in auditor.issues[1].message
+
+
+def test_audit_flags_flac_layouts_that_need_a_listen(tmp_path: Path) -> None:
+    def flac(
+        label: str, channels: int, layout: str, native: bool
+    ) -> AudioProcessingResult:
+        return AudioProcessingResult(
+            label,
+            "flac",
+            "A_TRUEHD",
+            True,
+            "converted",
+            channels=channels,
+            channel_layout=layout,
+            native_layout=native,
+        )
+
+    ctx = _ctx(tmp_path, [], raw_delay_ms=0.0)
+    ctx.audio_processing_results.extend(
+        [
+            flac("Source 1 audio track 1", 2, "", True),  # PCM stereo from WAV: fine
+            flac("Source 1 audio track 2", 6, "5.1(side)", True),
+            flac("Source 2 audio track 1", 8, "7.1(wide)", False),
+            flac("Source 2 audio track 2", 6, "", True),
+            AudioProcessingResult(  # failed conversions kept the original: not ours
+                "Source 3 audio track 1",
+                "flac",
+                "A_DTS",
+                False,
+                "failed",
+                channels=8,
+                channel_layout="7.1(wide)",
+                native_layout=False,
+            ),
+        ]
+    )
+    auditor = FlacConversionAuditor(ctx, CommandRunner(AppSettings(), lambda _m: None))
+    assert auditor.run(tmp_path / "out.mkv", {}) == 2
+    wide, unnamed = (i.message for i in auditor.issues)
+    assert wide.startswith("Source 2 audio track 1") and "7.1(wide)" in wide
+    assert unnamed.startswith("Source 2 audio track 2") and "6 channels" in unnamed
 
 
 def test_audit_flags_tracks_offset_from_the_correlated_one(tmp_path: Path) -> None:
