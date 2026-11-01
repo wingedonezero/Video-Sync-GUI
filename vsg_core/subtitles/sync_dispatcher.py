@@ -241,7 +241,9 @@ def _apply_cached_video_verified(
         cached.get("details") or {},
         global_shift_ms,
         log,
-        lambda msg: add_grid_warning(ctx, f"{source_key}: {msg}", log),
+        lambda msg: add_grid_warning(
+            ctx, f"{source_key}: {msg}", log, label="Frame grid"
+        ),
         fallback=bool(cached.get("fallback")),
     )
     if frame_shift is not None:

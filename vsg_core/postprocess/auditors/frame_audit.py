@@ -30,9 +30,9 @@ class FrameAuditAuditor(BaseAuditor):
         """
         for note in self.ctx.frame_grid_notes:
             if note.severity == "warning":
-                self._report(f"Source 1 frame grid: {note.message}")
+                self._report(f"{note.label}: {note.message}")
             else:
-                self.log(f"[INFO] Source 1 frame grid: {note.message}")
+                self.log(f"[INFO] {note.label}: {note.message}")
 
         if not self.ctx.frame_audit_results:
             self.log("[INFO] No frame audit results available - skipping")

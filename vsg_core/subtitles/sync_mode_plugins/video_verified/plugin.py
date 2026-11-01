@@ -221,7 +221,9 @@ class VideoVerifiedSync(SyncPlugin):
             global_shift_ms,
             log,
             lambda msg: (
-                add_grid_warning(ctx, msg, log) if ctx is not None else log(msg)
+                add_grid_warning(ctx, msg, log, label="Frame grid")
+                if ctx is not None
+                else log(msg)
             ),
         )
         if frame_shift is not None:
