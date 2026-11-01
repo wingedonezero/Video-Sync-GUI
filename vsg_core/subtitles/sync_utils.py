@@ -37,7 +37,10 @@ def build_frame_shift(
     with the measured wall-clock offset) - file-wide, or up to a break that
     comes after every picture the matcher compared, past which times take the
     flat delay. Different start offsets are fine — frames are paired by index,
-    so each snap lands on the real target frame time. Anything else returns None and events take the flat
+    so each snap lands on the real target frame time. Paired times that creep
+    (same pictures, one file stamped with a slightly different clock) are
+    accepted too, mapped frame by frame for every time, and reported through
+    ``warn``. Anything else returns None and events take the flat
     millisecond delay exactly as before. Shared by the cached dispatcher path
     and the inline plugin path. ``load_source`` reads the source video's frame
     timestamps; it is only called once the cheap gates pass.
@@ -64,11 +67,24 @@ def build_frame_shift(
         return _formula_frame_shift(
             target_clock, details, log, warn, "the source's real frame times unreadable"
         )
-    match = matched_frame_range(source, target, details, log, allow_tail=True)
+    match = matched_frame_range(
+        source, target, details, log, allow_tail=True, allow_creep=True
+    )
     if match is None:
         return None
+    if match.creep_ms:
+        warn(
+            f"frame times creep {match.creep_ms:.1f} ms against Source 1 at "
+            f"{match.frames:+d} frames (the same pictures in the same order, both "
+            f"declared at the same rate, but one file's timestamps follow a slightly "
+            f"different clock) - subtitles were mapped frame by frame; check them"
+        )
     return FrameShift(
-        source=source, target=target, frames=match.frames, source_end=match.source_end
+        source=source,
+        target=target,
+        frames=match.frames,
+        source_end=match.source_end,
+        per_frame=match.creep_ms > 0,
     )
 
 
