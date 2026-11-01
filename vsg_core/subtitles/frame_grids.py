@@ -138,12 +138,18 @@ def source1_frame_table(
     return table
 
 
-def add_grid_warning(ctx: Context, message: str, log: Log) -> None:
-    """Record a frame-grid fallback for the final audit (once per message)."""
+def add_grid_warning(
+    ctx: Context, message: str, log: Log, *, label: str = "Source 1 frame grid"
+) -> None:
+    """Record a frame-grid fallback for the final audit (once per message).
+
+    ``label`` heads it there: the default for Source 1's own timeline,
+    "Frame grid" for a source's frames paired with Source 1's.
+    """
     if any(n.message == message for n in ctx.frame_grid_notes):
         return
     log(f"[FrameGrid] ⚠ {message}")
-    ctx.frame_grid_notes.append(FrameGridNote("warning", message))
+    ctx.frame_grid_notes.append(FrameGridNote("warning", message, label))
 
 
 @dataclass(frozen=True, slots=True)

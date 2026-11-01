@@ -447,3 +447,22 @@ def test_same_clock_files_are_unchanged():
 def test_bitmap_path_does_not_accept_clock_creep():
     source, target = _episode()
     assert fg.matched_frame_offset(source, target, _creep_details(), _no_log) is None
+
+
+def test_final_audit_labels_pair_warnings_apart_from_source1_ones():
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.models.settings import AppSettings
+    from vsg_core.postprocess.auditors import FrameAuditAuditor
+
+    ctx = SimpleNamespace(frame_grid_notes=[], frame_audit_results={}, tool_paths={})
+    c = cast("Context", ctx)
+    fg.add_grid_warning(c, "Could not read Source 1's real frame times", _no_log)
+    fg.add_grid_warning(
+        c, "Source 2: frame times creep 2.0 ms", _no_log, label="Frame grid"
+    )
+    auditor = FrameAuditAuditor(c, CommandRunner(AppSettings(), _no_log))
+    auditor.run(fg.Path("out.mkv"), {})
+    assert [i.message for i in auditor.issues] == [
+        "Source 1 frame grid: Could not read Source 1's real frame times",
+        "Frame grid: Source 2: frame times creep 2.0 ms",
+    ]

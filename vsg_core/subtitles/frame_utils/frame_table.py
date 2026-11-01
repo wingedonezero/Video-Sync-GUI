@@ -307,10 +307,12 @@ def check_timeline(table: FrameTable) -> TimelineCheck:
 
 @dataclass(frozen=True, slots=True)
 class FrameGridNote:
-    """A finding about Source 1's frame grid, surfaced in the final audit."""
+    """A frame-grid finding, surfaced in the final audit under ``label``:
+    Source 1's own timeline, or a source paired with it ("Frame grid")."""
 
     severity: Literal["info", "warning"]
     message: str
+    label: str = "Source 1 frame grid"
 
 
 # ── Building from the ffms2 index ────────────────────────────────────────────
