@@ -404,8 +404,8 @@ def _run_frame_audit_if_enabled(
             report_path = write_audit_report(result, config_dir, runner._log_message)
             runner._log_message(f"[FrameAudit] Report saved: {report_path}")
 
-        # Log summary (always)
-        total = result.total_events
+        # Log summary (always); comment lines are not audited, so not counted
+        total = result.audited_events
         if total > 0:
             start_pct = 100 * result.start_ok / total
             end_pct = 100 * result.end_ok / total

@@ -16,6 +16,8 @@ class FlacConversionAuditor(BaseAuditor):
     def run(
         self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None
     ) -> int:
+        self._report_layouts()
+
         converted_items = [
             item for item in (self.ctx.extracted_items or []) if item.flac_converted
         ]
@@ -25,8 +27,9 @@ class FlacConversionAuditor(BaseAuditor):
             or self.ctx.flac_conversion_failures
             or self.ctx.flac_conversion_skips
         ):
-            self.log("No FLAC conversions were requested for this job.")
-            return 0
+            if not self.issues:
+                self.log("No FLAC conversions were requested for this job.")
+            return len(self.issues)
 
         for entry in self.ctx.flac_conversion_failures:
             self._report(f"FLAC conversion failed (original track kept): {entry}")
@@ -62,3 +65,30 @@ class FlacConversionAuditor(BaseAuditor):
             self.log("✅ FLAC conversion audit clean.")
 
         return len(self.issues)
+
+    def _report_layouts(self) -> None:
+        """Flag FLACs written with a layout outside FLAC's own channel orders.
+
+        The audio is still stored exactly (the layout is pinned and read back),
+        but a non-native layout lives only in a channel-mask tag, and an unnamed
+        source gets FLAC's default order for its channel count - both worth a
+        listen before trusting the speaker mapping. Unnamed mono / stereo (PCM
+        extracted to WAV reads as unnamed) has only one possible order.
+        """
+        for r in self.ctx.audio_processing_results:
+            if r.route not in ("flac", "corrected") or not r.ok:
+                continue
+            if not r.channel_layout:
+                if r.channels > 2:
+                    self._report(
+                        f"{r.label}: the source names no layout for its "
+                        f"{r.channels} channels; the FLAC uses FLAC's default "
+                        f"{r.channels}-channel order - check each channel plays "
+                        f"from the right speaker"
+                    )
+            elif not r.native_layout:
+                self._report(
+                    f"{r.label}: converted to FLAC with a non-native channel "
+                    f"layout ({r.channel_layout}) - stored with a channel-mask "
+                    f"tag; players that ignore it assume FLAC's default order"
+                )
