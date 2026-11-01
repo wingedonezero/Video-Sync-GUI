@@ -158,20 +158,56 @@ class FrameShift:
     # Source frames from here on take the flat delay: the pairing was confirmed
     # only before it (a late-stamped last frame, say). None = the whole file.
     source_end: int | None = None
+    # The two clocks creep against each other (same pictures, one file stamped
+    # with a slightly different clock): one flat delay is then up to the creep
+    # wrong, so times between frames are also moved frame by frame.
+    per_frame: bool = False
 
     def shifted_ms(self, time_ms: float, flat_delay_ms: float) -> float:
-        """Exact-snap ``time_ms`` when it is on a source frame, else the flat delay."""
+        """Exact-snap ``time_ms`` when it is on a source frame, else the flat delay
+        (or, with ``per_frame``, the delay of the frame it shows from)."""
         k = frame_at(self.source, time_ms)
-        if k is not None and (self.source_end is None or k < self.source_end):
+        if k is not None and self._covers(k):
             dest = k + self.frames
             if _in_range(self.target, dest):
                 return float(self.target.frame_ms(dest))
+        if self.per_frame:
+            moved = self._between_frames(time_ms)
+            if moved is not None:
+                return moved
         return time_ms + flat_delay_ms
+
+    def _covers(self, k: int) -> bool:
+        return self.source_end is None or k < self.source_end
+
+    def _between_frames(self, time_ms: float) -> float | None:
+        """A time inside the video, between two source frames, moved by the
+        paired delay of the frame it shows from, so it shows from the paired
+        target frame. None (flat delay) before the first or after the last frame.
+        """
+        k = self.source.frame_of(time_ms)  # the first frame showing it
+        dest = k + self.frames
+        if not (
+            k >= 1
+            and _in_range(self.source, k)
+            and self._covers(k)
+            and _in_range(self.target, dest - 1)
+            and _in_range(self.target, dest)
+        ):
+            return None
+        moved = time_ms + self.target.frame_ms(dest) - self.source.frame_ms(k)
+        # Neighbouring frames' delays differ by up to 1 ms here, which can put
+        # a time just after the previous frame onto it: then the frame's start.
+        if self.target.frame_of(moved) != dest:
+            return float(self.target.frame_ms(dest))
+        return moved
 
     @property
     def coverage(self) -> str:
         """Where the snap applies, for the log."""
         total = getattr(self.source, "num_frames", None)
+        if self.per_frame:
+            return "verified file-wide; clocks creep, every time mapped frame by frame"
         if self.source_end is None or (total is not None and self.source_end >= total):
             return "verified file-wide"
         of = f" of {total}" if total is not None else ""

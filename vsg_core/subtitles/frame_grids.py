@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -148,10 +149,15 @@ def add_grid_warning(ctx: Context, message: str, log: Log) -> None:
 @dataclass(frozen=True, slots=True)
 class MatchedFrames:
     """A frame match confirmed on both real timelines: source frame k shows on
-    target frame ``k + frames`` for every source frame below ``source_end``."""
+    target frame ``k + frames`` for every source frame below ``source_end``.
+
+    ``creep_ms`` > 0: the pairing was accepted as clock creep (see
+    ``_clock_creep``) - the same pictures, but the paired times drift by that
+    much, so times must be mapped frame by frame, not by one delay."""
 
     frames: int
     source_end: int
+    creep_ms: float = 0.0
 
 
 def matched_frame_offset(
@@ -179,6 +185,7 @@ def matched_frame_range(
     log: Log,
     *,
     allow_tail: bool,
+    allow_creep: bool = False,
 ) -> MatchedFrames | None:
     """``matched_frame_offset``, optionally confirmed only up to a break.
 
@@ -187,6 +194,10 @@ def matched_frame_range(
     still give the offset, valid for the source frames before the break; the
     frames from the break on take the flat delay. A break at or before a
     compared picture returns None, as file-wide.
+
+    With ``allow_creep``, paired times that drift smoothly instead of holding
+    still are accepted when ``_clock_creep`` proves it is the same pictures on a
+    slightly different clock; the result then carries ``creep_ms``.
     """
     if details.get("reason") != "sliding-matched":
         return None
@@ -203,6 +214,16 @@ def matched_frame_range(
         return None
     diffs = [target.times_ms[k + r] - source.times_ms[k] for k in range(lo, hi)]
     agree = _agreeing_prefix(diffs)
+    creep_ms = 0.0
+    if agree < len(diffs) and allow_creep and _clock_creep(diffs, details, target):
+        creep_ms = max(diffs) - min(diffs)
+        log(
+            f"[FrameGrid] Paired frames at {r:+d} frames creep {creep_ms:.1f} ms over "
+            "the file, smoothly (never more than whole-ms storage from one frame "
+            "to the next, both declared at the same rate): the same pictures on a "
+            "slightly different clock - mapped frame by frame"
+        )
+        agree = len(diffs)
     if agree < len(diffs):
         brk = lo + agree
         compared_end = _compared_source_end(details)
@@ -231,7 +252,31 @@ def matched_frame_range(
                 f"the matched {video_offset:+.1f} ms - no exact snap"
             )
             return None
-    return MatchedFrames(frames=r, source_end=hi)
+    return MatchedFrames(frames=r, source_end=hi, creep_ms=creep_ms)
+
+
+def _clock_creep(
+    diffs: list[float],
+    details: Mapping[str, Any],  # Any: sliding-matcher details dict (JSON-like)
+    target: FrameTable,
+) -> bool:
+    """Paired times that drift only because one file was stamped with a slightly
+    different clock (e.g. exactly 23.976 for a 24000/1001 stream).
+
+    All three must hold:
+    - both videos declare the same frame rate (a real rate difference - PAL,
+      telecine - is a different video, not a clock);
+    - no step between neighbouring pairs exceeds whole-ms storage (a missing
+      or duplicated frame jumps by a whole frame);
+    - the whole drift stays under half a frame, so pairing by frame number and
+      pairing by time pick the same picture everywhere.
+    """
+    src_fps, tgt_fps = details.get("source_fps"), details.get("target_fps")
+    if not isinstance(src_fps, (int, float)) or src_fps != tgt_fps:
+        return False
+    if any(abs(b - a) > _MS_QUANTISATION_SPREAD for a, b in pairwise(diffs)):
+        return False
+    return max(diffs) - min(diffs) < target.frame_duration_ms / 2
 
 
 def _agreeing_prefix(diffs: list[float]) -> int:

@@ -344,3 +344,106 @@ def test_bitmap_path_still_requires_the_whole_file():
     assert fg.matched_frame_offset(source, target, details, _no_log) is None
     clean = _grid(FILM, 3000, start_ms=7.0)
     assert fg.matched_frame_offset(clean, target, details, _no_log) == 0
+
+
+# --- clock creep: same pictures, one file stamped with a slightly different clock
+
+
+# A WEB encode declared 24000/1001 but stamped at exactly 23.976 fps (SubsPlease,
+# 7th Time Loop): its frame times run ~1.4 ms behind a 24000/1001 Blu-ray by the
+# end of a 24-minute episode. The Blu-ray shows WEB frame k as frame k + 24.
+DECIMAL_23976 = FrameClock(23976, 1000)
+FILM_FPS = 24000 / 1001
+
+
+def _creep_details(frames: int = 24, fps: tuple = (FILM_FPS, FILM_FPS)) -> dict:
+    return _details(frames, 0, frames * 1001 / 24) | {
+        "source_fps": fps[0],
+        "target_fps": fps[1],
+    }
+
+
+def _episode() -> tuple[FrameTable, FrameTable]:
+    return _grid(DECIMAL_23976, 34286), _grid(FILM, 34334)
+
+
+def test_clock_creep_maps_every_time_frame_by_frame():
+    source, target = _episode()
+    warnings: list[str] = []
+    shift = _build(lambda: source, target, _creep_details(), warn=warnings.append)
+    assert shift is not None and shift.frames == 24 and shift.per_frame
+    assert len(warnings) == 1 and "creep" in warnings[0] and "+24 frames" in warnings[0]
+    assert "frame by frame" in shift.coverage
+    # The measured line: WEB frame 11783 starts at 491450 ms, its Blu-ray frame
+    # 11807 at 492450 ms - 1000 ms later there, not the flat 1001.
+    assert source.times_ms[11783] == 491450 and target.times_ms[11807] == 492450
+    assert shift.shifted_ms(491450, 1001.0) == 492450
+    # Every time keeps the picture it shows from: on a frame, just after the
+    # previous one, and just before (the episode 12 case: 1 ms before a frame).
+    for k in range(1, source.num_frames):
+        for t in (
+            source.times_ms[k],
+            source.times_ms[k - 1] + 1,
+            source.times_ms[k] - 1,
+        ):
+            moved = shift.shifted_ms(t, 1001.0)
+            assert target.frame_of(moved) == source.frame_of(t) + 24, (k, t, moved)
+
+
+def test_clock_creep_leaves_times_outside_the_video_on_the_flat_delay():
+    source, target = _episode()
+    shift = _build(lambda: source, target, _creep_details())
+    assert shift is not None
+    assert shift.shifted_ms(-500.0, 1001.0) == 501.0  # before the first frame
+    after = source.times_ms[-1] + 30.0
+    assert shift.shifted_ms(after, 1001.0) == after + 1001.0  # after the last
+
+
+def test_clock_creep_needs_the_same_declared_rate():
+    source, target = _episode()
+    lines: list[str] = []
+    assert (
+        _build(lambda: source, target, _details(24, 0, 1001.0), log=lines.append)
+        is None
+    )
+    assert any("drift" in line for line in lines)  # no rates recorded: refused
+    other = _creep_details(fps=(23.976, FILM_FPS))
+    assert _build(lambda: source, target, other) is None
+
+
+def test_real_rate_differences_are_still_refused():
+    target = _grid(FILM, 30000)
+    # 24.000 really, with the header claiming 24000/1001: ~1 ms/s of drift,
+    # past half a frame long before the end.
+    assert (
+        _build(lambda: _grid(FrameClock(24, 1), 30000), target, _creep_details(0))
+        is None
+    )
+    # PAL 25 fps: each frame 1.7 ms shorter, a step bigger than ms storage.
+    assert (
+        _build(lambda: _grid(FrameClock(25, 1), 30000), target, _creep_details(0))
+        is None
+    )
+
+
+def test_a_hole_is_still_refused_with_a_creeping_clock():
+    times = [DECIMAL_23976.frame_ms(i) for i in range(30000)]
+    times = times[:15000] + times[15001:]  # one frame missing
+    source = FrameTable.from_timestamps(times, origin="test")
+    target = _grid(FILM, 30100)
+    assert _build(lambda: source, target, _creep_details()) is None
+
+
+def test_same_clock_files_are_unchanged():
+    table = _grid(FILM, 3000)
+    warnings: list[str] = []
+    shift = _build(lambda: table, table, _creep_details(), warn=warnings.append)
+    assert shift is not None and not shift.per_frame and warnings == []
+    mid = table.times_ms[100] + 5.0
+    assert shift.shifted_ms(mid, 1001.0) == mid + 1001.0  # flat delay, as before
+    assert "frame by frame" not in shift.coverage
+
+
+def test_bitmap_path_does_not_accept_clock_creep():
+    source, target = _episode()
+    assert fg.matched_frame_offset(source, target, _creep_details(), _no_log) is None
