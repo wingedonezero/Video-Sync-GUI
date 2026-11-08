@@ -151,22 +151,14 @@ def _apply_ocr_default_font(item, ctx: Context, runner: CommandRunner) -> None:
         return
 
     from vsg_core.config import get_fonts_dir_path
-    from vsg_core.font_manager import FontScanner
+
+    from .line_fit import find_font_file
 
     font_file: str | None = None
     try:
-        fonts_dir = get_fonts_dir_path(ctx.settings.fonts_directory)
-        for font_info in FontScanner(fonts_dir).scan(include_subdirs=True):
-            # Mirror the picker's libass-name choice (full_name when it pins a
-            # specific variant, else the bare family name).
-            libass_name = (
-                font_info.full_name
-                if font_info.full_name and font_info.full_name != font_info.family_name
-                else font_info.family_name
-            )
-            if libass_name == ocr_font_name:
-                font_file = str(font_info.file_path)
-                break
+        font_file = find_font_file(
+            ocr_font_name, get_fonts_dir_path(ctx.settings.fonts_directory)
+        )
     except Exception as e:  # font scanning must never break a merge
         runner._log_message(
             f"[OCR] WARNING: Could not scan fonts for default '{ocr_font_name}': {e}"

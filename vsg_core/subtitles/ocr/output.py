@@ -20,8 +20,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .line_fit import FontWidths, box_scale_percent, load_font_widths, text_width
+
 if TYPE_CHECKING:
-    from ..data import SubtitleData
+    from ..data import SubtitleData, SubtitleStyle
 
 
 @dataclass(slots=True)
@@ -37,6 +39,7 @@ class OutputConfig:
     style_name: str = "Default"
     font_name: str = "Arial"
     font_size: int = 48
+    font_file: str = ""  # The font's file, for measuring positioned lines
     primary_color: str = "&H00FFFFFF"  # White
     outline_color: str = "&H00000000"  # Black
     outline_width: float = 2.0
@@ -204,6 +207,9 @@ def create_subtitle_data_from_ocr(
     unknown_words_map: dict = {}  # word -> first occurrence info
     positioned_count = 0
 
+    # Measures positioned lines; None leaves them all as they are
+    font_widths = load_font_widths(config.font_file) if config.font_file else None
+
     # Region-to-style mapping (top/bottom only — anime VobSub standard)
     _region_styles = {"top": "Top", "bottom": "Default"}
 
@@ -241,7 +247,17 @@ def create_subtitle_data_from_ocr(
             # \an4 = middle-left anchor, \pos() at pixel left edge + vertical center
             # Coordinates are pixel-refined from raw image, in source resolution space
             style = "Default"
-            text = f"{{\\an4\\pos({result.pos_x},{result.pos_y}){_color_tag}}}{text}"
+            fit_tag = _fit_tag(
+                result,
+                font_widths,
+                float(config.font_size),
+                output_resolution[0],
+                default_style,
+            )
+            text = (
+                f"{{\\an4\\pos({result.pos_x},{result.pos_y}){fit_tag}{_color_tag}}}"
+                f"{text}"
+            )
             positioned_count += 1
 
             event = SubtitleEvent(
@@ -382,6 +398,32 @@ def create_subtitle_data_from_ocr(
     return data
 
 
+def _fit_tag(
+    result: OCRSubtitleResult,
+    font_widths: FontWidths | None,
+    font_size: float,
+    play_res_x: int,
+    style: "SubtitleStyle",
+) -> str:
+    """Scale tag that sizes a positioned line to its disc box."""
+    if font_widths is None:
+        return ""
+    widths = [
+        text_width(font_widths, line, font_size) for line in result.text.split("\n")
+    ]
+    if not widths or any(width is None for width in widths):
+        return ""
+    scale = box_scale_percent(
+        max(w for w in widths if w is not None),
+        result.pos_x,
+        result.width,
+        play_res_x,
+        style.margin_l,
+        style.margin_r,
+    )
+    return f"\\fscx{scale}\\fscy{scale}" if scale is not None else ""
+
+
 def _extract_pos(text: str) -> tuple[int, int] | None:
     """Extract (x,y) from \\pos() tag in ASS text."""
     import re
@@ -396,7 +438,7 @@ def _strip_pos_tag(text: str) -> str:
     """Strip \\an\\pos() tag from text for content comparison."""
     import re
 
-    return re.sub(r"\{\\an\d+\\pos\(\d+,\d+\)\}", "", text)
+    return re.sub(r"\{\\an\d+\\pos\(\d+,\d+\)(?:\\fscx\d+\\fscy\d+)?\}", "", text)
 
 
 def _merge_consecutive_duplicate_events(events: list) -> None:
