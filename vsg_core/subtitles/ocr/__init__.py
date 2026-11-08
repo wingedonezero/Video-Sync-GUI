@@ -99,6 +99,7 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         "ocr_output_format": get_val("ocr_output_format", "ass"),
         "ocr_font_size_ratio": get_val("ocr_font_size_ratio", 5.80),
         "ocr_font_name": get_val("ocr_font_name", ""),
+        "fonts_directory": get_val("fonts_directory", ""),
         # Reporting
         "ocr_generate_report": get_val("ocr_generate_report", True),
         # Debug output - saves images and text files for problem subtitles

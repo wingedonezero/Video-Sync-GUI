@@ -285,7 +285,9 @@ class OCRPipeline:
             ocr_font_name = self.settings.get("ocr_font_name", "")
             if ocr_font_name:
                 output_config = OutputConfig(
-                    font_size=calculated_font_size, font_name=ocr_font_name
+                    font_size=calculated_font_size,
+                    font_name=ocr_font_name,
+                    font_file=self._find_ocr_font_file(ocr_font_name, ocr_results),
                 )
             else:
                 output_config = OutputConfig(font_size=calculated_font_size)
@@ -303,6 +305,12 @@ class OCRPipeline:
             )
             result.subtitle_data = subtitle_data
             result.output_path = output_path  # Caller will save later
+
+            fitted = sum("\\fscx" in e.text for e in subtitle_data.events)
+            if fitted:
+                self._log_progress(
+                    f"Sized {fitted} positioned line(s) to their disc boxes", 0.95
+                )
 
             # Step 7: Save report
             if self.config.generate_report:
@@ -330,6 +338,32 @@ class OCRPipeline:
             self._cleanup()
 
         return result
+
+    def _find_ocr_font_file(
+        self, font_name: str, ocr_results: list[OCRSubtitleResult]
+    ) -> str:
+        """File of the OCR font, for measuring positioned lines (or empty)."""
+        if not any(r.pos_x > 0 or r.pos_y > 0 for r in ocr_results):
+            return ""
+        logger = logging.getLogger(__name__)
+        from vsg_core.config import get_fonts_dir_path
+
+        from .line_fit import find_font_file
+
+        try:
+            font_file = find_font_file(
+                font_name,
+                get_fonts_dir_path(self.settings.get("fonts_directory", "")),
+            )
+        except Exception as e:  # Font scanning must never break an OCR job
+            logger.warning(f"Could not scan fonts for '{font_name}': {e}")
+            return ""
+        if not font_file:
+            logger.warning(
+                f"OCR font '{font_name}' not in the fonts folder; "
+                "positioned lines keep their size"
+            )
+        return font_file or ""
 
     def _cleanup(self):
         """Release resources held by the pipeline."""
